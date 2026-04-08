@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
 import { useI18n } from "@/components/language-provider";
@@ -29,6 +29,7 @@ export function SetupStatusPanel() {
 
   const thaiLabels: Record<string, { label: string }> = {
     mongodb: { label: "MongoDB" },
+    "app-url": { label: "App URL" },
     jwt: { label: "JWT Secret" },
     openai: { label: "OpenAI" },
     facebook: { label: "Facebook OAuth" },

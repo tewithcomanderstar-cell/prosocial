@@ -1,4 +1,4 @@
-# Prosocial System
+﻿# Prosocial System
 
 Next.js web app for managing Facebook Pages, generating AI content, pulling images from Google Drive, and scheduling automatic posts.
 
@@ -12,6 +12,7 @@ Next.js web app for managing Facebook Pages, generating AI content, pulling imag
 - One-time and recurring scheduling
 - Queue, retry, rate limit, duplicate protection, and logs
 - Analytics, personas, templates, team workspace, and settings
+- Profile management, avatar upload, password change, and connected accounts
 - Privacy Policy page at `/privacy-policy`
 
 ## Requirements
@@ -44,6 +45,7 @@ If you want only one model, use `gpt-5-mini`.
 app/
   api/
   analytics/
+  connected-accounts/
   connections/
   integrations/
   login/
@@ -51,6 +53,7 @@ app/
   planner/
   posts/
   privacy-policy/
+  profile/
   schedules/
   settings/
   team/
@@ -94,6 +97,7 @@ Copy-Item .env.example .env.local
 - `OPENAI_LIGHT_MODEL`
 - `FACEBOOK_APP_ID`
 - `FACEBOOK_APP_SECRET`
+- `FACEBOOK_LOGIN_CONFIG_ID`
 - `FACEBOOK_REDIRECT_URI`
 - `FACEBOOK_AUTH_REDIRECT_URI`
 - `GOOGLE_CLIENT_ID`
@@ -105,10 +109,10 @@ Copy-Item .env.example .env.local
 4. Run development server
 
 ```bash
-npm run dev
+npm run dev -- -p 3002
 ```
 
-Open [http://localhost:3000](http://localhost:3000)
+Open [http://localhost:3002](http://localhost:3002)
 
 ## Social Login Setup
 
@@ -116,9 +120,9 @@ Open [http://localhost:3000](http://localhost:3000)
 
 - Create OAuth credentials in Google Cloud Console
 - Add authorized redirect URI:
-  - `http://localhost:3000/api/auth/google/callback`
+  - `http://localhost:3002/api/auth/google/callback`
 - Add authorized origin:
-  - `http://localhost:3000`
+  - `http://localhost:3002`
 - Scopes used:
   - `openid`
   - `email`
@@ -128,11 +132,12 @@ Open [http://localhost:3000](http://localhost:3000)
 
 - Create an app in Meta for Developers
 - Enable Facebook Login
+- Create a Facebook Login Configuration and save its ID as `FACEBOOK_LOGIN_CONFIG_ID`
 - Add valid OAuth redirect URI:
-  - `http://localhost:3000/api/auth/facebook/callback`
-- Permissions used:
+  - `http://localhost:3002/api/auth/facebook/callback`
+- Permissions used for login:
   - `email`
-  - `public_profile`
+- If the app is still in development mode, add your Facebook account as an app role before testing
 
 Users who sign in with Google or Facebook are created automatically on first login.
 
@@ -141,7 +146,7 @@ Users who sign in with Google or Facebook are created automatically on first log
 ### Facebook Page Connection
 
 - Set redirect URI:
-  - `http://localhost:3000/api/facebook/oauth/callback`
+  - `http://localhost:3002/api/facebook/oauth/callback`
 - Permissions commonly needed:
   - `pages_show_list`
   - `pages_read_engagement`
@@ -151,7 +156,7 @@ Users who sign in with Google or Facebook are created automatically on first log
 
 - Enable Google Drive API
 - Set redirect URI:
-  - `http://localhost:3000/api/google-drive/oauth/callback`
+  - `http://localhost:3002/api/google-drive/oauth/callback`
 
 ## Automated Posting Flow
 
@@ -167,7 +172,7 @@ Users who sign in with Google or Facebook are created automatically on first log
 
 1. Push the project to GitHub
 2. Import the repository into Vercel
-3. Add all environment variables from `.env.local`
+3. Add all environment variables from `.env.production.example`
 4. Change local URLs to your production domain
 5. Redeploy
 
@@ -176,6 +181,7 @@ Users who sign in with Google or Facebook are created automatically on first log
 ```env
 NEXT_PUBLIC_APP_URL=https://your-domain.com
 MONGODB_URI=mongodb+srv://USER:PASSWORD@cluster.mongodb.net/facebook-auto-posting
+FACEBOOK_LOGIN_CONFIG_ID=your-facebook-login-config-id
 FACEBOOK_REDIRECT_URI=https://your-domain.com/api/facebook/oauth/callback
 FACEBOOK_AUTH_REDIRECT_URI=https://your-domain.com/api/auth/facebook/callback
 GOOGLE_REDIRECT_URI=https://your-domain.com/api/google-drive/oauth/callback
@@ -184,7 +190,7 @@ GOOGLE_AUTH_REDIRECT_URI=https://your-domain.com/api/auth/google/callback
 
 ### Vercel Cron
 
-`vercel.json` is included and runs `/api/cron/process-schedules` every 10 minutes.
+`vercel.json` is included and currently runs `/api/cron/process-schedules` once daily at `09:00 UTC` to stay compatible with the Hobby plan.
 
 ## Production Notes
 
@@ -193,6 +199,7 @@ GOOGLE_AUTH_REDIRECT_URI=https://your-domain.com/api/auth/google/callback
 - Google and Facebook OAuth redirect URLs must match exactly
 - Store all secrets in Vercel environment variables
 - Do not commit `.env.local`
+- Rotate any OpenAI key or Facebook secret that has been shared outside a secure secret manager
 
 ## Deployment Checklist
 
