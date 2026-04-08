@@ -1,0 +1,11 @@
+.next
+node_modules
+.env
+.env.local
+coverage
+dist
+.npm-cache
+.dev.log
+.dev.err
+.tmp.drivedownload
+.tmp.driveupload
