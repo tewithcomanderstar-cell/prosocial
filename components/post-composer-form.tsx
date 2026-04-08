@@ -41,7 +41,6 @@ export function PostComposerForm() {
     randomizeCaption: false,
     keyword: "",
     personaPageId: "",
-    autoEnabled: true,
     startMode: "scheduled" as StartMode,
     frequency: "once",
     intervalHours: 1,
@@ -66,23 +65,50 @@ export function PostComposerForm() {
 
   const copy = useMemo(
     () => ({
-      workspaceEyebrow: isThai ? "โพสต์ง่ายขึ้นในหน้าเดียว" : "Simplified posting workspace",
-      workspaceTitle: isThai ? "โพสต์ทันที หรือเปิดโหมดออโต้ได้จากหน้าเดียว" : "Post instantly or switch to auto mode from one page.",
-      aiTitle: isThai ? "AI ช่วยเขียนโพสต์" : "AI content assistant",
-      immediateTitle: isThai ? "โพสต์ทันที" : "Post now",
-      autoTitle: isThai ? "โหมดโพสต์อัตโนมัติ" : "Auto-post mode",
-      delayLabel: isThai ? "หน่วงเวลาก่อนเริ่ม (นาที)" : "Delay before first post (minutes)",
-      startModeLabel: isThai ? "โหมดเริ่มต้น" : "Start mode",
-      startModeScheduled: isThai ? "เลือกเวลาโพสต์เอง" : "Choose posting time",
-      startModeDelay: isThai ? "เริ่มหลังหน่วงเวลา" : "Start after delay",
-      intervalLabel: isThai ? "ความถี่ในการโพสต์" : "Posting frequency",
-      hourlyLabel: isThai ? "ทุกกี่ชั่วโมง" : "Repeat every how many hours",
-      useVariant: isThai ? "ใช้เวอร์ชันนี้" : "Use this version",
-      saveDraft: isThai ? "บันทึกเป็นร่าง" : "Save draft",
+      aiTitle: isThai ? "AI ช่วยเขียนโพสต์" : "AI assistant",
+      contentTitle: isThai ? "คอนเทนต์" : "Content",
+      targetTitle: isThai ? "เพจและรูปภาพ" : "Pages and media",
+      deliveryTitle: isThai ? "วิธีโพสต์" : "Delivery",
+      queueTitle: isThai ? "พร้อมโพสต์" : "Ready to post",
+      selectedPages: isThai ? "เพจ" : "Pages",
+      selectedImages: isThai ? "รูป" : "Images",
+      noSelection: isThai ? "ยังไม่ได้เลือก" : "Not selected",
+      noVariants: isThai ? "ยังไม่มีตัวเลือก" : "No variants yet",
+      useVariant: isThai ? "ใช้ตัวเลือกนี้" : "Use this",
+      saveDraft: isThai ? "บันทึกร่าง" : "Save draft",
       postNow: isThai ? "โพสต์ทันที" : "Post now",
-      saveAuto: isThai ? "บันทึกเข้าโหมดอัตโนมัติ" : "Save to auto mode"
+      saveAuto: isThai ? "เปิดโพสต์อัตโนมัติ" : "Enable auto post",
+      postingModeTitle: isThai ? "รูปแบบการลงเพจ" : "Publishing mode",
+      quickSchedule: isThai ? "ตั้งเวลาเร็ว" : "Quick schedule",
+      quickHour1: isThai ? "ทุก 1 ชม." : "Every 1h",
+      quickHour2: isThai ? "ทุก 2 ชม." : "Every 2h",
+      quickHour3: isThai ? "ทุก 3 ชม." : "Every 3h",
+      chooseTime: isThai ? "เลือกเวลาเอง" : "Pick time",
+      startAfterDelay: isThai ? "เริ่มหลังหน่วงเวลา" : "Start after delay",
+      delayLabel: isThai ? "หน่วงเวลา (นาที)" : "Delay (minutes)",
+      hourlyLabel: isThai ? "ทุกกี่ชั่วโมง" : "Every how many hours",
+      usePersona: isThai ? "ใช้ persona ของเพจ" : "Use page persona",
+      noPersona: isThai ? "ไม่เลือก persona" : "No persona",
+      broadcast: isThai ? "1 โพสต์ลงหลายเพจ" : "1 post to many pages",
+      randomPages: isThai ? "สุ่มเพจปลายทาง" : "Random target pages",
+      imageMode: isThai ? "สุ่มรูป" : "Random images",
+      captionMode: isThai ? "สุ่มข้อความ" : "Random captions",
+      autoSummary: isThai ? "อัตโนมัติ" : "Auto",
+      instantSummary: isThai ? "ทันที" : "Instant",
+      selectPagesHint: isThai ? "เลือกเพจที่ต้องการโพสต์" : "Choose target pages",
+      selectImagesHint: isThai ? "เลือกรูปได้หลายรูป" : "Choose multiple images"
     }),
     [isThai]
+  );
+
+  const selectedPageNames = useMemo(
+    () => pages.filter((page) => form.targetPageIds.includes(page.pageId)).map((page) => page.name),
+    [pages, form.targetPageIds]
+  );
+
+  const selectedImageNames = useMemo(
+    () => images.filter((image) => form.imageUrls.includes(`drive:${image.id}`)).map((image) => image.name),
+    [images, form.imageUrls]
   );
 
   function buildPayload() {
@@ -124,7 +150,30 @@ export function PostComposerForm() {
   }
 
   function applyVariant(variant: Variant) {
-    setForm((current) => ({ ...current, content: variant.caption, hashtags: variant.hashtags.join(" ") }));
+    setForm((current) => ({
+      ...current,
+      content: variant.caption,
+      hashtags: variant.hashtags.join(" ")
+    }));
+  }
+
+  function toggleMultiValue(value: string, currentValues: string[], field: "targetPageIds" | "imageUrls") {
+    setForm((current) => ({
+      ...current,
+      [field]: currentValues.includes(value)
+        ? currentValues.filter((item) => item !== value)
+        : [...currentValues, value]
+    }));
+  }
+
+  function applyQuickHourly(intervalHours: number) {
+    setForm((current) => ({
+      ...current,
+      frequency: "hourly",
+      intervalHours,
+      startMode: "delay",
+      delayMinutes: current.delayMinutes === 0 ? 10 : current.delayMinutes
+    }));
   }
 
   async function submitDraft() {
@@ -207,9 +256,57 @@ export function PostComposerForm() {
   }
 
   return (
-    <div className="stack">
-      <div className="grid cols-2">
-        <section className="card">
+    <form className="stack composer-shell" onSubmit={(event: FormEvent<HTMLFormElement>) => event.preventDefault()}>
+      <section className="card composer-summary">
+        <div className="section-head composer-summary-head">
+          <div>
+            <h2>{copy.queueTitle}</h2>
+          </div>
+          <div className="composer-actions">
+            <button className="button-secondary" type="button" disabled={saving !== null} onClick={() => handleAction("draft")}>
+              {saving === "draft" ? (isThai ? "กำลังบันทึก..." : "Saving...") : copy.saveDraft}
+            </button>
+            <button className="button-secondary" type="button" disabled={saving !== null} onClick={() => handleAction("auto")}>
+              {saving === "auto" ? (isThai ? "กำลังบันทึก..." : "Saving...") : copy.saveAuto}
+            </button>
+            <button className="button" type="button" disabled={saving !== null} onClick={() => handleAction("instant")}>
+              {saving === "instant" ? (isThai ? "กำลังโพสต์..." : "Posting...") : copy.postNow}
+            </button>
+          </div>
+        </div>
+
+        <div className="composer-summary-grid">
+          <div className="summary-pill">
+            <span>{copy.selectedPages}</span>
+            <strong>{selectedPageNames.length || 0}</strong>
+          </div>
+          <div className="summary-pill">
+            <span>{copy.selectedImages}</span>
+            <strong>{selectedImageNames.length || 0}</strong>
+          </div>
+          <div className="summary-pill">
+            <span>{isThai ? "ความถี่" : "Frequency"}</span>
+            <strong>
+              {form.frequency === "hourly"
+                ? `${form.intervalHours}${isThai ? " ชม." : "h"}`
+                : form.frequency === "daily"
+                  ? (isThai ? "รายวัน" : "Daily")
+                  : form.frequency === "weekly"
+                    ? (isThai ? "รายสัปดาห์" : "Weekly")
+                    : (isThai ? "ครั้งเดียว" : "Once")}
+            </strong>
+          </div>
+          <div className="summary-pill">
+            <span>{isThai ? "โหมด" : "Mode"}</span>
+            <strong>{form.startMode === "delay" || form.runAt ? copy.autoSummary : copy.instantSummary}</strong>
+          </div>
+        </div>
+
+        {message ? <div className="composer-message">{message}</div> : null}
+      </section>
+
+      <div className="grid cols-2 composer-grid">
+        <section className="card stack">
           <div className="section-head">
             <div>
               <h2>{copy.aiTitle}</h2>
@@ -223,9 +320,9 @@ export function PostComposerForm() {
             </label>
 
             <label className="label">
-              {isThai ? "ใช้ persona ของเพจ" : "Use page persona"}
+              {copy.usePersona}
               <select className="select" value={form.personaPageId} onChange={(e) => setForm({ ...form, personaPageId: e.target.value })}>
-                <option value="">{isThai ? "ไม่เลือก persona เฉพาะเพจ" : "No specific persona"}</option>
+                <option value="">{copy.noPersona}</option>
                 {pages.map((page) => (
                   <option key={page.pageId} value={page.pageId}>{page.name}</option>
                 ))}
@@ -248,85 +345,123 @@ export function PostComposerForm() {
                 </button>
               </article>
             ))}
-            {variants.length === 0 ? <div className="variant"><strong>{isThai ? "ยังไม่มีตัวเลือก" : "No variants yet"}</strong></div> : null}
+            {variants.length === 0 ? <div className="variant"><strong>{copy.noVariants}</strong></div> : null}
           </div>
         </section>
 
-        <form className="card form" onSubmit={(event: FormEvent<HTMLFormElement>) => event.preventDefault()}>
+        <section className="card stack">
           <div className="section-head">
             <div>
-              <h2>{isThai ? "ตั้งค่าโพสต์" : "Post setup"}</h2>
+              <h2>{copy.contentTitle}</h2>
             </div>
           </div>
 
-          <label className="label">
-            {t("composePostTitle")}
-            <input className="input" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder={t("composePostTitlePlaceholder")} required />
-          </label>
-
-          <label className="label">
-            {t("composeCaption")}
-            <textarea className="textarea" value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} placeholder={t("composeCaptionPlaceholder")} required />
-          </label>
-
-          <label className="label">
-            {t("composeHashtags")}
-            <input className="input" value={form.hashtags} onChange={(e) => setForm({ ...form, hashtags: e.target.value })} placeholder={t("composeHashtagsPlaceholder")} />
-          </label>
-
-          <label className="label">
-            {t("composeMode")}
-            <select className="select" value={form.postingMode} onChange={(e) => setForm({ ...form, postingMode: e.target.value })}>
-              <option value="broadcast">{t("composeModeBroadcast")}</option>
-              <option value="random-page">{t("composeModeRandom")}</option>
-            </select>
-          </label>
-
-          <label className="label">
-            {t("composePages")}
-            <select className="select" multiple size={Math.max(4, pages.length || 4)} value={form.targetPageIds} onChange={(e) => setForm({ ...form, targetPageIds: Array.from(e.target.selectedOptions).map((option) => option.value) })}>
-              {pages.map((page) => (
-                <option key={page.pageId} value={page.pageId}>{page.name}</option>
-              ))}
-            </select>
-          </label>
-
-          <label className="label">
-            {t("composeImages")}
-            <select className="select" multiple size={Math.max(4, images.length || 4)} value={form.imageUrls} onChange={(e) => setForm({ ...form, imageUrls: Array.from(e.target.selectedOptions).map((option) => option.value) })}>
-              {images.map((image) => (
-                <option key={image.id} value={`drive:${image.id}`}>{image.name}</option>
-              ))}
-            </select>
-          </label>
-
-          <label className="list-item">
-            <span>{t("composeRandomImage")}</span>
-            <input type="checkbox" checked={form.randomizeImages} onChange={(e) => setForm({ ...form, randomizeImages: e.target.checked })} />
-          </label>
-
-          <label className="list-item">
-            <span>{t("composeRandomCaption")}</span>
-            <input type="checkbox" checked={form.randomizeCaption} onChange={(e) => setForm({ ...form, randomizeCaption: e.target.checked })} />
-          </label>
-
-          <section className="variant stack">
-            <strong>{copy.immediateTitle}</strong>
-            <button className="button" type="button" disabled={saving !== null} onClick={() => handleAction("instant")}>
-              {saving === "instant" ? (isThai ? "กำลังโพสต์..." : "Posting...") : copy.postNow}
-            </button>
-          </section>
-
-          <section className="variant stack">
-            <strong>{copy.autoTitle}</strong>
+          <div className="form">
+            <label className="label">
+              {t("composePostTitle")}
+              <input className="input" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder={t("composePostTitlePlaceholder")} required />
+            </label>
 
             <label className="label">
-              {copy.startModeLabel}
-              <select className="select" value={form.startMode} onChange={(e) => setForm({ ...form, startMode: e.target.value as StartMode })}>
-                <option value="scheduled">{copy.startModeScheduled}</option>
-                <option value="delay">{copy.startModeDelay}</option>
+              {t("composeCaption")}
+              <textarea className="textarea" value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} placeholder={t("composeCaptionPlaceholder")} required />
+            </label>
+
+            <label className="label">
+              {t("composeHashtags")}
+              <input className="input" value={form.hashtags} onChange={(e) => setForm({ ...form, hashtags: e.target.value })} placeholder={t("composeHashtagsPlaceholder")} />
+            </label>
+          </div>
+        </section>
+
+        <section className="card stack">
+          <div className="section-head">
+            <div>
+              <h2>{copy.targetTitle}</h2>
+            </div>
+          </div>
+
+          <div className="stack">
+            <div className="label">
+              <span>{copy.selectPagesHint}</span>
+              <div className="chip-grid">
+                {pages.map((page) => {
+                  const active = form.targetPageIds.includes(page.pageId);
+                  return (
+                    <button key={page.pageId} type="button" className={`choice-chip ${active ? "active" : ""}`} onClick={() => toggleMultiValue(page.pageId, form.targetPageIds, "targetPageIds")}>
+                      {page.name}
+                    </button>
+                  );
+                })}
+                {pages.length === 0 ? <div className="muted">{copy.noSelection}</div> : null}
+              </div>
+            </div>
+
+            <div className="label">
+              <span>{copy.selectImagesHint}</span>
+              <div className="chip-grid">
+                {images.map((image) => {
+                  const value = `drive:${image.id}`;
+                  const active = form.imageUrls.includes(value);
+                  return (
+                    <button key={image.id} type="button" className={`choice-chip ${active ? "active" : ""}`} onClick={() => toggleMultiValue(value, form.imageUrls, "imageUrls")}>
+                      {image.name}
+                    </button>
+                  );
+                })}
+                {images.length === 0 ? <div className="muted">{copy.noSelection}</div> : null}
+              </div>
+            </div>
+
+            <div className="toggle-grid">
+              <label className="list-item">
+                <span>{copy.imageMode}</span>
+                <input type="checkbox" checked={form.randomizeImages} onChange={(e) => setForm({ ...form, randomizeImages: e.target.checked })} />
+              </label>
+
+              <label className="list-item">
+                <span>{copy.captionMode}</span>
+                <input type="checkbox" checked={form.randomizeCaption} onChange={(e) => setForm({ ...form, randomizeCaption: e.target.checked })} />
+              </label>
+            </div>
+
+            <label className="label">
+              {copy.postingModeTitle}
+              <select className="select" value={form.postingMode} onChange={(e) => setForm({ ...form, postingMode: e.target.value })}>
+                <option value="broadcast">{copy.broadcast}</option>
+                <option value="random-page">{copy.randomPages}</option>
               </select>
             </label>
+          </div>
+        </section>
+
+        <section className="card stack">
+          <div className="section-head">
+            <div>
+              <h2>{copy.deliveryTitle}</h2>
+            </div>
+          </div>
+
+          <div className="stack">
+            <div className="label">
+              <span>{copy.quickSchedule}</span>
+              <div className="chip-grid chip-grid-compact">
+                <button type="button" className={`choice-chip ${form.frequency === "hourly" && form.intervalHours === 1 ? "active" : ""}`} onClick={() => applyQuickHourly(1)}>{copy.quickHour1}</button>
+                <button type="button" className={`choice-chip ${form.frequency === "hourly" && form.intervalHours === 2 ? "active" : ""}`} onClick={() => applyQuickHourly(2)}>{copy.quickHour2}</button>
+                <button type="button" className={`choice-chip ${form.frequency === "hourly" && form.intervalHours === 3 ? "active" : ""}`} onClick={() => applyQuickHourly(3)}>{copy.quickHour3}</button>
+              </div>
+            </div>
+
+            <div className="toggle-grid">
+              <button type="button" className={`mode-card ${form.startMode === "scheduled" ? "active" : ""}`} onClick={() => setForm({ ...form, startMode: "scheduled" })}>
+                <strong>{copy.chooseTime}</strong>
+                <span>{form.runAt || copy.noSelection}</span>
+              </button>
+              <button type="button" className={`mode-card ${form.startMode === "delay" ? "active" : ""}`} onClick={() => setForm({ ...form, startMode: "delay" })}>
+                <strong>{copy.startAfterDelay}</strong>
+                <span>{form.delayMinutes}{isThai ? " นาที" : " min"}</span>
+              </button>
+            </div>
 
             {form.startMode === "scheduled" ? (
               <label className="label">
@@ -341,7 +476,7 @@ export function PostComposerForm() {
             )}
 
             <label className="label">
-              {copy.intervalLabel}
+              {isThai ? "รูปแบบการโพสต์ซ้ำ" : "Repeat"}
               <select className="select" value={form.frequency} onChange={(e) => setForm({ ...form, frequency: e.target.value })}>
                 <option value="once">{t("scheduleOneTime")}</option>
                 <option value="hourly">{isThai ? "ทุก X ชั่วโมง" : "Every X hours"}</option>
@@ -365,20 +500,9 @@ export function PostComposerForm() {
               {t("scheduleTimezone")}
               <input className="input" value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })} />
             </label>
-
-            <button className="button-secondary" type="button" disabled={saving !== null} onClick={() => handleAction("auto")}>
-              {saving === "auto" ? (isThai ? "กำลังบันทึก..." : "Saving...") : copy.saveAuto}
-            </button>
-          </section>
-
-          <button className="button-secondary" type="button" disabled={saving !== null} onClick={() => handleAction("draft")}>
-            {saving === "draft" ? (isThai ? "กำลังบันทึก..." : "Saving...") : copy.saveDraft}
-          </button>
-
-          {message ? <p className="muted">{message}</p> : null}
-        </form>
+          </div>
+        </section>
       </div>
-    </div>
+    </form>
   );
 }
-

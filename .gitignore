@@ -9,3 +9,6 @@ dist
 .dev.err
 .tmp.drivedownload
 .tmp.driveupload
+
+.dev-preview.log
+.dev-preview.err

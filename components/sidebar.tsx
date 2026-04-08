@@ -62,6 +62,7 @@ export function Sidebar() {
         { href: "/settings", label: t("navSettings"), icon: "settings" },
         { href: "/logs", label: t("navLogs"), icon: "logs" },
         { href: "/setup", label: t("navSetup"), icon: "setup" },
+        { href: "/privacy-policy", label: isThai ? "นโยบายความเป็นส่วนตัว" : "Privacy Policy", icon: "privacy" },
         { href: "/login", label: t("navLogin"), icon: "login" }
       ]
     }

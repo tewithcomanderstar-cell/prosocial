@@ -560,3 +560,147 @@ html:lang(th) .stat strong { font-family: var(--font-body); }
 .auth-mode-row h2 {
   margin: 0;
 }
+.composer-shell {
+  gap: 18px;
+}
+
+.composer-summary {
+  gap: 16px;
+}
+
+.composer-summary-head {
+  align-items: center;
+}
+
+.composer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.composer-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.summary-pill {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(255, 255, 255, 0.76);
+}
+
+.summary-pill span {
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.summary-pill strong {
+  font-size: 1.3rem;
+  letter-spacing: -0.04em;
+}
+
+.composer-message {
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(43, 111, 255, 0.08);
+  border: 1px solid rgba(43, 111, 255, 0.12);
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.composer-grid {
+  align-items: start;
+}
+
+.chip-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.chip-grid-compact .choice-chip {
+  min-width: 104px;
+  justify-content: center;
+}
+
+.choice-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 42px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--muted);
+  font-weight: 700;
+  cursor: pointer;
+  transition: 160ms ease;
+}
+
+.choice-chip.active {
+  background: rgba(43, 111, 255, 0.12);
+  border-color: rgba(43, 111, 255, 0.28);
+  color: var(--accent-strong);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.toggle-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.mode-card {
+  display: grid;
+  gap: 6px;
+  padding: 16px;
+  text-align: left;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.6);
+  color: var(--foreground);
+  cursor: pointer;
+  transition: 160ms ease;
+}
+
+.mode-card span {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.mode-card.active {
+  border-color: rgba(43, 111, 255, 0.28);
+  background: rgba(43, 111, 255, 0.1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+@media (max-width: 1024px) {
+  .composer-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .composer-actions,
+  .composer-actions .button,
+  .composer-actions .button-secondary {
+    width: 100%;
+  }
+
+  .composer-summary-grid,
+  .toggle-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .choice-chip,
+  .chip-grid-compact .choice-chip {
+    width: 100%;
+    min-width: 0;
+  }
+}
