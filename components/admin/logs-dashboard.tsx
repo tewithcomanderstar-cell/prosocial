@@ -7,6 +7,7 @@ type LogItem = {
   type: string;
   level: string;
   message: string;
+  metadata?: Record<string, unknown>;
   createdAt: string;
 };
 
@@ -66,9 +67,14 @@ export function LogsDashboard() {
           <div className="section-head"><div><h2>Recent Actions</h2></div></div>
           <div className="list">
             {logs.slice(0, 12).map((log) => (
-              <div key={log._id} className="list-item">
-                <strong>{log.message}</strong>
-                <span className="badge badge-neutral">{log.type}</span>
+              <div key={log._id} className="list-item stack">
+                <div className="split">
+                  <strong>{log.message}</strong>
+                  <span className="badge badge-neutral">{log.type}</span>
+                </div>
+                <div className="muted">{new Date(log.createdAt).toLocaleString()}</div>
+                {log.metadata?.reason ? <div className="muted">{String(log.metadata.reason)}</div> : null}
+                {log.metadata?.stack ? <pre className="muted" style={{ whiteSpace: "pre-wrap", margin: 0 }}>{String(log.metadata.stack)}</pre> : null}
               </div>
             ))}
           </div>
@@ -78,9 +84,13 @@ export function LogsDashboard() {
           <div className="section-head"><div><h2>Jobs</h2></div></div>
           <div className="list">
             {jobs.slice(0, 12).map((job) => (
-              <div key={job._id} className="list-item">
-                <strong>{job.type}</strong>
-                <span className="badge badge-neutral">{job.status}</span>
+              <div key={job._id} className="list-item stack">
+                <div className="split">
+                  <strong>{job.type}</strong>
+                  <span className="badge badge-neutral">{job.status}</span>
+                </div>
+                <div className="muted">Attempts: {job.attempts}</div>
+                {job.lastError ? <div className="muted">{job.lastError}</div> : null}
               </div>
             ))}
           </div>
@@ -91,9 +101,13 @@ export function LogsDashboard() {
         <div className="section-head"><div><h2>Alerts</h2></div></div>
         <div className="list">
           {notifications.slice(0, 10).map((item) => (
-            <div key={item._id} className="list-item">
-              <strong>{item.title}</strong>
-              <span className="badge badge-neutral">{item.severity}</span>
+            <div key={item._id} className="list-item stack">
+              <div className="split">
+                <strong>{item.title}</strong>
+                <span className="badge badge-neutral">{item.severity}</span>
+              </div>
+              <div className="muted">{item.message}</div>
+              <div className="muted">{new Date(item.createdAt).toLocaleString()}</div>
             </div>
           ))}
         </div>

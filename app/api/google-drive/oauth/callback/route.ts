@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/api";
 import { connectDb } from "@/lib/db";
 import { GoogleDriveConnection } from "@/models/GoogleDriveConnection";
 import { exchangeGoogleCode } from "@/lib/services/google-drive";
+import { logAction, logRouteError } from "@/lib/services/logging";
 
 export async function GET(request: Request) {
   try {
@@ -31,8 +32,26 @@ export async function GET(request: Request) {
       { upsert: true, new: true }
     );
 
+    await logAction({
+      userId,
+      type: "auth",
+      level: "success",
+      message: "Google Drive connected successfully"
+    });
+
     return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/connections/google-drive?success=1`);
-  } catch {
+  } catch (error) {
+    try {
+      const userId = await requireAuth();
+      await logAction({
+        userId,
+        type: "error",
+        level: "error",
+        message: "Google Drive connection failed",
+        metadata: { reason: error instanceof Error ? error.message : "unknown" }
+      });
+    } catch {}
     return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/connections/google-drive?error=oauth_failed`);
   }
 }
+

@@ -1,5 +1,6 @@
 ﻿"use client";
 
+import { Suspense } from "react";
 import { LoginForm } from "@/components/login-form";
 import { LogoutButton } from "@/components/logout-button";
 import { SectionCard } from "@/components/section-card";
@@ -11,9 +12,10 @@ export default function LoginPage() {
   return (
     <div className="stack">
       <SectionCard title={t("loginCardTitle")} action={<LogoutButton />}>
-        <LoginForm />
+        <Suspense fallback={<div className="muted">Loading...</div>}>
+          <LoginForm />
+        </Suspense>
       </SectionCard>
     </div>
   );
 }
-

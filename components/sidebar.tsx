@@ -49,6 +49,7 @@ export function Sidebar() {
       icon: "team",
       items: [
         { href: "/profile", label: isThai ? "โปรไฟล์" : "Profile", icon: "profile" },
+        { href: "/connected-accounts", label: isThai ? "บัญชีที่เชื่อมต่อ" : "Connected Accounts", icon: "accounts" },
         { href: "/team", label: isThai ? "ทีมและเวิร์กสเปซ" : "Team & Workspace", icon: "team" },
         { href: "/personas", label: t("navPersonas"), icon: "personas" },
         { href: "/connections/facebook", label: t("navFacebook"), icon: "facebook" },

@@ -1,22 +1,13 @@
-import { jsonError, jsonOk, requireAuth } from "@/lib/api";
-import { GoogleDriveConnection } from "@/models/GoogleDriveConnection";
+﻿import { jsonError, jsonOk, requireAuth } from "@/lib/api";
 import { fetchDriveFolders } from "@/lib/services/google-drive";
-
-type LeanGoogleConnection = {
-  accessToken: string;
-};
+import { ensureValidGoogleDriveConnection } from "@/lib/services/integration-auth";
 
 export async function GET() {
   try {
     const userId = await requireAuth();
-    const connection = (await GoogleDriveConnection.findOne({ userId }).lean()) as LeanGoogleConnection | null;
-
-    if (!connection) {
-      return jsonOk({ folders: [] }, "No Google Drive connection yet");
-    }
-
+    const connection = await ensureValidGoogleDriveConnection(userId);
     const payload = await fetchDriveFolders(connection.accessToken);
-    return jsonOk({ folders: payload.files });
+    return jsonOk({ folders: payload.files, tokenStatus: connection.tokenStatus ?? "healthy" });
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : "Unable to fetch folders", 400);
   }

@@ -1,10 +1,11 @@
-﻿import { FacebookConnection } from "@/models/FacebookConnection";
-import { GoogleDriveConnection } from "@/models/GoogleDriveConnection";
+﻿
+
 import { Job } from "@/models/Job";
 import { MediaCache } from "@/models/MediaCache";
 import { Post } from "@/models/Post";
 import { Schedule } from "@/models/Schedule";
 import { publishPostToFacebook } from "@/lib/services/facebook";
+import { ensureValidFacebookConnection, ensureValidGoogleDriveConnection } from "@/lib/services/integration-auth";
 import { fetchDriveImageBinary } from "@/lib/services/google-drive";
 import { recordMetricSnapshot } from "@/lib/services/analytics";
 import { isDuplicatePostBlocked } from "@/lib/services/duplicate";
@@ -85,7 +86,7 @@ async function resolveImages(userId: string, imageRefs: string[]): Promise<Resol
     return [];
   }
 
-  const driveConnection = (await GoogleDriveConnection.findOne({ userId }).lean()) as LeanDriveConnection | null;
+  const driveConnection = imageRefs.some((ref) => ref.startsWith("drive:")) ? ((await ensureValidGoogleDriveConnection(userId)) as LeanDriveConnection | null) : null;
   const images: ResolvedImage[] = [];
 
   for (const ref of imageRefs) {
@@ -151,7 +152,7 @@ export async function enqueuePostJobsForPost(userId: string, postId: string, opt
     throw new Error("Post not found");
   }
 
-  const connection = (await FacebookConnection.findOne({ userId }).lean()) as LeanFacebookConnection | null;
+  const connection = (await ensureValidFacebookConnection(userId)) as LeanFacebookConnection;
   if (!connection || connection.pages.length === 0) {
     throw new Error("No Facebook pages connected");
   }
@@ -309,7 +310,7 @@ async function executePostJob(job: JobExecution) {
   }
 
   const post = (await Post.findById(job.postId).lean()) as LeanPost | null;
-  const connection = (await FacebookConnection.findOne({ userId: job.userId }).lean()) as LeanFacebookConnection | null;
+  const connection = (await ensureValidFacebookConnection(job.userId)) as LeanFacebookConnection;
   if (!post || !connection) {
     throw new Error("Missing post or Facebook connection");
   }
@@ -435,5 +436,9 @@ export async function processQueuedJobs(limit = 10) {
 
   return processed;
 }
+
+
+
+
 
 

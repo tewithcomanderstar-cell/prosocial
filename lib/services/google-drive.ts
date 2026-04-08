@@ -1,4 +1,6 @@
-﻿export function getGoogleOAuthUrl() {
+﻿import { fetchWithRetry } from "@/lib/services/http";
+
+export function getGoogleOAuthUrl() {
   const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   url.searchParams.set("client_id", process.env.GOOGLE_CLIENT_ID ?? "");
   url.searchParams.set("redirect_uri", process.env.GOOGLE_REDIRECT_URI ?? "");
@@ -13,7 +15,7 @@
 }
 
 export async function exchangeGoogleCode(code: string) {
-  const response = await fetch("https://oauth2.googleapis.com/token", {
+  const response = await fetchWithRetry("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded"
@@ -40,7 +42,7 @@ export async function fetchDriveFolders(accessToken: string) {
   url.searchParams.set("fields", "files(id,name)");
   url.searchParams.set("pageSize", "100");
 
-  const response = await fetch(url.toString(), {
+  const response = await fetchWithRetry(url.toString(), {
     headers: {
       Authorization: `Bearer ${accessToken}`
     },
@@ -63,7 +65,7 @@ export async function fetchImagesFromFolder(accessToken: string, folderId: strin
   url.searchParams.set("fields", "files(id,name,mimeType,thumbnailLink,webContentLink,webViewLink)");
   url.searchParams.set("pageSize", "100");
 
-  const response = await fetch(url.toString(), {
+  const response = await fetchWithRetry(url.toString(), {
     headers: {
       Authorization: `Bearer ${accessToken}`
     },
@@ -87,7 +89,7 @@ export async function fetchImagesFromFolder(accessToken: string, folderId: strin
 }
 
 export async function fetchDriveImageBinary(accessToken: string, fileId: string) {
-  const response = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+  const response = await fetchWithRetry(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
     headers: {
       Authorization: `Bearer ${accessToken}`
     },
@@ -103,4 +105,3 @@ export async function fetchDriveImageBinary(accessToken: string, fileId: string)
     mimeType: response.headers.get("content-type") || "image/jpeg"
   };
 }
-

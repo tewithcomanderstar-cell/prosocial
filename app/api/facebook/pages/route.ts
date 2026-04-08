@@ -1,5 +1,5 @@
-import { jsonError, jsonOk, requireAuth } from "@/lib/api";
-import { FacebookConnection } from "@/models/FacebookConnection";
+﻿import { jsonError, jsonOk, requireAuth } from "@/lib/api";
+import { ensureValidFacebookConnection } from "@/lib/services/integration-auth";
 
 type LeanFacebookConnection = {
   pages?: Array<{
@@ -8,14 +8,15 @@ type LeanFacebookConnection = {
     category?: string;
     pageAccessToken: string;
   }>;
+  tokenStatus?: string;
 };
 
 export async function GET() {
   try {
     const userId = await requireAuth();
-    const connection = (await FacebookConnection.findOne({ userId }).lean()) as LeanFacebookConnection | null;
-    return jsonOk({ pages: connection?.pages ?? [] });
-  } catch {
-    return jsonError("Unauthorized", 401);
+    const connection = (await ensureValidFacebookConnection(userId)) as LeanFacebookConnection | null;
+    return jsonOk({ pages: connection?.pages ?? [], tokenStatus: connection?.tokenStatus ?? "unknown" });
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : "Unauthorized", 401);
   }
 }

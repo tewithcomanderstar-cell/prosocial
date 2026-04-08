@@ -24,6 +24,22 @@ function inferAuditAction(input: LogInput) {
   return "system-event";
 }
 
+export function serializeError(error: unknown) {
+  if (error instanceof Error) {
+    return {
+      reason: error.message,
+      stack: error.stack ?? null,
+      name: error.name
+    };
+  }
+
+  return {
+    reason: typeof error === "string" ? error : "unknown",
+    stack: null,
+    name: "UnknownError"
+  };
+}
+
 export async function logAction(input: LogInput) {
   const log = await ActionLog.create({
     userId: input.userId,
@@ -46,6 +62,32 @@ export async function logAction(input: LogInput) {
   });
 
   return log;
+}
+
+export async function logRouteError(params: {
+  userId: string;
+  type?: LogInput["type"];
+  message: string;
+  error: unknown;
+  metadata?: Record<string, unknown>;
+  relatedJobId?: string;
+  relatedPostId?: string;
+  relatedScheduleId?: string;
+}) {
+  const details = serializeError(params.error);
+  return logAction({
+    userId: params.userId,
+    type: params.type ?? "error",
+    level: "error",
+    message: params.message,
+    metadata: {
+      ...params.metadata,
+      ...details
+    },
+    relatedJobId: params.relatedJobId,
+    relatedPostId: params.relatedPostId,
+    relatedScheduleId: params.relatedScheduleId
+  });
 }
 
 export async function createNotification(params: {
@@ -73,13 +115,17 @@ export async function logAndNotifyError(params: {
   relatedJobId?: string;
   relatedPostId?: string;
   relatedScheduleId?: string;
+  error?: unknown;
 }) {
   await logAction({
     userId: params.userId,
     type: "error",
     level: "error",
     message: params.message,
-    metadata: params.metadata,
+    metadata: {
+      ...(params.metadata ?? {}),
+      ...(params.error ? serializeError(params.error) : {})
+    },
     relatedJobId: params.relatedJobId,
     relatedPostId: params.relatedPostId,
     relatedScheduleId: params.relatedScheduleId

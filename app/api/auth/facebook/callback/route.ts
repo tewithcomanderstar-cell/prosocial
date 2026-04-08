@@ -1,5 +1,7 @@
 ﻿import { NextResponse } from "next/server";
 import { createSession } from "@/lib/auth";
+import { connectDb } from "@/lib/db";
+import { logAction } from "@/lib/services/logging";
 import {
   buildLoginErrorUrl,
   buildLoginSuccessUrl,
@@ -68,9 +70,17 @@ export async function GET(request: Request) {
       avatar: profile.picture?.data?.url ?? null
     });
 
+    await connectDb();
     await createSession(String(user._id));
+    await logAction({
+      userId: String(user._id),
+      type: "auth",
+      level: "success",
+      message: "Facebook login successful",
+      metadata: { provider: "facebook", email }
+    });
     return NextResponse.redirect(buildLoginSuccessUrl());
-  } catch {
+  } catch (error) {
     return NextResponse.redirect(buildLoginErrorUrl("facebook_login_failed"));
   }
 }

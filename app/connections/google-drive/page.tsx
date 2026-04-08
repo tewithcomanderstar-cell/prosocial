@@ -1,5 +1,6 @@
 ﻿"use client";
 
+import { Suspense } from "react";
 import { GoogleDrivePanel } from "@/components/google-drive-panel";
 import { SectionCard } from "@/components/section-card";
 import { useI18n } from "@/components/language-provider";
@@ -10,9 +11,10 @@ export default function GoogleDriveConnectionPage() {
   return (
     <div className="stack">
       <SectionCard title={t("driveCardTitle")}>
-        <GoogleDrivePanel />
+        <Suspense fallback={<div className="muted">Loading...</div>}>
+          <GoogleDrivePanel />
+        </Suspense>
       </SectionCard>
     </div>
   );
 }
-

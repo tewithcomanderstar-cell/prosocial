@@ -755,3 +755,51 @@ html:lang(th) .stat strong { font-family: var(--font-body); }
     grid-template-columns: 1fr;
   }
 }
+
+@media (max-width: 1024px) {
+  .connected-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.profile-avatar-large {
+  width: 96px;
+  height: 96px;
+}
+
+.profile-file-input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.profile-upload-button,
+.profile-link-button {
+  position: relative;
+  width: fit-content;
+}
+
+.profile-password-grid,
+.connected-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.connected-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.connected-card {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.56);
+  border: 1px solid rgba(255, 255, 255, 0.72);
+}
+
+.connected-meta,
+.connected-actions {
+  display: grid;
+  gap: 10px;
+}

@@ -1,23 +1,46 @@
 ﻿"use client";
 
-import Link from "next/link";
-import { FormEvent, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { AppIcon } from "@/components/app-icon";
 import { useI18n } from "@/components/language-provider";
 
+function mapAuthMessage(code: string, isThai: boolean) {
+  const messages: Record<string, string> = {
+    missing_google_oauth: isThai ? "ระบบ Google Login ยังตั้งค่าไม่ครบใน environment variables" : "Google Login is not configured yet.",
+    missing_facebook_oauth: isThai ? "ระบบ Facebook Login ยังตั้งค่าไม่ครบใน environment variables" : "Facebook Login is not configured yet.",
+    invalid_google_state: isThai ? "สถานะการยืนยันตัวตนของ Google ไม่ถูกต้อง กรุณาลองใหม่" : "Invalid Google OAuth state. Please try again.",
+    invalid_facebook_state: isThai ? "สถานะการยืนยันตัวตนของ Facebook ไม่ถูกต้อง กรุณาลองใหม่" : "Invalid Facebook OAuth state. Please try again.",
+    google_token_exchange_failed: isThai ? "Google แลก token ไม่สำเร็จ กรุณาลอง login ใหม่" : "Google token exchange failed. Please try again.",
+    facebook_token_exchange_failed: isThai ? "Facebook แลก token ไม่สำเร็จ กรุณาลอง login ใหม่" : "Facebook token exchange failed. Please try again.",
+    google_profile_failed: isThai ? "ไม่สามารถดึงข้อมูลโปรไฟล์ Google ได้" : "Unable to load Google profile.",
+    facebook_profile_failed: isThai ? "ไม่สามารถดึงข้อมูลโปรไฟล์ Facebook ได้" : "Unable to load Facebook profile.",
+    google_login_failed: isThai ? "Google Login ล้มเหลว กรุณาลองใหม่" : "Google login failed. Please try again.",
+    facebook_login_failed: isThai ? "Facebook Login ล้มเหลว กรุณาลองใหม่" : "Facebook login failed. Please try again.",
+    unsupported_permission: isThai ? "แอป Facebook ยังไม่ได้รับสิทธิ์ที่จำเป็น กรุณาตรวจสอบ Login Configuration และ App Review" : "The Facebook app is missing required permissions. Review Login Configuration and app permissions."
+  };
+
+  return messages[code] || code;
+}
+
 export function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { language, t } = useI18n();
   const isThai = language === "th";
   const [mode, setMode] = useState<"login" | "register">("login");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [socialLoading, setSocialLoading] = useState<"google" | "facebook" | null>(null);
+
+  const mappedError = useMemo(() => {
+    const error = searchParams.get("error") || "";
+    return error ? mapAuthMessage(error, isThai) : "";
+  }, [searchParams, isThai]);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    setMessage(params.get("error") || "");
-  }, []);
+    setMessage(mappedError);
+  }, [mappedError]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -49,17 +72,22 @@ export function LoginForm() {
     }
   }
 
+  function startSocialLogin(provider: "google" | "facebook") {
+    setSocialLoading(provider);
+    window.location.href = `/api/auth/${provider}/start`;
+  }
+
   return (
     <form className="form" onSubmit={handleSubmit}>
       <div className="social-login-grid">
-        <Link href="/api/auth/google/start" className="social-button social-google">
+        <button type="button" className="social-button social-google" onClick={() => startSocialLogin("google")} disabled={socialLoading !== null}>
           <AppIcon name="google" className="social-icon" />
-          <span>{isThai ? "ดำเนินการต่อด้วย Google" : "Continue with Google"}</span>
-        </Link>
-        <Link href="/api/auth/facebook/start" className="social-button social-facebook">
+          <span>{socialLoading === "google" ? (isThai ? "กำลังเชื่อมต่อ..." : "Connecting...") : (isThai ? "ดำเนินการต่อด้วย Google" : "Continue with Google")}</span>
+        </button>
+        <button type="button" className="social-button social-facebook" onClick={() => startSocialLogin("facebook")} disabled={socialLoading !== null}>
           <AppIcon name="facebook" className="social-icon" />
-          <span>{isThai ? "ดำเนินการต่อด้วย Facebook" : "Continue with Facebook"}</span>
-        </Link>
+          <span>{socialLoading === "facebook" ? (isThai ? "กำลังเชื่อมต่อ..." : "Connecting...") : (isThai ? "ดำเนินการต่อด้วย Facebook" : "Continue with Facebook")}</span>
+        </button>
       </div>
 
       <div className="auth-divider">

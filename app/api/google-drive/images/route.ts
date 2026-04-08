@@ -1,19 +1,11 @@
-import { jsonError, jsonOk, requireAuth } from "@/lib/api";
-import { GoogleDriveConnection } from "@/models/GoogleDriveConnection";
+﻿import { jsonError, jsonOk, requireAuth } from "@/lib/api";
 import { fetchDriveFolders, fetchImagesFromFolder } from "@/lib/services/google-drive";
-
-type LeanGoogleConnection = {
-  accessToken: string;
-};
+import { ensureValidGoogleDriveConnection } from "@/lib/services/integration-auth";
 
 export async function GET(request: Request) {
   try {
     const userId = await requireAuth();
-    const connection = (await GoogleDriveConnection.findOne({ userId }).lean()) as LeanGoogleConnection | null;
-
-    if (!connection) {
-      return jsonOk({ images: [] }, "No Google Drive connection yet");
-    }
+    const connection = await ensureValidGoogleDriveConnection(userId);
 
     const url = new URL(request.url);
     let folderId = url.searchParams.get("folderId");
@@ -28,7 +20,7 @@ export async function GET(request: Request) {
     }
 
     const payload = await fetchImagesFromFolder(connection.accessToken, folderId);
-    return jsonOk({ images: payload.files });
+    return jsonOk({ images: payload.files, tokenStatus: connection.tokenStatus ?? "healthy" });
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : "Unable to fetch images", 400);
   }

@@ -1,4 +1,6 @@
-﻿type FacebookPage = {
+﻿import { fetchWithRetry } from "@/lib/services/http";
+
+type FacebookPage = {
   id: string;
   name: string;
   access_token: string;
@@ -20,7 +22,7 @@ export async function exchangeFacebookCode(code: string) {
   url.searchParams.set("redirect_uri", process.env.FACEBOOK_REDIRECT_URI ?? "");
   url.searchParams.set("code", code);
 
-  const response = await fetch(url.toString(), { cache: "no-store" });
+  const response = await fetchWithRetry(url.toString(), { cache: "no-store" });
   if (!response.ok) {
     throw new Error("Failed to exchange Facebook code");
   }
@@ -32,7 +34,7 @@ export async function fetchFacebookPages(userAccessToken: string) {
   const url = new URL("https://graph.facebook.com/v21.0/me/accounts");
   url.searchParams.set("access_token", userAccessToken);
 
-  const response = await fetch(url.toString(), { cache: "no-store" });
+  const response = await fetchWithRetry(url.toString(), { cache: "no-store" });
   if (!response.ok) {
     throw new Error("Failed to fetch Facebook pages");
   }
@@ -53,7 +55,7 @@ async function uploadPhotoByUrl(pageId: string, pageAccessToken: string, url: st
     access_token: pageAccessToken
   });
 
-  const response = await fetch(`https://graph.facebook.com/v21.0/${pageId}/photos`, {
+  const response = await fetchWithRetry(`https://graph.facebook.com/v21.0/${pageId}/photos`, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded"
@@ -80,7 +82,7 @@ async function uploadPhotoByBuffer(
   formData.set("access_token", pageAccessToken);
   formData.set("source", new Blob([bytes], { type: mimeType }), fileName);
 
-  const response = await fetch(`https://graph.facebook.com/v21.0/${pageId}/photos`, {
+  const response = await fetchWithRetry(`https://graph.facebook.com/v21.0/${pageId}/photos`, {
     method: "POST",
     body: formData
   });
@@ -126,7 +128,7 @@ export async function publishPostToFacebook(params: {
     body.append(`attached_media[${index}]`, JSON.stringify(media));
   });
 
-  const response = await fetch(`https://graph.facebook.com/v21.0/${params.pageId}/feed`, {
+  const response = await fetchWithRetry(`https://graph.facebook.com/v21.0/${params.pageId}/feed`, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded"
@@ -140,4 +142,3 @@ export async function publishPostToFacebook(params: {
 
   return response.json();
 }
-

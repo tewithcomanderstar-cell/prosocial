@@ -1,4 +1,5 @@
 ﻿import { jsonError, jsonOk, parseBody, requireAuth } from "@/lib/api";
+import { logRouteError } from "@/lib/services/logging";
 import { connectDb } from "@/lib/db";
 import { User } from "@/models/User";
 import { z } from "zod";
@@ -6,7 +7,20 @@ import { z } from "zod";
 const updateProfileSchema = z.object({
   name: z.string().trim().min(1).max(120),
   timezone: z.string().trim().min(1).max(120),
-  locale: z.string().trim().min(1).max(40)
+  locale: z.string().trim().min(1).max(40),
+  avatar: z
+    .string()
+    .trim()
+    .max(2_000_000)
+    .refine(
+      (value) =>
+        value.length === 0 ||
+        value.startsWith("data:image/") ||
+        value.startsWith("http://") ||
+        value.startsWith("https://"),
+      "Invalid avatar image"
+    )
+    .optional()
 });
 
 function serializeUser(user: any) {
@@ -16,6 +30,7 @@ function serializeUser(user: any) {
     email: user.email,
     avatar: user.avatar,
     provider: user.provider,
+    hasPassword: Boolean(user.passwordHash),
     role: user.role,
     timezone: user.timezone,
     locale: user.locale,
@@ -54,7 +69,8 @@ export async function PUT(request: Request) {
       {
         name: payload.name,
         timezone: payload.timezone,
-        locale: payload.locale
+        locale: payload.locale,
+        avatar: payload.avatar === undefined ? undefined : payload.avatar || null
       },
       { new: true }
     );
@@ -68,6 +84,16 @@ export async function PUT(request: Request) {
     if (error instanceof z.ZodError) {
       return jsonError(error.issues[0]?.message || "Invalid profile data", 422);
     }
+
+    try {
+      const userId = await requireAuth();
+      await logRouteError({
+        userId,
+        message: "Profile update failed",
+        error,
+        metadata: { source: "profile-update" }
+      });
+    } catch {}
 
     return jsonError("Unable to update profile", 400);
   }

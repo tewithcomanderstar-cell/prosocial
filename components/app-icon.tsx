@@ -21,6 +21,7 @@ export type AppIconName =
   | "login"
   | "privacy"
   | "profile"
+  | "accounts"
   | "system";
 
 type AppIconProps = SVGProps<SVGSVGElement> & {
@@ -92,6 +93,8 @@ export function AppIcon({ name, className, ...props }: AppIconProps) {
       return <svg {...common}><path d="M12 21c4-2.2 7-5.3 7-9.5V5.5L12 3 5 5.5v6C5 15.7 8 18.8 12 21z" /><path d="M9.5 11.5V10a2.5 2.5 0 0 1 5 0v1.5" /><rect x="8.5" y="11.5" width="7" height="5" rx="1.5" /></svg>;
     case "profile":
       return <svg {...common}><circle cx="12" cy="8" r="4" /><path d="M4.5 20a7.5 7.5 0 0 1 15 0" /></svg>;
+    case "accounts":
+      return <svg {...common}><path d="M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2" /><circle cx="10" cy="7" r="4" /><path d="M21 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13A4 4 0 0 1 16 10.87" /></svg>;
     case "system":
       return <svg {...common}><rect x="4" y="5" width="16" height="14" rx="3" /><path d="M8 9h8" /><path d="M8 13h5" /></svg>;
   }
