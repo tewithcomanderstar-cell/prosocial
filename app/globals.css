@@ -1294,3 +1294,8 @@ html:lang(th) .auth-title {
     grid-template-columns: 1fr;
   }
 }
+.composer-upload-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}

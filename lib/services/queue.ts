@@ -1,5 +1,4 @@
 ﻿
-
 import { Job } from "@/models/Job";
 import { MediaCache } from "@/models/MediaCache";
 import { Post } from "@/models/Post";
@@ -90,12 +89,13 @@ async function resolveImages(userId: string, imageRefs: string[]): Promise<Resol
   const images: ResolvedImage[] = [];
 
   for (const ref of imageRefs) {
-    if (ref.startsWith("drive:")) {
-      if (!driveConnection) {
+    if (ref.startsWith("drive:") || ref.startsWith("upload:")) {
+      const isDriveRef = ref.startsWith("drive:");
+      if (isDriveRef && !driveConnection) {
         throw new Error("Google Drive is not connected");
       }
 
-      const fileId = ref.replace("drive:", "");
+      const fileId = ref.replace(isDriveRef ? "drive:" : "upload:", "");
       const cached = (await MediaCache.findOne({
         userId,
         fileId,
@@ -112,7 +112,16 @@ async function resolveImages(userId: string, imageRefs: string[]): Promise<Resol
         continue;
       }
 
-      const file = await fetchDriveImageBinary(driveConnection.accessToken, fileId);
+      if (!isDriveRef) {
+        throw new Error("Uploaded image is no longer available. Please upload it again.");
+      }
+
+      const activeDriveConnection = driveConnection;
+      if (!activeDriveConnection) {
+        throw new Error("Google Drive is not connected");
+      }
+
+      const file = await fetchDriveImageBinary(activeDriveConnection.accessToken, fileId);
       await MediaCache.findOneAndUpdate(
         { userId, fileId },
         {
@@ -121,6 +130,7 @@ async function resolveImages(userId: string, imageRefs: string[]): Promise<Resol
           mimeType: file.mimeType,
           fileName: `${fileId}.jpg`,
           bytesBase64: Buffer.from(file.bytes).toString("base64"),
+          source: "google-drive",
           expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
         },
         { upsert: true, new: true }
@@ -436,9 +446,6 @@ export async function processQueuedJobs(limit = 10) {
 
   return processed;
 }
-
-
-
 
 
 
