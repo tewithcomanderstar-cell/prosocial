@@ -20,6 +20,7 @@ type PreviewImage = UploadedImage & {
 };
 
 type ActionMode = "instant" | "schedule";
+type MessageTone = "info" | "success" | "error";
 
 function buildInternalTitle(content: string) {
   const normalized = content.trim().replace(/\s+/g, " ");
@@ -42,6 +43,7 @@ export function PostComposerForm() {
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState<ActionMode | null>(null);
   const [message, setMessage] = useState("");
+  const [messageTone, setMessageTone] = useState<MessageTone>("info");
   const [images, setImages] = useState<PreviewImage[]>([]);
 
   useEffect(() => {
@@ -77,16 +79,38 @@ export function PostComposerForm() {
       scheduleLabel: isThai ? "ตั้งเวลาโพสต์" : "Schedule",
       scheduleHint: isThai ? "ถ้าไม่ตั้งเวลา คุณยังโพสต์ทันทีได้" : "Leave blank if you want to post right away.",
       postNow: isThai ? "โพสต์ทันที" : "Post Now",
-      schedulePost: isThai ? "Schedule Post" : "Schedule Post",
+      schedulePost: isThai ? "ตั้งเวลาโพสต์" : "Schedule Post",
       posting: isThai ? "กำลังโพสต์..." : "Posting...",
       scheduling: isThai ? "กำลังตั้งเวลา..." : "Scheduling...",
       helper: isThai ? "รองรับหลายรูปและแสดงตัวอย่างทันที" : "Supports multiple images with instant preview.",
       needContent: isThai ? "กรุณากรอกข้อความโพสต์ก่อน" : "Please enter a caption first.",
       needPage: isThai ? "กรุณาเลือกเพจอย่างน้อย 1 เพจ" : "Please choose at least one page.",
-      needSchedule: isThai ? "กรุณาเลือกวันและเวลาสำหรับการตั้งเวลาโพสต์" : "Please choose a date and time for scheduling."
+      needSchedule: isThai ? "กรุณาเลือกวันและเวลาสำหรับการตั้งเวลาโพสต์" : "Please choose a date and time for scheduling.",
+      uploadFailed: isThai ? "อัปโหลดรูปไม่สำเร็จ กรุณาลองใหม่" : "Image upload failed. Please try again.",
+      uploadSuccess: isThai ? "อัปโหลดรูปเรียบร้อยแล้ว" : "Images uploaded successfully.",
+      instantSuccess: isThai ? "เริ่มโพสต์แล้ว ระบบกำลังส่งไปยังเพจที่เลือก" : "Post request started for the selected pages.",
+      scheduleSuccess: isThai ? "ตั้งเวลาโพสต์เรียบร้อยแล้ว" : "Post scheduled successfully.",
+      instantFailed: isThai ? "โพสต์ทันทีไม่สำเร็จ กรุณาลองใหม่" : "Unable to start posting. Please try again.",
+      scheduleFailed: isThai ? "ตั้งเวลาโพสต์ไม่สำเร็จ กรุณาลองใหม่" : "Unable to schedule the post. Please try again."
     }),
     [isThai]
   );
+
+  function setFeedback(nextMessage: string, tone: MessageTone) {
+    setMessage(nextMessage);
+    setMessageTone(tone);
+  }
+
+  function resetComposer() {
+    images.forEach((image) => URL.revokeObjectURL(image.previewUrl));
+    setContent("");
+    setRunAt("");
+    setSelectedPageIds([]);
+    setImages([]);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }
 
   function togglePage(pageId: string) {
     setSelectedPageIds((current) =>
@@ -101,7 +125,7 @@ export function PostComposerForm() {
     }
 
     setUploading(true);
-    setMessage("");
+    setFeedback("", "info");
 
     const body = new FormData();
     const previews = Array.from(files).map((file) => ({ file, previewUrl: URL.createObjectURL(file) }));
@@ -117,7 +141,7 @@ export function PostComposerForm() {
 
     if (!result.ok) {
       previews.forEach(({ previewUrl }) => URL.revokeObjectURL(previewUrl));
-      setMessage(result.message || t("commonRequestFailed"));
+      setFeedback(result.message || copy.uploadFailed || t("commonRequestFailed"), "error");
       return;
     }
 
@@ -128,6 +152,7 @@ export function PostComposerForm() {
     }));
 
     setImages((current) => [...current, ...nextImages]);
+    setFeedback(copy.uploadSuccess, "success");
     event.target.value = "";
   }
 
@@ -163,7 +188,13 @@ export function PostComposerForm() {
     });
 
     const result = await response.json();
-    setMessage(result.message || (result.ok ? copy.postNow : t("commonRequestFailed")));
+    if (!result.ok) {
+      setFeedback(result.message || copy.instantFailed || t("commonRequestFailed"), "error");
+      return;
+    }
+
+    resetComposer();
+    setFeedback(copy.instantSuccess, "success");
   }
 
   async function submitSchedule() {
@@ -175,7 +206,7 @@ export function PostComposerForm() {
     const postResult = await postResponse.json();
 
     if (!postResult.ok) {
-      setMessage(postResult.message || t("commonRequestFailed"));
+      setFeedback(postResult.message || copy.scheduleFailed || t("commonRequestFailed"), "error");
       return;
     }
 
@@ -192,27 +223,33 @@ export function PostComposerForm() {
     });
 
     const scheduleResult = await scheduleResponse.json();
-    setMessage(scheduleResult.message || (scheduleResult.ok ? copy.schedulePost : t("commonRequestFailed")));
+    if (!scheduleResult.ok) {
+      setFeedback(scheduleResult.message || copy.scheduleFailed || t("commonRequestFailed"), "error");
+      return;
+    }
+
+    resetComposer();
+    setFeedback(copy.scheduleSuccess, "success");
   }
 
   async function handleAction(mode: ActionMode) {
     if (!content.trim()) {
-      setMessage(copy.needContent);
+      setFeedback(copy.needContent, "error");
       return;
     }
 
     if (selectedPageIds.length === 0) {
-      setMessage(copy.needPage);
+      setFeedback(copy.needPage, "error");
       return;
     }
 
     if (mode === "schedule" && !runAt) {
-      setMessage(copy.needSchedule);
+      setFeedback(copy.needSchedule, "error");
       return;
     }
 
     setSaving(mode);
-    setMessage("");
+    setFeedback("", "info");
 
     try {
       if (mode === "instant") {
@@ -234,7 +271,7 @@ export function PostComposerForm() {
         </div>
       </div>
 
-      {message ? <div className="composer-message">{message}</div> : null}
+      {message ? <div className={`composer-message composer-message-${messageTone}`}>{message}</div> : null}
 
       <div className="minimal-post-grid">
         <section className="minimal-post-main stack">
@@ -327,5 +364,3 @@ export function PostComposerForm() {
     </form>
   );
 }
-
-
