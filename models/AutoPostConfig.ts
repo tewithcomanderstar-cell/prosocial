@@ -26,7 +26,7 @@ const autoPostConfigSchema = new Schema(
     },
     autoPostStatus: {
       type: String,
-      enum: ["idle", "running", "posting", "success", "failed", "retrying", "paused"],
+      enum: ["idle", "running", "posting", "success", "failed", "retrying", "paused", "waiting"],
       default: "paused",
       index: true
     },

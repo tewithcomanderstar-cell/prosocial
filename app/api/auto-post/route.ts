@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { jsonError, jsonOk, parseBody, requireAuth } from "@/lib/api";
+import { jsonError, jsonOk, parseBody } from "@/lib/api";
 import { handleRoleError, requireRole } from "@/lib/services/permissions";
 import { logAction } from "@/lib/services/logging";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
@@ -7,7 +7,7 @@ import { AutoPostConfig } from "@/models/AutoPostConfig";
 type LeanAutoPostConfig = {
   enabled?: boolean;
   nextRunAt?: Date;
-  autoPostStatus?: "idle" | "running" | "posting" | "success" | "failed" | "retrying" | "paused";
+  autoPostStatus?: "idle" | "running" | "posting" | "success" | "failed" | "retrying" | "paused" | "waiting";
   jobStatus?: "pending" | "processing" | "posted" | "failed";
   lastError?: string | null;
   retryCount?: number;
@@ -31,6 +31,7 @@ const schema = z.object({
 
 export async function GET() {
   try {
+    const { requireAuth } = await import("@/lib/api");
     const userId = await requireAuth();
     const config = await AutoPostConfig.findOneAndUpdate(
       { userId },
@@ -67,7 +68,7 @@ export async function POST(request: Request) {
     const autoPostStatus = payload.enabled
       ? current?.autoPostStatus && current.autoPostStatus !== "paused"
         ? current.autoPostStatus
-        : "idle"
+        : "waiting"
       : "paused";
 
     const config = await AutoPostConfig.findOneAndUpdate(

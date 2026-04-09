@@ -413,7 +413,7 @@ async function executePostJob(job: JobExecution) {
 
   if (job.payload?.autoPostConfigId) {
     await AutoPostConfig.findByIdAndUpdate(String(job.payload.autoPostConfigId), {
-      autoPostStatus: "success",
+      autoPostStatus: "waiting",
       jobStatus: "posted",
       lastStatus: "posted",
       retryCount: 0,
@@ -509,6 +509,7 @@ export async function processQueuedJobs(limit = 10) {
 
   return processed;
 }
+
 
 
 

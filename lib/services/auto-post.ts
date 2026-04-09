@@ -8,7 +8,7 @@ import { generateFacebookContent } from "@/lib/services/ai";
 import { logAction, logAndNotifyError } from "@/lib/services/logging";
 import { randomItem } from "@/lib/utils";
 
-type AutoPostStatus = "idle" | "running" | "posting" | "success" | "failed" | "retrying" | "paused";
+type AutoPostStatus = "idle" | "running" | "posting" | "success" | "failed" | "retrying" | "paused" | "waiting";
 type JobStatus = "pending" | "processing" | "posted" | "failed";
 
 type LeanAutoPostConfig = {
@@ -167,7 +167,7 @@ export async function processDueAutoPosts() {
       const totalToday = await countSuccessfulAutoPostsToday(config.userId, config._id);
       if (totalToday >= (config.maxPostsPerDay ?? 12)) {
         await updateAutoPostState(config._id, {
-          autoPostStatus: "idle",
+          autoPostStatus: "waiting",
           jobStatus: "pending",
           lastStatus: "pending",
           lastError: "Daily Auto Post limit reached",
@@ -182,7 +182,7 @@ export async function processDueAutoPosts() {
       const pageCount = await countSuccessfulAutoPostsToday(config.userId, config._id, pageId);
       if (pageCount >= (config.maxPostsPerPagePerDay ?? 4)) {
         await updateAutoPostState(config._id, {
-          autoPostStatus: "idle",
+          autoPostStatus: "waiting",
           jobStatus: "pending",
           lastStatus: "pending",
           lastError: "Per-page daily Auto Post limit reached",
@@ -284,7 +284,7 @@ export async function processDueAutoPosts() {
           queued,
           targetPageId: pageId,
           scheduledDelayMinutes: delayMinutes,
-          autoPostStatus: "posting",
+          autoPostStatus: "waiting",
           jobStatus: "pending"
         }
       });
@@ -311,3 +311,5 @@ export async function processDueAutoPosts() {
 
   return processed;
 }
+
+
