@@ -27,17 +27,7 @@ type AutoPostConfig = {
 };
 
 type Folder = { id: string; name: string };
-
-type DriveImage = {
-  id: string;
-  name: string;
-  thumbnailLink?: string;
-};
-
-type FacebookPage = {
-  pageId: string;
-  name: string;
-};
+type FacebookPage = { pageId: string; name: string };
 
 type StatusLog = {
   _id: string;
@@ -123,8 +113,8 @@ function statusTone(status?: AutoPostStatus) {
       return "badge-warn";
     case "retrying":
     case "waiting":
-    case "idle":
       return "badge-neutral";
+    case "idle":
     case "paused":
     default:
       return "badge-neutral";
@@ -134,7 +124,6 @@ function statusTone(status?: AutoPostStatus) {
 export function AutoPostPanel() {
   const [config, setConfig] = useState<AutoPostConfig>(defaults);
   const [folders, setFolders] = useState<Folder[]>([]);
-  const [images, setImages] = useState<DriveImage[]>([]);
   const [pages, setPages] = useState<FacebookPage[]>([]);
   const [logs, setLogs] = useState<StatusLog[]>([]);
   const [message, setMessage] = useState("");
@@ -164,14 +153,11 @@ export function AutoPostPanel() {
       if (statusJson.ok) {
         const statusData = statusJson.data as StatusResponse;
         setConfig((current) => ({ ...current, ...defaults, ...statusData.config }));
-        setLogs(statusData.logs ?? []);
+        setLogs((statusData.logs ?? []).slice(0, 8));
       }
-      if (pagesJson.ok) {
-        setPages(pagesJson.data?.pages ?? []);
-      }
-      if (foldersJson.ok) {
-        setFolders(foldersJson.data?.folders ?? []);
-      }
+
+      if (pagesJson.ok) setPages(pagesJson.data?.pages ?? []);
+      if (foldersJson.ok) setFolders(foldersJson.data?.folders ?? []);
     } catch (statusError) {
       setError(statusError instanceof Error ? statusError.message : "Unable to load Auto Post status");
     } finally {
@@ -184,37 +170,15 @@ export function AutoPostPanel() {
   }, [loadStatus]);
 
   useEffect(() => {
-    const interval = window.setInterval(() => {
-      loadStatus(false);
-    }, 10000);
-
+    const interval = window.setInterval(() => loadStatus(false), 10000);
     return () => window.clearInterval(interval);
   }, [loadStatus]);
 
-  useEffect(() => {
-    async function loadImages() {
-      if (!config.folderId) {
-        setImages([]);
-        return;
-      }
+  const selectedPageNames = useMemo(
+    () => pages.filter((page) => config.targetPageIds.includes(page.pageId)).map((page) => page.name),
+    [config.targetPageIds, pages]
+  );
 
-      try {
-        const response = await fetch(`/api/google-drive/images?folderId=${encodeURIComponent(config.folderId)}`, {
-          cache: "no-store"
-        });
-        const result = await response.json();
-        if (result.ok) {
-          setImages(result.data?.images ?? []);
-        }
-      } catch {
-        setImages([]);
-      }
-    }
-
-    loadImages();
-  }, [config.folderId]);
-
-  const selectedPageNames = useMemo(() => pages.filter((page) => config.targetPageIds.includes(page.pageId)).map((page) => page.name), [config.targetPageIds, pages]);
   const startDisabled = starting || saving || ["running", "posting", "retrying"].includes(config.autoPostStatus ?? "");
 
   function togglePage(pageId: string) {
@@ -229,10 +193,7 @@ export function AutoPostPanel() {
   function updateCaptions(value: string) {
     setConfig((current) => ({
       ...current,
-      captions: value
-        .split("\n")
-        .map((item) => item.trim())
-        .filter(Boolean)
+      captions: value.split("\n").map((item) => item.trim()).filter(Boolean)
     }));
   }
 
@@ -243,9 +204,7 @@ export function AutoPostPanel() {
       body: JSON.stringify({ ...config, enabled: enabledOverride ?? config.enabled })
     });
     const result = await response.json();
-    if (!result.ok) {
-      throw new Error(result.message || "Unable to save Auto Post settings");
-    }
+    if (!result.ok) throw new Error(result.message || "Unable to save Auto Post settings");
     setConfig({ ...defaults, ...result.data.config });
     return result;
   }
@@ -258,7 +217,7 @@ export function AutoPostPanel() {
 
     try {
       const result = await saveConfig();
-      setMessage(result.message || (config.enabled ? "Auto Post settings saved" : "Auto Post paused"));
+      setMessage(result.message || "Settings saved");
       await loadStatus(false);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Unable to save Auto Post settings");
@@ -290,6 +249,7 @@ export function AutoPostPanel() {
     setPausing(true);
     setMessage("");
     setError("");
+
     try {
       const response = await fetch("/api/auto-post/pause", { method: "POST" });
       const result = await response.json();
@@ -307,6 +267,7 @@ export function AutoPostPanel() {
     setStopping(true);
     setMessage("");
     setError("");
+
     try {
       const response = await fetch("/api/auto-post/stop", { method: "POST" });
       const result = await response.json();
@@ -325,18 +286,15 @@ export function AutoPostPanel() {
   }
 
   return (
-    <div className="stack auto-post-shell">
-      {message ? <div className="composer-message">{message}</div> : null}
-      {error ? <div className="composer-message composer-message-error">{error}</div> : null}
-
-      <form className="card auto-post-card" onSubmit={handleSubmit}>
-        <div className="split auto-post-head">
-          <div className="stack">
-            <div className="kicker">AUTO POST</div>
-            <h3>Control Panel</h3>
+    <div className="auto-post-minimal-layout">
+      <form className="card auto-post-card auto-post-config-card" onSubmit={handleSubmit}>
+        <div className="split auto-post-head auto-post-head-minimal">
+          <div className="stack compact-stack">
+            <div className="kicker">Config</div>
+            <h3>Auto Post Setup</h3>
           </div>
           <label className="auto-post-toggle">
-            <span>{config.enabled ? "Enabled" : "Disabled"}</span>
+            <span>{config.enabled ? "On" : "Off"}</span>
             <input
               type="checkbox"
               checked={config.enabled}
@@ -345,139 +303,152 @@ export function AutoPostPanel() {
           </label>
         </div>
 
-        <div className="grid cols-2 auto-post-grid">
+        <div className="grid cols-2 auto-post-grid auto-post-grid-minimal">
           <label className="label">
-            Google Drive folder
-            <select className="select" value={config.folderId} onChange={(event) => {
-              const folder = folders.find((item) => item.id === event.target.value);
-              setConfig((current) => ({ ...current, folderId: event.target.value, folderName: folder?.name ?? current.folderName }));
-            }}>
-              {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+            Google Drive Folder
+            <select
+              className="select"
+              value={config.folderId}
+              onChange={(event) => {
+                const folder = folders.find((item) => item.id === event.target.value);
+                setConfig((current) => ({
+                  ...current,
+                  folderId: event.target.value,
+                  folderName: folder?.name ?? current.folderName
+                }));
+              }}
+            >
+              {folders.map((folder) => (
+                <option key={folder.id} value={folder.id}>{folder.name}</option>
+              ))}
             </select>
           </label>
 
           <label className="label">
-            Interval (hours)
-            <input className="input" type="number" min={1} max={24} value={config.intervalHours} onChange={(event) => setConfig((current) => ({ ...current, intervalHours: Number(event.target.value) || 1 }))} />
-          </label>
-
-          <label className="label">
-            Min random delay (minutes)
-            <input className="input" type="number" min={0} max={720} value={config.minRandomDelayMinutes} onChange={(event) => setConfig((current) => ({ ...current, minRandomDelayMinutes: Number(event.target.value) || 0 }))} />
-          </label>
-
-          <label className="label">
-            Max random delay (minutes)
-            <input className="input" type="number" min={0} max={1440} value={config.maxRandomDelayMinutes} onChange={(event) => setConfig((current) => ({ ...current, maxRandomDelayMinutes: Number(event.target.value) || 0 }))} />
-          </label>
-
-          <label className="label">
-            Caption mode
-            <select className="select" value={config.captionStrategy} onChange={(event) => setConfig((current) => ({ ...current, captionStrategy: event.target.value as AutoPostConfig["captionStrategy"] }))}>
-              <option value="manual">Manual</option>
-              <option value="hybrid">Hybrid</option>
-              <option value="ai">AI</option>
-            </select>
-          </label>
-
-          <label className="label">
-            Language
-            <select className="select" value={config.language} onChange={(event) => setConfig((current) => ({ ...current, language: event.target.value as AutoPostConfig["language"] }))}>
-              <option value="th">Thai</option>
-              <option value="en">English</option>
-            </select>
+            Every (hours)
+            <input
+              className="input"
+              type="number"
+              min={1}
+              max={24}
+              value={config.intervalHours}
+              onChange={(event) => setConfig((current) => ({ ...current, intervalHours: Number(event.target.value) || 1 }))}
+            />
           </label>
         </div>
 
-        <label className="label">
-          AI prompt
-          <input className="input" value={config.aiPrompt} onChange={(event) => setConfig((current) => ({ ...current, aiPrompt: event.target.value }))} placeholder="Optional prompt for n8n or AI caption generation" />
-        </label>
-
-        <label className="label">
-          Captions
-          <textarea className="textarea" value={config.captions.join("\n")} onChange={(event) => updateCaptions(event.target.value)} placeholder="One caption per line" />
-        </label>
-
-        <div className="stack">
-          <div className="split">
-            <strong>Facebook pages</strong>
-            <span className="muted">{selectedPageNames.length ? selectedPageNames.join(", ") : "No pages selected"}</span>
+        <div className="stack compact-stack">
+          <div className="split compact-row">
+            <strong>Facebook Pages</strong>
+            <span className="muted">{selectedPageNames.length || 0} selected</span>
           </div>
           <div className="chip-grid">
             {pages.map((page) => (
-              <button key={page.pageId} type="button" className={`choice-chip ${config.targetPageIds.includes(page.pageId) ? "active" : ""}`} onClick={() => togglePage(page.pageId)}>
+              <button
+                key={page.pageId}
+                type="button"
+                className={`choice-chip ${config.targetPageIds.includes(page.pageId) ? "active" : ""}`}
+                onClick={() => togglePage(page.pageId)}
+              >
                 {page.name}
               </button>
             ))}
           </div>
         </div>
 
-        <div className="minimal-action-stack auto-post-actions auto-post-actions-3">
-          <button className="button button-secondary" type="button" onClick={handleStartNow} disabled={startDisabled}>{starting ? "Starting..." : "Start Now"}</button>
-          <button className="button button-secondary" type="button" onClick={handlePause} disabled={pausing || stopping}>{pausing ? "Pausing..." : "Pause"}</button>
-          <button className="button button-secondary" type="button" onClick={handleStop} disabled={stopping || pausing}>{stopping ? "Stopping..." : "Stop"}</button>
-          <button className="button" type="submit" disabled={saving}>{saving ? "Saving..." : "Save Settings"}</button>
-        </div>
+        <label className="label">
+          Caption Mode
+          <select
+            className="select"
+            value={config.captionStrategy}
+            onChange={(event) => setConfig((current) => ({ ...current, captionStrategy: event.target.value as AutoPostConfig["captionStrategy"] }))}
+          >
+            <option value="manual">Manual</option>
+            <option value="hybrid">Manual + AI</option>
+            <option value="ai">AI only</option>
+          </select>
+        </label>
+
+        <label className="label">
+          Captions
+          <textarea
+            className="textarea auto-post-captions"
+            value={config.captions.join("\n")}
+            onChange={(event) => updateCaptions(event.target.value)}
+            placeholder="One caption per line"
+          />
+        </label>
+
+        <label className="label">
+          AI Prompt
+          <input
+            className="input"
+            value={config.aiPrompt}
+            onChange={(event) => setConfig((current) => ({ ...current, aiPrompt: event.target.value }))}
+            placeholder="Optional"
+          />
+        </label>
+
+        <button className="button" type="submit" disabled={saving}>
+          {saving ? "Saving..." : "Save Settings"}
+        </button>
       </form>
 
-      <div className="grid cols-2 auto-post-grid">
-        <section className="card auto-post-card">
-          <div className="split">
-            <h3>Folder Preview</h3>
-            <span className="badge badge-neutral">{images.length} images</span>
+      <section className="card auto-post-card auto-post-status-card">
+        <div className="split auto-post-head auto-post-head-minimal">
+          <div className="stack compact-stack">
+            <div className="kicker">Status</div>
+            <h3>Control & Monitor</h3>
           </div>
-          <div className="auto-post-image-grid">
-            {images.length ? images.slice(0, 8).map((image) => (
-              <article key={image.id} className="minimal-image-card">
-                {image.thumbnailLink ? <img className="minimal-image-preview" src={image.thumbnailLink} alt={image.name} /> : <div className="minimal-image-preview auto-post-preview-fallback">IMG</div>}
-                <div className="minimal-image-meta"><span>{image.name}</span></div>
+          <span className={`badge ${statusTone(config.autoPostStatus)}`}>{statusLabel(config.autoPostStatus)}</span>
+        </div>
+
+        {message ? <div className="composer-message">{message}</div> : null}
+        {error ? <div className="composer-message composer-message-error">{error}</div> : null}
+
+        <div className="auto-post-control-row">
+          <button className="button button-secondary" type="button" onClick={handleStartNow} disabled={startDisabled}>
+            {starting ? "Starting..." : "Start Now"}
+          </button>
+          <button className="button button-secondary" type="button" onClick={handlePause} disabled={pausing || stopping}>
+            {pausing ? "Pausing..." : "Pause"}
+          </button>
+          <button className="button button-secondary" type="button" onClick={handleStop} disabled={stopping || pausing}>
+            {stopping ? "Stopping..." : "Stop"}
+          </button>
+        </div>
+
+        <div className="grid cols-2 auto-post-metrics auto-post-metrics-minimal">
+          <div className="auto-post-metric-card"><span className="muted">Last run</span><strong>{formatDateTime(config.lastRunAt)}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Next run</span><strong>{formatDateTime(config.nextRunAt)}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Current job</span><strong>{jobStatusLabel(config.jobStatus)}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Last error</span><strong>{config.lastError || "None"}</strong></div>
+        </div>
+
+        <div className="stack compact-stack">
+          <div className="split compact-row">
+            <strong>Latest activity</strong>
+            <span className="badge badge-neutral">{logs.length}</span>
+          </div>
+          <div className="auto-post-log-list auto-post-log-list-minimal">
+            {logs.length ? logs.map((log) => (
+              <article key={log._id} className="auto-post-log-item">
+                <div className="split compact-row">
+                  <strong>{log.message}</strong>
+                  <span className={`badge ${log.level === "error" ? "badge-warn" : log.level === "success" ? "badge-success" : "badge-neutral"}`}>
+                    {log.level}
+                  </span>
+                </div>
+                <div className="muted">{formatDateTime(log.createdAt)}</div>
+                <div className="muted auto-post-log-meta">
+                  {log.metadata?.pageId ? `Page ${String(log.metadata.pageId)}` : "System event"}
+                  {log.metadata?.autoPostStatus ? ` • ${String(log.metadata.autoPostStatus)}` : ""}
+                </div>
               </article>
-            )) : <div className="composer-media-empty">No images found.</div>}
+            )) : <div className="composer-media-empty">No logs yet.</div>}
           </div>
-        </section>
-
-        <section className="card auto-post-card">
-          <div className="split">
-            <h3>Status</h3>
-            <span className={`badge ${statusTone(config.autoPostStatus)}`}>{statusLabel(config.autoPostStatus)}</span>
-          </div>
-
-          <div className="grid cols-2 auto-post-metrics">
-            <div className="auto-post-metric-card"><span className="muted">Last run</span><strong>{formatDateTime(config.lastRunAt)}</strong></div>
-            <div className="auto-post-metric-card"><span className="muted">Next run</span><strong>{formatDateTime(config.nextRunAt)}</strong></div>
-            <div className="auto-post-metric-card"><span className="muted">Current job</span><strong>{jobStatusLabel(config.jobStatus)}</strong></div>
-            <div className="auto-post-metric-card"><span className="muted">Retry count</span><strong>{config.retryCount ?? 0}</strong></div>
-          </div>
-
-          <div className="stack auto-post-status-box">
-            <div className="list-item"><span>Folder</span><strong>{config.folderName || "My Drive"}</strong></div>
-            <div className="list-item"><span>Pages</span><strong>{selectedPageNames.length || 0}</strong></div>
-            <div className="list-item"><span>Worker</span><strong>n8n webhook</strong></div>
-            <div className="list-item"><span>Last error</span><strong>{config.lastError || "None"}</strong></div>
-          </div>
-
-          <div className="stack">
-            <div className="split">
-              <h3>Latest log</h3>
-              <span className="badge badge-neutral">{logs.length} entries</span>
-            </div>
-            <div className="auto-post-log-list">
-              {logs.length ? logs.map((log) => (
-                <article key={log._id} className="auto-post-log-item">
-                  <div className="split">
-                    <strong>{log.message}</strong>
-                    <span className={`badge ${log.level === "error" ? "badge-warn" : log.level === "success" ? "badge-success" : "badge-neutral"}`}>{log.level}</span>
-                  </div>
-                  <div className="muted">{formatDateTime(log.createdAt)}</div>
-                  {log.metadata?.pageId ? <div className="muted">Page: {String(log.metadata.pageId)}</div> : null}
-                  {log.metadata?.autoPostStatus ? <div className="muted">Status: {String(log.metadata.autoPostStatus)}</div> : null}
-                </article>
-              )) : <div className="composer-media-empty">No logs yet.</div>}
-            </div>
-          </div>
-        </section>
-      </div>
+        </div>
+      </section>
     </div>
   );
 }

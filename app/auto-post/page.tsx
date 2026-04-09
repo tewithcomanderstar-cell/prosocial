@@ -5,7 +5,7 @@ import { SectionCard } from "@/components/section-card";
 export default function AutoPostPage() {
   return (
     <div className="stack page-stack">
-      <SectionCard title="Auto Post" icon="planner" tooltip="Control panel for n8n-driven Google Drive and Facebook automation">
+      <SectionCard title="Auto Post" icon="planner" tooltip="n8n control panel for Drive folders, Facebook pages, and live status">
         <Suspense fallback={<div className="muted">Loading...</div>}>
           <AutoPostPanel />
         </Suspense>

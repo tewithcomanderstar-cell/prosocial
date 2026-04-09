@@ -1538,3 +1538,63 @@ html:lang(th) .auth-title {
   background: rgba(47, 125, 87, 0.12);
   color: var(--success);
 }
+.auto-post-minimal-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.95fr);
+  gap: 20px;
+}
+
+.auto-post-config-card,
+.auto-post-status-card {
+  align-self: start;
+}
+
+.auto-post-head-minimal {
+  align-items: center;
+}
+
+.compact-stack {
+  gap: 8px;
+}
+
+.compact-row {
+  align-items: center;
+}
+
+.auto-post-grid-minimal {
+  gap: 14px;
+}
+
+.auto-post-captions {
+  min-height: 120px;
+}
+
+.auto-post-control-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.auto-post-metrics-minimal {
+  gap: 12px;
+}
+
+.auto-post-log-list-minimal {
+  max-height: 360px;
+}
+
+.auto-post-log-meta {
+  font-size: 0.88rem;
+}
+
+@media (max-width: 1120px) {
+  .auto-post-minimal-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .auto-post-control-row {
+    grid-template-columns: 1fr;
+  }
+}
