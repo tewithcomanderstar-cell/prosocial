@@ -32,7 +32,7 @@ export function GoogleDrivePanel() {
   const isThai = language === "th";
   const searchParams = useSearchParams();
   const [folders, setFolders] = useState<DriveFolder[]>([]);
-  const [selectedFolder, setSelectedFolder] = useState("");
+  const [selectedFolder, setSelectedFolder] = useState("root");
   const [images, setImages] = useState<DriveImage[]>([]);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
@@ -46,17 +46,39 @@ export function GoogleDrivePanel() {
     return error ? mapGoogleDriveMessage(error, isThai) : "";
   }, [searchParams, isThai]);
 
+  async function loadFolders() {
+    const response = await fetch("/api/google-drive/folders", { cache: "no-store" });
+    const result = await response.json();
+    if (result.ok) {
+      setFolders(result.data.folders);
+      return true;
+    }
+
+    if (result.message) {
+      setMessage(result.message);
+    }
+    return false;
+  }
+
+  async function loadImages(folderId: string) {
+    setSelectedFolder(folderId);
+    const response = await fetch(`/api/google-drive/images?folderId=${folderId}`, { cache: "no-store" });
+    const result = await response.json();
+    if (result.ok) {
+      setImages(result.data.images);
+    } else {
+      setMessage(result.message || t("commonRequestFailed"));
+      setImages([]);
+    }
+  }
+
   useEffect(() => {
     setMessage(queryMessage);
-    fetch("/api/google-drive/folders")
-      .then((res) => res.json())
-      .then((result) => {
-        if (result.ok) {
-          setFolders(result.data.folders);
-        } else if (result.message) {
-          setMessage(result.message);
-        }
-      });
+    loadFolders().then((ok) => {
+      if (ok) {
+        loadImages("root");
+      }
+    });
   }, [queryMessage]);
 
   async function connect() {
@@ -72,17 +94,6 @@ export function GoogleDrivePanel() {
     setMessage(result.message || t("commonRequestFailed"));
   }
 
-  async function loadImages(folderId: string) {
-    setSelectedFolder(folderId);
-    const response = await fetch(`/api/google-drive/images?folderId=${folderId}`);
-    const result = await response.json();
-    if (result.ok) {
-      setImages(result.data.images);
-    } else {
-      setMessage(result.message || t("commonRequestFailed"));
-    }
-  }
-
   return (
     <div className="stack">
       <button className="button" type="button" onClick={connect} disabled={loading}>
@@ -91,10 +102,10 @@ export function GoogleDrivePanel() {
       {message ? <p className="muted">{message}</p> : null}
 
       <label className="label">
-        {t("driveFolder")}
+        {isThai ? "โฟลเดอร์ในไดรฟ์ของฉัน" : t("driveFolder")}
         <select className="select" value={selectedFolder} onChange={(event) => loadImages(event.target.value)}>
-          <option value="">{t("driveSelectFolder")}</option>
-          {folders.map((folder) => (
+          <option value="root">{isThai ? "ไดรฟ์ของฉัน" : "My Drive"}</option>
+          {folders.filter((folder) => folder.id !== "root").map((folder) => (
             <option key={folder.id} value={folder.id}>
               {folder.name}
             </option>
@@ -107,7 +118,7 @@ export function GoogleDrivePanel() {
           <div key={image.id} className="card">
             <strong>{image.name}</strong>
             <p className="muted">{image.id}</p>
-            <a className="button-secondary" href={image.webContentLink || image.webViewLink || "#"}>
+            <a className="button-secondary" href={image.webContentLink || image.webViewLink || "#"} target="_blank" rel="noreferrer">
               {t("driveOpenImage")}
             </a>
           </div>

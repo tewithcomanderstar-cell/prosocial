@@ -36,11 +36,15 @@ export async function exchangeGoogleCode(code: string) {
   return response.json() as Promise<{ access_token: string; refresh_token?: string; expires_in?: number }>;
 }
 
-export async function fetchDriveFolders(accessToken: string) {
+export async function fetchDriveFolders(accessToken: string, parentId = "root") {
   const url = new URL("https://www.googleapis.com/drive/v3/files");
-  url.searchParams.set("q", "mimeType = 'application/vnd.google-apps.folder' and trashed = false");
+  url.searchParams.set(
+    "q",
+    `'${parentId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`
+  );
   url.searchParams.set("fields", "files(id,name)");
   url.searchParams.set("pageSize", "100");
+  url.searchParams.set("orderBy", "folder,name_natural");
 
   const response = await fetchWithRetry(url.toString(), {
     headers: {
@@ -58,12 +62,14 @@ export async function fetchDriveFolders(accessToken: string) {
 
 export async function fetchImagesFromFolder(accessToken: string, folderId: string) {
   const url = new URL("https://www.googleapis.com/drive/v3/files");
-  url.searchParams.set(
-    "q",
-    `'${folderId}' in parents and mimeType contains 'image/' and trashed = false`
-  );
+  const rootQuery = folderId === "root"
+    ? "'root' in parents and mimeType contains 'image/' and trashed = false"
+    : `'${folderId}' in parents and mimeType contains 'image/' and trashed = false`;
+
+  url.searchParams.set("q", rootQuery);
   url.searchParams.set("fields", "files(id,name,mimeType,thumbnailLink,webContentLink,webViewLink)");
   url.searchParams.set("pageSize", "100");
+  url.searchParams.set("orderBy", "name_natural");
 
   const response = await fetchWithRetry(url.toString(), {
     headers: {
