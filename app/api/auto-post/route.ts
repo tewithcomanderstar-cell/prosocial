@@ -1,4 +1,4 @@
-import { z } from "zod";
+﻿import { z } from "zod";
 import { jsonError, jsonOk, parseBody } from "@/lib/api";
 import { handleRoleError, requireRole } from "@/lib/services/permissions";
 import { logAction } from "@/lib/services/logging";
@@ -6,23 +6,26 @@ import { AutoPostConfig } from "@/models/AutoPostConfig";
 
 type LeanAutoPostConfig = {
   enabled?: boolean;
-  nextRunAt?: Date;
+  nextRunAt?: Date | null;
   autoPostStatus?: "idle" | "running" | "posting" | "success" | "failed" | "retrying" | "paused" | "waiting";
   jobStatus?: "pending" | "processing" | "posted" | "failed";
   lastError?: string | null;
   retryCount?: number;
 };
 
+const intervalSchema = z.union([
+  z.literal(15),
+  z.literal(30),
+  z.literal(60),
+  z.literal(120)
+]);
+
 const schema = z.object({
   enabled: z.boolean(),
   folderId: z.string().min(1).default("root"),
   folderName: z.string().min(1).default("My Drive"),
-  targetPageIds: z.array(z.string()).default([]),
-  intervalHours: z.number().min(1).max(24),
-  minRandomDelayMinutes: z.number().min(0).max(720),
-  maxRandomDelayMinutes: z.number().min(0).max(1440),
-  maxPostsPerDay: z.number().min(1).max(200),
-  maxPostsPerPagePerDay: z.number().min(1).max(100),
+  targetPageIds: z.array(z.string()).max(100, "Select up to 100 Facebook pages").default([]),
+  intervalMinutes: intervalSchema.default(60),
   captionStrategy: z.enum(["manual", "ai", "hybrid"]),
   captions: z.array(z.string()).default([]),
   aiPrompt: z.string().default(""),
@@ -41,7 +44,8 @@ export async function GET() {
           nextRunAt: new Date(),
           autoPostStatus: "paused",
           jobStatus: "pending",
-          retryCount: 0
+          retryCount: 0,
+          intervalMinutes: 60
         }
       },
       { upsert: true, new: true }
@@ -95,9 +99,11 @@ export async function POST(request: Request) {
         autoPost: true,
         folderId: payload.folderId,
         targetPageCount: (payload.targetPageIds ?? []).length,
-        intervalHours: payload.intervalHours,
+        intervalMinutes: payload.intervalMinutes,
         captionStrategy: payload.captionStrategy,
-        autoPostStatus
+        autoPostStatus,
+        maxTargetPages: 100,
+        imageAssignmentMode: "unique-per-page"
       }
     });
 

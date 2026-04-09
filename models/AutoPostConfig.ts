@@ -1,4 +1,4 @@
-import { Schema, model, models } from "mongoose";
+﻿import { Schema, model, models } from "mongoose";
 
 const autoPostConfigSchema = new Schema(
   {
@@ -7,7 +7,11 @@ const autoPostConfigSchema = new Schema(
     folderId: { type: String, default: "root" },
     folderName: { type: String, default: "My Drive" },
     targetPageIds: { type: [String], default: [] },
-    intervalHours: { type: Number, default: 6 },
+    intervalMinutes: {
+      type: Number,
+      enum: [15, 30, 60, 120],
+      default: 60
+    },
     minRandomDelayMinutes: { type: Number, default: 5 },
     maxRandomDelayMinutes: { type: Number, default: 30 },
     maxPostsPerDay: { type: Number, default: 12 },

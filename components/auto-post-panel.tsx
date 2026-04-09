@@ -1,20 +1,17 @@
-"use client";
+﻿"use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 type AutoPostStatus = "idle" | "running" | "posting" | "success" | "failed" | "retrying" | "paused" | "waiting";
+type CaptionStrategy = "manual" | "ai" | "hybrid";
 
 type AutoPostConfig = {
   enabled: boolean;
   folderId: string;
   folderName: string;
   targetPageIds: string[];
-  intervalHours: number;
-  minRandomDelayMinutes: number;
-  maxRandomDelayMinutes: number;
-  maxPostsPerDay: number;
-  maxPostsPerPagePerDay: number;
-  captionStrategy: "manual" | "ai" | "hybrid";
+  intervalMinutes: number;
+  captionStrategy: CaptionStrategy;
   captions: string[];
   aiPrompt: string;
   language: "th" | "en";
@@ -42,16 +39,20 @@ type StatusResponse = {
   logs: StatusLog[];
 };
 
+const MAX_TARGET_PAGES = 100;
+const INTERVAL_OPTIONS = [
+  { value: 15, label: "15 minutes" },
+  { value: 30, label: "30 minutes" },
+  { value: 60, label: "1 hour" },
+  { value: 120, label: "2 hours" }
+] as const;
+
 const defaults: AutoPostConfig = {
   enabled: false,
   folderId: "root",
   folderName: "My Drive",
   targetPageIds: [],
-  intervalHours: 6,
-  minRandomDelayMinutes: 5,
-  maxRandomDelayMinutes: 30,
-  maxPostsPerDay: 12,
-  maxPostsPerPagePerDay: 4,
+  intervalMinutes: 60,
   captionStrategy: "hybrid",
   captions: [],
   aiPrompt: "",
@@ -153,7 +154,7 @@ export function AutoPostPanel() {
       if (statusJson.ok) {
         const statusData = statusJson.data as StatusResponse;
         setConfig((current) => ({ ...current, ...defaults, ...statusData.config }));
-        setLogs((statusData.logs ?? []).slice(0, 8));
+        setLogs((statusData.logs ?? []).slice(0, 10));
       }
 
       if (pagesJson.ok) setPages(pagesJson.data?.pages ?? []);
@@ -182,12 +183,24 @@ export function AutoPostPanel() {
   const startDisabled = starting || saving || ["running", "posting", "retrying"].includes(config.autoPostStatus ?? "");
 
   function togglePage(pageId: string) {
-    setConfig((current) => ({
-      ...current,
-      targetPageIds: current.targetPageIds.includes(pageId)
-        ? current.targetPageIds.filter((id) => id !== pageId)
-        : [...current.targetPageIds, pageId]
-    }));
+    setConfig((current) => {
+      if (current.targetPageIds.includes(pageId)) {
+        return {
+          ...current,
+          targetPageIds: current.targetPageIds.filter((id) => id !== pageId)
+        };
+      }
+
+      if (current.targetPageIds.length >= MAX_TARGET_PAGES) {
+        setError(`You can select up to ${MAX_TARGET_PAGES} pages.`);
+        return current;
+      }
+
+      return {
+        ...current,
+        targetPageIds: [...current.targetPageIds, pageId]
+      };
+    });
   }
 
   function updateCaptions(value: string) {
@@ -325,34 +338,40 @@ export function AutoPostPanel() {
           </label>
 
           <label className="label">
-            Every (hours)
-            <input
-              className="input"
-              type="number"
-              min={1}
-              max={24}
-              value={config.intervalHours}
-              onChange={(event) => setConfig((current) => ({ ...current, intervalHours: Number(event.target.value) || 1 }))}
-            />
+            Every
+            <select
+              className="select"
+              value={config.intervalMinutes}
+              onChange={(event) => setConfig((current) => ({ ...current, intervalMinutes: Number(event.target.value) || 60 }))}
+            >
+              {INTERVAL_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
           </label>
         </div>
 
         <div className="stack compact-stack">
           <div className="split compact-row">
             <strong>Facebook Pages</strong>
-            <span className="muted">{selectedPageNames.length || 0} selected</span>
+            <span className="muted">{selectedPageNames.length} / {MAX_TARGET_PAGES} selected</span>
           </div>
           <div className="chip-grid">
-            {pages.map((page) => (
-              <button
-                key={page.pageId}
-                type="button"
-                className={`choice-chip ${config.targetPageIds.includes(page.pageId) ? "active" : ""}`}
-                onClick={() => togglePage(page.pageId)}
-              >
-                {page.name}
-              </button>
-            ))}
+            {pages.map((page) => {
+              const active = config.targetPageIds.includes(page.pageId);
+              const disabled = !active && config.targetPageIds.length >= MAX_TARGET_PAGES;
+              return (
+                <button
+                  key={page.pageId}
+                  type="button"
+                  className={`choice-chip ${active ? "active" : ""}`}
+                  onClick={() => togglePage(page.pageId)}
+                  disabled={disabled}
+                >
+                  {page.name}
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -361,7 +380,7 @@ export function AutoPostPanel() {
           <select
             className="select"
             value={config.captionStrategy}
-            onChange={(event) => setConfig((current) => ({ ...current, captionStrategy: event.target.value as AutoPostConfig["captionStrategy"] }))}
+            onChange={(event) => setConfig((current) => ({ ...current, captionStrategy: event.target.value as CaptionStrategy }))}
           >
             <option value="manual">Manual</option>
             <option value="hybrid">Manual + AI</option>
@@ -388,6 +407,8 @@ export function AutoPostPanel() {
             placeholder="Optional"
           />
         </label>
+
+        <div className="muted">Unique image assignment per page is handled in n8n for each run.</div>
 
         <button className="button" type="submit" disabled={saving}>
           {saving ? "Saving..." : "Save Settings"}

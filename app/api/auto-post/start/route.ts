@@ -1,4 +1,4 @@
-import { jsonError, jsonOk } from "@/lib/api";
+﻿import { jsonError, jsonOk } from "@/lib/api";
 import { handleRoleError, requireRole } from "@/lib/services/permissions";
 import { logAction, logAndNotifyError } from "@/lib/services/logging";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
@@ -10,11 +10,7 @@ type LeanAutoPostConfig = {
   folderId: string;
   folderName: string;
   targetPageIds: string[];
-  intervalHours: number;
-  minRandomDelayMinutes: number;
-  maxRandomDelayMinutes: number;
-  maxPostsPerDay: number;
-  maxPostsPerPagePerDay: number;
+  intervalMinutes: number;
   captionStrategy: "manual" | "ai" | "hybrid";
   captions: string[];
   aiPrompt: string;
@@ -22,9 +18,9 @@ type LeanAutoPostConfig = {
   autoPostStatus?: string;
 };
 
-function getNextAutoRun(intervalHours: number) {
-  const hours = Math.max(1, intervalHours || 1);
-  return new Date(Date.now() + hours * 60 * 60 * 1000);
+function getNextAutoRun(intervalMinutes: number) {
+  const minutes = [15, 30, 60, 120].includes(intervalMinutes) ? intervalMinutes : 60;
+  return new Date(Date.now() + minutes * 60 * 1000);
 }
 
 export async function POST() {
@@ -42,6 +38,10 @@ export async function POST() {
 
     if (!config.targetPageIds.length) {
       return jsonError("Select at least one Facebook page first", 400);
+    }
+
+    if (config.targetPageIds.length > 100) {
+      return jsonError("Select up to 100 Facebook pages", 400);
     }
 
     if (["running", "posting", "retrying"].includes(config.autoPostStatus ?? "")) {
@@ -76,15 +76,14 @@ export async function POST() {
       folderId: config.folderId,
       folderName: config.folderName,
       pageIds: config.targetPageIds,
-      intervalHours: config.intervalHours,
-      minRandomDelayMinutes: config.minRandomDelayMinutes,
-      maxRandomDelayMinutes: config.maxRandomDelayMinutes,
-      maxPostsPerDay: config.maxPostsPerDay,
-      maxPostsPerPagePerDay: config.maxPostsPerPagePerDay,
+      intervalMinutes: config.intervalMinutes,
       captionStrategy: config.captionStrategy,
       captions: config.captions,
       aiPrompt: config.aiPrompt,
       language: config.language,
+      imageAssignmentMode: "unique-per-page",
+      allowImageReuseAfterPoolExhausted: true,
+      maxTargetPages: 100,
       triggeredAt: new Date().toISOString(),
       source: "manual-start"
     };
@@ -112,7 +111,7 @@ export async function POST() {
     await AutoPostConfig.findByIdAndUpdate(config._id, {
       autoPostStatus: "waiting",
       jobStatus: "pending",
-      nextRunAt: getNextAutoRun(config.intervalHours),
+      nextRunAt: getNextAutoRun(config.intervalMinutes),
       lastError: null
     });
 
@@ -126,10 +125,12 @@ export async function POST() {
         autoPostConfigId: config._id,
         folderId: config.folderId,
         targetPageCount: config.targetPageIds.length,
-        intervalHours: config.intervalHours,
+        intervalMinutes: config.intervalMinutes,
         source: "manual-start",
         destination: "n8n",
-        action: "start"
+        action: "start",
+        imageAssignmentMode: "unique-per-page",
+        allowImageReuseAfterPoolExhausted: true
       }
     });
 
