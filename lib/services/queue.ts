@@ -1,4 +1,4 @@
-﻿
+import { AutoPostConfig } from "@/models/AutoPostConfig";
 import { Job } from "@/models/Job";
 import { MediaCache } from "@/models/MediaCache";
 import { Post } from "@/models/Post";
@@ -72,12 +72,14 @@ type JobExecution = {
   attempts: number;
   maxAttempts: number;
   fingerprint?: string;
+  payload?: Record<string, unknown>;
 };
 
 type EnqueueOptions = {
   scheduleId?: string;
   applyRandomDelay?: boolean;
   startAt?: Date;
+  payloadExtras?: Record<string, unknown>;
 };
 
 async function resolveImages(userId: string, imageRefs: string[]): Promise<ResolvedImage[]> {
@@ -85,7 +87,9 @@ async function resolveImages(userId: string, imageRefs: string[]): Promise<Resol
     return [];
   }
 
-  const driveConnection = imageRefs.some((ref) => ref.startsWith("drive:")) ? ((await ensureValidGoogleDriveConnection(userId)) as LeanDriveConnection | null) : null;
+  const driveConnection = imageRefs.some((ref) => ref.startsWith("drive:"))
+    ? ((await ensureValidGoogleDriveConnection(userId)) as LeanDriveConnection | null)
+    : null;
   const images: ResolvedImage[] = [];
 
   for (const ref of imageRefs) {
@@ -204,7 +208,8 @@ export async function enqueuePostJobsForPost(userId: string, postId: string, opt
       payload: {
         postingMode: post.postingMode,
         randomizeImages: post.randomizeImages,
-        randomizeCaption: post.randomizeCaption
+        randomizeCaption: post.randomizeCaption,
+        ...(options.payloadExtras ?? {})
       },
       nextRunAt,
       maxAttempts: 3,
@@ -256,7 +261,8 @@ export async function enqueueJobsForDueSchedules() {
         userId: String(schedule.userId),
         message: error instanceof Error ? error.message : "Unable to enqueue scheduled jobs",
         relatedPostId: String(schedule.postId),
-        relatedScheduleId: String(schedule._id)
+        relatedScheduleId: String(schedule._id),
+        error
       });
     }
   }
@@ -286,8 +292,15 @@ async function executePostJob(job: JobExecution) {
       relatedJobId: job._id,
       relatedPostId: job.postId,
       relatedScheduleId: job.scheduleId,
-      metadata: { targetPageId: job.targetPageId }
+      metadata: { targetPageId: job.targetPageId, autoPostConfigId: job.payload?.autoPostConfigId }
     });
+
+    if (job.payload?.autoPostConfigId) {
+      await AutoPostConfig.findByIdAndUpdate(String(job.payload.autoPostConfigId), {
+        lastStatus: "failed",
+        lastError: rateLimit.reason ?? "Rate limited"
+      });
+    }
 
     return { status: "rate_limited" };
   }
@@ -313,8 +326,14 @@ async function executePostJob(job: JobExecution) {
         relatedJobId: job._id,
         relatedPostId: job.postId,
         relatedScheduleId: job.scheduleId,
-        metadata: { targetPageId: job.targetPageId }
+        metadata: { targetPageId: job.targetPageId, autoPostConfigId: job.payload?.autoPostConfigId }
       });
+      if (job.payload?.autoPostConfigId) {
+        await AutoPostConfig.findByIdAndUpdate(String(job.payload.autoPostConfigId), {
+          lastStatus: "failed",
+          lastError: "Duplicate auto post was blocked by duplicate protection"
+        });
+      }
       return { status: "duplicate_blocked" };
     }
   }
@@ -374,8 +393,16 @@ async function executePostJob(job: JobExecution) {
     relatedJobId: job._id,
     relatedPostId: String(post._id),
     relatedScheduleId: job.scheduleId,
-    metadata: { targetPageId: page.pageId, publishResult }
+    metadata: { targetPageId: page.pageId, publishResult, autoPostConfigId: job.payload?.autoPostConfigId }
   });
+
+  if (job.payload?.autoPostConfigId) {
+    await AutoPostConfig.findByIdAndUpdate(String(job.payload.autoPostConfigId), {
+      lastStatus: "posted",
+      lastError: null,
+      lastPostId: post._id
+    });
+  }
 
   return { status: "success" };
 }
@@ -400,7 +427,8 @@ export async function processQueuedJobs(limit = 10) {
       targetPageId: String(item.targetPageId),
       attempts: item.attempts ?? 0,
       maxAttempts: item.maxAttempts ?? 3,
-      fingerprint: item.fingerprint
+      fingerprint: item.fingerprint,
+      payload: (item.payload ?? {}) as Record<string, unknown>
     };
 
     await Job.findByIdAndUpdate(job._id, {
@@ -434,11 +462,24 @@ export async function processQueuedJobs(limit = 10) {
         message: shouldRetry
           ? `Publish failed and will retry (${attempts}/${job.maxAttempts}): ${message}`
           : `Publish failed after ${attempts} attempts: ${message}`,
-        metadata: { targetPageId: job.targetPageId, attempts, maxAttempts: job.maxAttempts },
+        metadata: {
+          targetPageId: job.targetPageId,
+          attempts,
+          maxAttempts: job.maxAttempts,
+          autoPostConfigId: job.payload?.autoPostConfigId
+        },
         relatedJobId: job._id,
         relatedPostId: job.postId,
-        relatedScheduleId: job.scheduleId
+        relatedScheduleId: job.scheduleId,
+        error
       });
+
+      if (job.payload?.autoPostConfigId) {
+        await AutoPostConfig.findByIdAndUpdate(String(job.payload.autoPostConfigId), {
+          lastStatus: shouldRetry ? "pending" : "failed",
+          lastError: message
+        });
+      }
 
       processed.push({ jobId: job._id, status: shouldRetry ? "retrying" : "failed" });
     }
@@ -446,6 +487,4 @@ export async function processQueuedJobs(limit = 10) {
 
   return processed;
 }
-
-
 

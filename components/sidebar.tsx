@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -20,51 +20,51 @@ type NavGroup = {
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { language, t } = useI18n();
-  const isThai = language === "th";
+  const { t } = useI18n();
 
   const groups: NavGroup[] = [
     {
-      title: isThai ? "งานหลัก" : "Core",
+      title: "Core",
       icon: "dashboard",
       items: [
         { href: "/dashboard", label: t("navDashboard"), icon: "dashboard" },
-        { href: "/posts/new", label: isThai ? "สร้างโพสต์" : "Create Post", icon: "compose" },
-        { href: "/planner", label: isThai ? "ปฏิทินโพสต์" : "Planner", icon: "planner" },
-        { href: "/media-library", label: isThai ? "คลังคอนเทนต์" : "Media Library", icon: "media" }
+        { href: "/posts/new", label: "Create Post", icon: "compose" },
+        { href: "/auto-post", label: "Auto Post", icon: "planner" },
+        { href: "/planner", label: "Planner", icon: "planner" },
+        { href: "/media-library", label: "Media Library", icon: "media" }
       ]
     },
     {
-      title: isThai ? "คอนเทนต์" : "Content",
+      title: "Content",
       icon: "template",
       items: [
         { href: "/analytics", label: t("navAnalytics"), icon: "analytics" },
-        { href: "/recommendations", label: isThai ? "คำแนะนำอัจฉริยะ" : "Recommendations", icon: "recommend" },
-        { href: "/templates", label: isThai ? "เทมเพลตและแฮชแท็ก" : "Templates", icon: "template" },
-        { href: "/bulk", label: isThai ? "อัปโหลดหลายโพสต์" : "Bulk Upload", icon: "bulk" }
+        { href: "/recommendations", label: "Recommendations", icon: "recommend" },
+        { href: "/templates", label: "Templates", icon: "template" },
+        { href: "/bulk", label: "Bulk Upload", icon: "bulk" }
       ]
     },
     {
-      title: isThai ? "เวิร์กสเปซ" : "Workspace",
+      title: "Workspace",
       icon: "team",
       items: [
-        { href: "/profile", label: isThai ? "โปรไฟล์" : "Profile", icon: "profile" },
-        { href: "/connected-accounts", label: isThai ? "บัญชีที่เชื่อมต่อ" : "Connected Accounts", icon: "accounts" },
-        { href: "/team", label: isThai ? "ทีมและเวิร์กสเปซ" : "Team & Workspace", icon: "team" },
+        { href: "/profile", label: "Profile", icon: "profile" },
+        { href: "/connected-accounts", label: "Connected Accounts", icon: "accounts" },
+        { href: "/team", label: "Team & Workspace", icon: "team" },
         { href: "/personas", label: t("navPersonas"), icon: "personas" },
         { href: "/connections/facebook", label: t("navFacebook"), icon: "facebook" },
         { href: "/connections/google-drive", label: t("navGoogle"), icon: "drive" }
       ]
     },
     {
-      title: isThai ? "ระบบ" : "System",
+      title: "System",
       icon: "system",
       items: [
-        { href: "/integrations", label: isThai ? "การเชื่อมต่อและแจ้งเตือน" : "Integrations & Notifications", icon: "integrations" },
+        { href: "/integrations", label: "Integrations & Notifications", icon: "integrations" },
         { href: "/settings", label: t("navSettings"), icon: "settings" },
         { href: "/logs", label: t("navLogs"), icon: "logs" },
         { href: "/setup", label: t("navSetup"), icon: "setup" },
-        { href: "/privacy-policy", label: isThai ? "นโยบายความเป็นส่วนตัว" : "Privacy Policy", icon: "privacy" },
+        { href: "/privacy-policy", label: "Privacy Policy", icon: "privacy" },
         { href: "/login", label: t("navLogin"), icon: "login" }
       ]
     }

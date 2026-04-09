@@ -1421,3 +1421,81 @@ html:lang(th) .auth-title {
   }
 }
 
+
+.auto-post-shell {
+  gap: 18px;
+}
+
+.auto-post-card {
+  display: grid;
+  gap: 16px;
+}
+
+.auto-post-head {
+  align-items: flex-start;
+}
+
+.auto-post-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  font-weight: 700;
+}
+
+.auto-post-grid {
+  align-items: start;
+}
+
+.auto-post-image-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.auto-post-preview-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.composer-message-error {
+  background: rgba(209, 67, 67, 0.08);
+  border-color: rgba(209, 67, 67, 0.14);
+  color: #8b1f1f;
+}
+
+.auto-post-status-box {
+  gap: 10px;
+}
+
+.auto-post-log-item {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.52);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+}
+
+.auto-post-log-error {
+  color: #a23030;
+  font-size: 0.92rem;
+}
+
+@media (max-width: 1024px) {
+  .auto-post-image-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .auto-post-image-grid {
+    grid-template-columns: 1fr;
+  }
+}
