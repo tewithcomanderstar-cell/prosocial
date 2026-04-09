@@ -52,6 +52,16 @@ export function getSocialRedirectUri(provider: SocialProvider) {
   return process.env.FACEBOOK_AUTH_REDIRECT_URI || `${getBaseUrl()}/api/auth/facebook/callback`;
 }
 
+export function getSocialRedirectUriForRequest(provider: SocialProvider, requestOrUrl?: Request | URL | string | null) {
+  const baseUrl = getRequestBaseUrl(requestOrUrl);
+
+  if (provider === "google") {
+    return `${baseUrl}/api/auth/google/callback`;
+  }
+
+  return `${baseUrl}/api/auth/facebook/callback`;
+}
+
 export async function createOAuthState(provider: SocialProvider) {
   const state = randomUUID();
   const store = await cookies();

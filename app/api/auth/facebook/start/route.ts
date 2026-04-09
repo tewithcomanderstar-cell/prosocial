@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createOAuthState, getRequestBaseUrl, getSocialRedirectUri, setPostLoginRedirect } from "@/lib/social-auth";
+import { createOAuthState, getRequestBaseUrl, getSocialRedirectUriForRequest, setPostLoginRedirect } from "@/lib/social-auth";
 
 export async function GET(request: Request) {
   const clientId = process.env.FACEBOOK_APP_ID;
@@ -16,7 +16,7 @@ export async function GET(request: Request) {
   const state = await createOAuthState("facebook");
   const url = new URL("https://www.facebook.com/v20.0/dialog/oauth");
   url.searchParams.set("client_id", clientId);
-  url.searchParams.set("redirect_uri", getSocialRedirectUri("facebook"));
+  url.searchParams.set("redirect_uri", getSocialRedirectUriForRequest("facebook", request));
   url.searchParams.set("state", state);
   url.searchParams.set("response_type", "code");
 

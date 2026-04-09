@@ -5,7 +5,7 @@ import { logAction, logRouteError } from "@/lib/services/logging";
 import {
   buildLoginErrorUrl,
   buildLoginSuccessUrlForRequest,
-  getSocialRedirectUri,
+  getSocialRedirectUriForRequest,
   upsertSocialUser,
   verifyOAuthState
 } from "@/lib/social-auth";
@@ -81,7 +81,7 @@ export async function GET(request: Request) {
         code,
         client_id: clientId,
         client_secret: clientSecret,
-        redirect_uri: getSocialRedirectUri("google"),
+        redirect_uri: getSocialRedirectUriForRequest("google", request),
         grant_type: "authorization_code"
       })
     });
@@ -148,4 +148,5 @@ export async function GET(request: Request) {
     return NextResponse.redirect(buildLoginErrorUrl("google_login_failed", null, url.origin));
   }
 }
+
 

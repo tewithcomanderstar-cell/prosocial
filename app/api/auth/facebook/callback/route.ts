@@ -5,7 +5,7 @@ import { logAction, logRouteError } from "@/lib/services/logging";
 import {
   buildLoginErrorUrl,
   buildLoginSuccessUrlForRequest,
-  getSocialRedirectUri,
+  getSocialRedirectUriForRequest,
   upsertSocialUser,
   verifyOAuthState
 } from "@/lib/social-auth";
@@ -77,7 +77,7 @@ export async function GET(request: Request) {
     const tokenUrl = new URL("https://graph.facebook.com/v20.0/oauth/access_token");
     tokenUrl.searchParams.set("client_id", clientId);
     tokenUrl.searchParams.set("client_secret", clientSecret);
-    tokenUrl.searchParams.set("redirect_uri", getSocialRedirectUri("facebook"));
+    tokenUrl.searchParams.set("redirect_uri", getSocialRedirectUriForRequest("facebook", request));
     tokenUrl.searchParams.set("code", code);
 
     const tokenResponse = await fetch(tokenUrl);
@@ -146,4 +146,5 @@ export async function GET(request: Request) {
     return NextResponse.redirect(buildLoginErrorUrl("facebook_login_failed", null, url.origin));
   }
 }
+
 
