@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/components/language-provider";
@@ -65,56 +65,56 @@ export function PostComposerForm() {
 
   const copy = useMemo(
     () => ({
-      aiTitle: isThai ? "AI ??????????????" : "AI assistant",
-      contentTitle: isThai ? "?????????????" : "Post composer",
-      targetTitle: isThai ? "??????????????" : "Destinations and media",
-      deliveryTitle: isThai ? "??????????" : "Publishing",
-      queueTitle: isThai ? "??????????" : "Ready to post",
-      selectedPages: isThai ? "???" : "Pages",
-      selectedImages: isThai ? "???" : "Images",
-      noSelection: isThai ? "??????????????" : "Not selected",
-      noVariants: isThai ? "????????????????" : "No variants yet",
-      useVariant: isThai ? "??????????????" : "Use this",
-      saveDraft: isThai ? "??????????" : "Save draft",
-      postNow: isThai ? "??????????" : "Post now",
-      saveAuto: isThai ? "??????????????????" : "Enable auto post",
-      postingModeTitle: isThai ? "????????????????????" : "Distribution mode",
-      quickSchedule: isThai ? "????????????" : "Quick schedule",
-      quickHour1: isThai ? "??? 1 ??." : "Every 1h",
-      quickHour2: isThai ? "??? 2 ??." : "Every 2h",
-      quickHour3: isThai ? "??? 3 ??." : "Every 3h",
-      chooseTime: isThai ? "????????????" : "Schedule manually",
-      startAfterDelay: isThai ? "??????????????????" : "Start after delay",
-      delayLabel: isThai ? "????????? (????)" : "Delay (minutes)",
-      hourlyLabel: isThai ? "?????????????" : "Every how many hours",
-      usePersona: isThai ? "??? persona ??????" : "Use page persona",
-      noPersona: isThai ? "???????? persona" : "No persona",
-      broadcast: isThai ? "???????????????????" : "1 post to many pages",
-      randomPages: isThai ? "??????????????" : "Random target page",
-      imageMode: isThai ? "???????" : "Random images",
-      captionMode: isThai ? "???????????" : "Random captions",
-      autoSummary: isThai ? "?????????" : "Automated",
-      instantSummary: isThai ? "?????" : "Instant",
-      selectPagesHint: isThai ? "????????????????????????????????????????????? Facebook Business" : "Choose the pages you want to publish to.",
-      selectImagesHint: isThai ? "???????????????????????????????" : "Choose the media for this post.",
-      publishAudience: isThai ? "?????" : "Audience",
-      audiencePublic: isThai ? "???????" : "Public",
-      audienceFollowers: isThai ? "?????????" : "Followers",
-      audienceTeam: isThai ? "??????" : "Team only",
-      fbPrompt: isThai ? "???????????????????" : "What is on your mind?",
-      addToPost: isThai ? "??????????????????" : "Add to your post",
-      fbPreview: isThai ? "??????????? Facebook" : "Facebook preview",
-      postSettings: isThai ? "????????????" : "Post settings",
-      primaryPage: isThai ? "???????" : "Primary page",
-      postTitleHint: isThai ? "???????????????" : "Internal title",
-      titleOptional: isThai ? "????????????????? ????????? Facebook" : "For your internal queue only.",
-      variantsHint: isThai ? "????????????? AI ??????????????????????????????????????" : "Pick an AI variant and apply it to the post instantly.",
-      postingStatus: isThai ? "???????????????" : "Publishing status",
-      mediaEmpty: isThai ? "????????????????? ?????????????????????????????????????????? flow" : "No media selected yet.",
-      like: isThai ? "?????" : "Like",
-      comment: isThai ? "???????????????" : "Comment",
-      share: isThai ? "????" : "Share",
-      atAGlance: isThai ? "??????" : "At a glance"
+      aiTitle: isThai ? "AI \u0e0a\u0e48\u0e27\u0e22\u0e40\u0e02\u0e35\u0e22\u0e19\u0e42\u0e1e\u0e2a\u0e15\u0e4c" : "AI assistant",
+      contentTitle: isThai ? "\u0e15\u0e31\u0e27\u0e40\u0e02\u0e35\u0e22\u0e19\u0e42\u0e1e\u0e2a\u0e15\u0e4c" : "Post composer",
+      targetTitle: isThai ? "\u0e1b\u0e25\u0e32\u0e22\u0e17\u0e32\u0e07\u0e41\u0e25\u0e30\u0e2a\u0e37\u0e48\u0e2d" : "Destinations and media",
+      deliveryTitle: isThai ? "\u0e01\u0e32\u0e23\u0e40\u0e1c\u0e22\u0e41\u0e1e\u0e23\u0e48" : "Publishing",
+      queueTitle: isThai ? "\u0e1e\u0e23\u0e49\u0e2d\u0e21\u0e42\u0e1e\u0e2a\u0e15\u0e4c" : "Ready to post",
+      selectedPages: isThai ? "\u0e40\u0e1e\u0e08" : "Pages",
+      selectedImages: isThai ? "\u0e23\u0e39\u0e1b" : "Images",
+      noSelection: isThai ? "\u0e22\u0e31\u0e07\u0e44\u0e21\u0e48\u0e44\u0e14\u0e49\u0e40\u0e25\u0e37\u0e2d\u0e01" : "Not selected",
+      noVariants: isThai ? "\u0e22\u0e31\u0e07\u0e44\u0e21\u0e48\u0e21\u0e35\u0e15\u0e31\u0e27\u0e40\u0e25\u0e37\u0e2d\u0e01" : "No variants yet",
+      useVariant: isThai ? "\u0e43\u0e0a\u0e49\u0e15\u0e31\u0e27\u0e40\u0e25\u0e37\u0e2d\u0e01\u0e19\u0e35\u0e49" : "Use this",
+      saveDraft: isThai ? "\u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01\u0e23\u0e48\u0e32\u0e07" : "Save draft",
+      postNow: isThai ? "\u0e42\u0e1e\u0e2a\u0e15\u0e4c\u0e17\u0e31\u0e19\u0e17\u0e35" : "Post now",
+      saveAuto: isThai ? "\u0e15\u0e31\u0e49\u0e07\u0e42\u0e1e\u0e2a\u0e15\u0e4c\u0e2d\u0e31\u0e15\u0e42\u0e19\u0e21\u0e31\u0e15\u0e34" : "Enable auto post",
+      postingModeTitle: isThai ? "\u0e23\u0e39\u0e1b\u0e41\u0e1a\u0e1a\u0e01\u0e32\u0e23\u0e01\u0e23\u0e30\u0e08\u0e32\u0e22\u0e42\u0e1e\u0e2a\u0e15\u0e4c" : "Distribution mode",
+      quickSchedule: isThai ? "\u0e15\u0e31\u0e49\u0e07\u0e40\u0e27\u0e25\u0e32\u0e40\u0e23\u0e47\u0e27" : "Quick schedule",
+      quickHour1: isThai ? "\u0e17\u0e38\u0e01 1 \u0e0a\u0e21." : "Every 1h",
+      quickHour2: isThai ? "\u0e17\u0e38\u0e01 2 \u0e0a\u0e21." : "Every 2h",
+      quickHour3: isThai ? "\u0e17\u0e38\u0e01 3 \u0e0a\u0e21." : "Every 3h",
+      chooseTime: isThai ? "\u0e01\u0e33\u0e2b\u0e19\u0e14\u0e40\u0e27\u0e25\u0e32\u0e40\u0e2d\u0e07" : "Schedule manually",
+      startAfterDelay: isThai ? "\u0e40\u0e23\u0e34\u0e48\u0e21\u0e2b\u0e25\u0e31\u0e07\u0e2b\u0e19\u0e48\u0e27\u0e07\u0e40\u0e27\u0e25\u0e32" : "Start after delay",
+      delayLabel: isThai ? "\u0e2b\u0e19\u0e48\u0e27\u0e07\u0e40\u0e27\u0e25\u0e32 (\u0e19\u0e32\u0e17\u0e35)" : "Delay (minutes)",
+      hourlyLabel: isThai ? "\u0e17\u0e38\u0e01\u0e01\u0e35\u0e48\u0e0a\u0e31\u0e48\u0e27\u0e42\u0e21\u0e07" : "Every how many hours",
+      usePersona: isThai ? "\u0e43\u0e0a\u0e49 persona \u0e02\u0e2d\u0e07\u0e40\u0e1e\u0e08" : "Use page persona",
+      noPersona: isThai ? "\u0e44\u0e21\u0e48\u0e40\u0e25\u0e37\u0e2d\u0e01 persona" : "No persona",
+      broadcast: isThai ? "\u0e42\u0e1e\u0e2a\u0e15\u0e4c\u0e40\u0e14\u0e35\u0e22\u0e27\u0e25\u0e07\u0e2b\u0e25\u0e32\u0e22\u0e40\u0e1e\u0e08" : "1 post to many pages",
+      randomPages: isThai ? "\u0e2a\u0e38\u0e48\u0e21\u0e40\u0e1e\u0e08\u0e1b\u0e25\u0e32\u0e22\u0e17\u0e32\u0e07" : "Random target page",
+      imageMode: isThai ? "\u0e2a\u0e38\u0e48\u0e21\u0e23\u0e39\u0e1b" : "Random images",
+      captionMode: isThai ? "\u0e2a\u0e38\u0e48\u0e21\u0e02\u0e49\u0e2d\u0e04\u0e27\u0e32\u0e21" : "Random captions",
+      autoSummary: isThai ? "\u0e2d\u0e31\u0e15\u0e42\u0e19\u0e21\u0e31\u0e15\u0e34" : "Automated",
+      instantSummary: isThai ? "\u0e17\u0e31\u0e19\u0e17\u0e35" : "Instant",
+      selectPagesHint: isThai ? "\u0e40\u0e25\u0e37\u0e2d\u0e01\u0e40\u0e1e\u0e08\u0e17\u0e35\u0e48\u0e08\u0e30\u0e25\u0e07\u0e42\u0e1e\u0e2a\u0e15\u0e4c\u0e41\u0e1a\u0e1a\u0e40\u0e14\u0e35\u0e22\u0e27\u0e01\u0e31\u0e1a\u0e40\u0e25\u0e37\u0e2d\u0e01\u0e1b\u0e25\u0e32\u0e22\u0e17\u0e32\u0e07\u0e43\u0e19 Facebook Business" : "Choose the pages you want to publish to.",
+      selectImagesHint: isThai ? "\u0e40\u0e25\u0e37\u0e2d\u0e01\u0e23\u0e39\u0e1b\u0e17\u0e35\u0e48\u0e15\u0e49\u0e2d\u0e07\u0e01\u0e32\u0e23\u0e43\u0e0a\u0e49\u0e43\u0e19\u0e42\u0e1e\u0e2a\u0e15\u0e4c\u0e19\u0e35\u0e49" : "Choose the media for this post.",
+      publishAudience: isThai ? "\u0e1c\u0e39\u0e49\u0e0a\u0e21" : "Audience",
+      audiencePublic: isThai ? "\u0e2a\u0e32\u0e18\u0e32\u0e23\u0e13\u0e30" : "Public",
+      audienceFollowers: isThai ? "\u0e1c\u0e39\u0e49\u0e15\u0e34\u0e14\u0e15\u0e32\u0e21" : "Followers",
+      audienceTeam: isThai ? "\u0e17\u0e35\u0e21\u0e07\u0e32\u0e19" : "Team only",
+      fbPrompt: isThai ? "\u0e04\u0e38\u0e13\u0e01\u0e33\u0e25\u0e31\u0e07\u0e04\u0e34\u0e14\u0e2d\u0e30\u0e44\u0e23\u0e2d\u0e22\u0e39\u0e48" : "What is on your mind?",
+      addToPost: isThai ? "\u0e40\u0e1e\u0e34\u0e48\u0e21\u0e43\u0e19\u0e42\u0e1e\u0e2a\u0e15\u0e4c\u0e02\u0e2d\u0e07\u0e04\u0e38\u0e13" : "Add to your post",
+      fbPreview: isThai ? "\u0e15\u0e31\u0e27\u0e2d\u0e22\u0e48\u0e32\u0e07\u0e41\u0e1a\u0e1a Facebook" : "Facebook preview",
+      postSettings: isThai ? "\u0e15\u0e31\u0e49\u0e07\u0e04\u0e48\u0e32\u0e42\u0e1e\u0e2a\u0e15\u0e4c" : "Post settings",
+      primaryPage: isThai ? "\u0e40\u0e1e\u0e08\u0e2b\u0e25\u0e31\u0e01" : "Primary page",
+      postTitleHint: isThai ? "\u0e2b\u0e31\u0e27\u0e02\u0e49\u0e2d\u0e20\u0e32\u0e22\u0e43\u0e19\u0e23\u0e30\u0e1a\u0e1a" : "Internal title",
+      titleOptional: isThai ? "\u0e43\u0e0a\u0e49\u0e08\u0e31\u0e14\u0e01\u0e32\u0e23\u0e04\u0e34\u0e27\u0e20\u0e32\u0e22\u0e43\u0e19 \u0e44\u0e21\u0e48\u0e41\u0e2a\u0e14\u0e07\u0e43\u0e19 Facebook" : "For your internal queue only.",
+      variantsHint: isThai ? "\u0e40\u0e25\u0e37\u0e2d\u0e01\u0e2a\u0e44\u0e15\u0e25\u0e4c\u0e17\u0e35\u0e48 AI \u0e2a\u0e23\u0e49\u0e32\u0e07\u0e41\u0e25\u0e49\u0e27\u0e14\u0e36\u0e07\u0e21\u0e32\u0e43\u0e2a\u0e48\u0e42\u0e1e\u0e2a\u0e15\u0e4c\u0e14\u0e49\u0e32\u0e19\u0e0b\u0e49\u0e32\u0e22\u0e44\u0e14\u0e49\u0e17\u0e31\u0e19\u0e17\u0e35" : "Pick an AI variant and apply it to the post instantly.",
+      postingStatus: isThai ? "\u0e2a\u0e16\u0e32\u0e19\u0e30\u0e01\u0e32\u0e23\u0e40\u0e1c\u0e22\u0e41\u0e1e\u0e23\u0e48" : "Publishing status",
+      mediaEmpty: isThai ? "\u0e22\u0e31\u0e07\u0e44\u0e21\u0e48\u0e44\u0e14\u0e49\u0e40\u0e25\u0e37\u0e2d\u0e01\u0e23\u0e39\u0e1b \u0e23\u0e30\u0e1a\u0e1a\u0e08\u0e30\u0e42\u0e1e\u0e2a\u0e15\u0e4c\u0e41\u0e1a\u0e1a\u0e02\u0e49\u0e2d\u0e04\u0e27\u0e32\u0e21\u0e2b\u0e23\u0e37\u0e2d\u0e43\u0e0a\u0e49\u0e04\u0e48\u0e32\u0e40\u0e23\u0e34\u0e48\u0e21\u0e15\u0e49\u0e19\u0e15\u0e32\u0e21 flow" : "No media selected yet.",
+      like: isThai ? "\u0e16\u0e39\u0e01\u0e43\u0e08" : "Like",
+      comment: isThai ? "\u0e41\u0e2a\u0e14\u0e07\u0e04\u0e27\u0e32\u0e21\u0e04\u0e34\u0e14\u0e40\u0e2b\u0e47\u0e19" : "Comment",
+      share: isThai ? "\u0e41\u0e0a\u0e23\u0e4c" : "Share",
+      atAGlance: isThai ? "\u0e20\u0e32\u0e1e\u0e23\u0e27\u0e21" : "At a glance"
     }),
     [isThai]
   );
@@ -134,7 +134,7 @@ export function PostComposerForm() {
     return [form.content.trim(), hashtagText].filter(Boolean).join("\n\n");
   }, [form.content, form.hashtags]);
 
-  const primaryPageName = selectedPages[0]?.name || (isThai ? "????????????????? 1 ???" : "Choose at least one page");
+  const primaryPageName = selectedPages[0]?.name || (isThai ? "\u0e40\u0e25\u0e37\u0e2d\u0e01\u0e40\u0e1e\u0e08\u0e2d\u0e22\u0e48\u0e32\u0e07\u0e19\u0e49\u0e2d\u0e22 1 \u0e40\u0e1e\u0e08" : "Choose at least one page");
 
   function buildPayload() {
     return {
@@ -255,12 +255,12 @@ export function PostComposerForm() {
 
   async function handleAction(mode: ActionMode) {
     if (!form.title || !form.content || form.targetPageIds.length === 0) {
-      setMessage(isThai ? "????????????? ??????? ???????????????????? 1 ???????" : "Please enter a title, content, and choose at least one target page.");
+      setMessage(isThai ? "\u0e01\u0e23\u0e2d\u0e01\u0e0a\u0e37\u0e48\u0e2d\u0e42\u0e1e\u0e2a\u0e15\u0e4c \u0e02\u0e49\u0e2d\u0e04\u0e27\u0e32\u0e21 \u0e41\u0e25\u0e30\u0e40\u0e25\u0e37\u0e2d\u0e01\u0e40\u0e1e\u0e08\u0e2d\u0e22\u0e48\u0e32\u0e07\u0e19\u0e49\u0e2d\u0e22 1 \u0e40\u0e1e\u0e08\u0e01\u0e48\u0e2d\u0e19" : "Please enter a title, content, and choose at least one target page.");
       return;
     }
 
     if (mode === "auto" && form.startMode === "scheduled" && !form.runAt) {
-      setMessage(isThai ? "??????????????????????????????????????" : "Please choose the posting time for auto mode.");
+      setMessage(isThai ? "\u0e01\u0e23\u0e38\u0e13\u0e32\u0e40\u0e25\u0e37\u0e2d\u0e01\u0e40\u0e27\u0e25\u0e32\u0e42\u0e1e\u0e2a\u0e15\u0e4c\u0e2a\u0e33\u0e2b\u0e23\u0e31\u0e1a\u0e42\u0e2b\u0e21\u0e14\u0e2d\u0e31\u0e15\u0e42\u0e19\u0e21\u0e31\u0e15\u0e34" : "Please choose the posting time for auto mode.");
       return;
     }
 
@@ -290,13 +290,13 @@ export function PostComposerForm() {
           </div>
           <div className="composer-actions">
             <button className="button-secondary" type="button" disabled={saving !== null} onClick={() => handleAction("draft")}>
-              {saving === "draft" ? (isThai ? "???????????..." : "Saving...") : copy.saveDraft}
+              {saving === "draft" ? (isThai ? "\u0e01\u0e33\u0e25\u0e31\u0e07\u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01..." : "Saving...") : copy.saveDraft}
             </button>
             <button className="button-secondary" type="button" disabled={saving !== null} onClick={() => handleAction("auto")}>
-              {saving === "auto" ? (isThai ? "????????????..." : "Scheduling...") : copy.saveAuto}
+              {saving === "auto" ? (isThai ? "\u0e01\u0e33\u0e25\u0e31\u0e07\u0e15\u0e31\u0e49\u0e07\u0e04\u0e34\u0e27..." : "Scheduling...") : copy.saveAuto}
             </button>
             <button className="button" type="button" disabled={saving !== null} onClick={() => handleAction("instant")}>
-              {saving === "instant" ? (isThai ? "??????????..." : "Posting...") : copy.postNow}
+              {saving === "instant" ? (isThai ? "\u0e01\u0e33\u0e25\u0e31\u0e07\u0e42\u0e1e\u0e2a\u0e15\u0e4c..." : "Posting...") : copy.postNow}
             </button>
           </div>
         </div>
@@ -314,16 +314,16 @@ export function PostComposerForm() {
             <span>{copy.postingStatus}</span>
             <strong>
               {form.frequency === "hourly"
-                ? `${form.intervalHours}${isThai ? " ??." : "h"}`
+                ? `${form.intervalHours}${isThai ? " \u0e0a\u0e21." : "h"}`
                 : form.frequency === "daily"
-                  ? (isThai ? "??????" : "Daily")
+                  ? (isThai ? "\u0e23\u0e32\u0e22\u0e27\u0e31\u0e19" : "Daily")
                   : form.frequency === "weekly"
-                    ? (isThai ? "??????????" : "Weekly")
-                    : (isThai ? "??????????" : "Once")}
+                    ? (isThai ? "\u0e23\u0e32\u0e22\u0e2a\u0e31\u0e1b\u0e14\u0e32\u0e2b\u0e4c" : "Weekly")
+                    : (isThai ? "\u0e04\u0e23\u0e31\u0e49\u0e07\u0e40\u0e14\u0e35\u0e22\u0e27" : "Once")}
             </strong>
           </div>
           <div className="summary-pill">
-            <span>{isThai ? "????" : "Mode"}</span>
+            <span>{isThai ? "\u0e42\u0e2b\u0e21\u0e14" : "Mode"}</span>
             <strong>{form.startMode === "delay" || form.runAt ? copy.autoSummary : copy.instantSummary}</strong>
           </div>
         </div>
@@ -359,7 +359,7 @@ export function PostComposerForm() {
                   className="textarea composer-facebook-textarea"
                   value={form.content}
                   onChange={(e) => setForm({ ...form, content: e.target.value })}
-                  placeholder={`${copy.fbPrompt} ${primaryPageName}${isThai ? "?" : "?"}`}
+                  placeholder={`${copy.fbPrompt} ${primaryPageName}?`}
                   required
                 />
               </label>
@@ -434,7 +434,7 @@ export function PostComposerForm() {
             <div className="variants">
               {variants.map((variant, index) => (
                 <article key={index} className="variant stack">
-                  <strong>{isThai ? `???????? ${index + 1}` : `Option ${index + 1}`}</strong>
+                  <strong>{isThai ? `\u0e15\u0e31\u0e27\u0e40\u0e25\u0e37\u0e2d\u0e01 ${index + 1}` : `Option ${index + 1}`}</strong>
                   <p>{variant.caption}</p>
                   <p className="muted">{variant.hashtags.join(" ")}</p>
                   <button className="button-secondary" type="button" onClick={() => applyVariant(variant)}>
@@ -521,7 +521,7 @@ export function PostComposerForm() {
                 </button>
                 <button type="button" className={`mode-card ${form.startMode === "delay" ? "active" : ""}`} onClick={() => setForm({ ...form, startMode: "delay" })}>
                   <strong>{copy.startAfterDelay}</strong>
-                  <span>{form.delayMinutes}{isThai ? " ????" : " min"}</span>
+                  <span>{form.delayMinutes}{isThai ? " \u0e19\u0e32\u0e17\u0e35" : " min"}</span>
                 </button>
               </div>
 
@@ -538,10 +538,10 @@ export function PostComposerForm() {
               )}
 
               <label className="label">
-                {isThai ? "?????????????????" : "Repeat"}
+                {isThai ? "\u0e23\u0e39\u0e1b\u0e41\u0e1a\u0e1a\u0e01\u0e32\u0e23\u0e42\u0e1e\u0e2a\u0e15\u0e4c\u0e0b\u0e49\u0e33" : "Repeat"}
                 <select className="select" value={form.frequency} onChange={(e) => setForm({ ...form, frequency: e.target.value })}>
                   <option value="once">{t("scheduleOneTime")}</option>
-                  <option value="hourly">{isThai ? "??? X ???????" : "Every X hours"}</option>
+                  <option value="hourly">{isThai ? "\u0e17\u0e38\u0e01 X \u0e0a\u0e31\u0e48\u0e27\u0e42\u0e21\u0e07" : "Every X hours"}</option>
                   <option value="daily">{t("scheduleEveryDay")}</option>
                   <option value="weekly">{t("scheduleEveryWeek")}</option>
                 </select>
@@ -551,9 +551,9 @@ export function PostComposerForm() {
                 <label className="label">
                   {copy.hourlyLabel}
                   <select className="select" value={form.intervalHours} onChange={(e) => setForm({ ...form, intervalHours: Number(e.target.value) })}>
-                    <option value="1">1 {isThai ? "???????" : "hour"}</option>
-                    <option value="2">2 {isThai ? "???????" : "hours"}</option>
-                    <option value="3">3 {isThai ? "???????" : "hours"}</option>
+                    <option value="1">1 {isThai ? "\u0e0a\u0e31\u0e48\u0e27\u0e42\u0e21\u0e07" : "hour"}</option>
+                    <option value="2">2 {isThai ? "\u0e0a\u0e31\u0e48\u0e27\u0e42\u0e21\u0e07" : "hours"}</option>
+                    <option value="3">3 {isThai ? "\u0e0a\u0e31\u0e48\u0e27\u0e42\u0e21\u0e07" : "hours"}</option>
                   </select>
                 </label>
               ) : null}
