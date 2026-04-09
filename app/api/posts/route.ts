@@ -15,6 +15,8 @@ type SettingsShape = {
   pageLimitOverride?: number | null;
 };
 
+const MAX_TARGET_PAGES = 10;
+
 const schema = z.object({
   title: z.string().min(2),
   content: z.string().min(2),
@@ -47,10 +49,11 @@ export async function POST(request: Request) {
     const { userId } = await requireRole(["admin", "editor"]);
     const payload = parseBody(schema, await request.json());
     const { settings, user } = await getUserSettings(userId);
-    const pageLimit = getEffectivePageLimit((user ?? {}) as UserPlanShape, (settings ?? {}) as SettingsShape);
+    const planLimit = getEffectivePageLimit((user ?? {}) as UserPlanShape, (settings ?? {}) as SettingsShape);
+    const allowedTargetPages = Math.max(planLimit, MAX_TARGET_PAGES);
 
-    if (payload.targetPageIds.length > pageLimit) {
-      return jsonError(`Your plan allows up to ${pageLimit} target pages per post.`);
+    if (payload.targetPageIds.length > allowedTargetPages) {
+      return jsonError(`You can post to up to ${allowedTargetPages} pages at once.`);
     }
 
     const fingerprint = contentFingerprint(payload);
@@ -75,7 +78,7 @@ export async function POST(request: Request) {
       metadata: { targetPageCount: payload.targetPageIds.length }
     });
 
-    return jsonOk({ postId: String(post._id) }, "Post saved");
+    return jsonOk({ postId: String(post._id) }, `Post saved for ${payload.targetPageIds.length} page(s)`);
   } catch (error) {
     return handleRoleError(error);
   }

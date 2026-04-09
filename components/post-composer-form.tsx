@@ -22,6 +22,8 @@ type PreviewImage = UploadedImage & {
 type ActionMode = "instant" | "schedule";
 type MessageTone = "info" | "success" | "error";
 
+const MAX_TARGET_PAGES = 10;
+
 function buildInternalTitle(content: string) {
   const normalized = content.trim().replace(/\s+/g, " ");
   if (!normalized) {
@@ -74,7 +76,9 @@ export function PostComposerForm() {
       emptyImages: isThai ? "ยังไม่ได้เลือกรูป" : "No images selected yet",
       removeImage: isThai ? "ลบรูป" : "Remove image",
       pageLabel: isThai ? "เลือกเพจ" : "Select pages",
-      pageHint: isThai ? "เลือกอย่างน้อย 1 เพจสำหรับโพสต์นี้" : "Choose at least one page for this post.",
+      pageHint: isThai ? "เลือกอย่างน้อย 1 เพจ และได้สูงสุด 10 เพจต่อโพสต์" : "Choose at least one page, up to 10 pages per post.",
+      pageLimitReached: isThai ? "เลือกได้สูงสุด 10 เพจต่อโพสต์" : "You can select up to 10 pages per post.",
+      selectedPages: isThai ? "เลือกแล้ว" : "Selected",
       noSelection: isThai ? "ยังไม่มีเพจที่เชื่อมไว้" : "No connected pages yet.",
       scheduleLabel: isThai ? "ตั้งเวลาโพสต์" : "Schedule",
       scheduleHint: isThai ? "ถ้าไม่ตั้งเวลา คุณยังโพสต์ทันทีได้" : "Leave blank if you want to post right away.",
@@ -88,8 +92,9 @@ export function PostComposerForm() {
       needSchedule: isThai ? "กรุณาเลือกวันและเวลาสำหรับการตั้งเวลาโพสต์" : "Please choose a date and time for scheduling.",
       uploadFailed: isThai ? "อัปโหลดรูปไม่สำเร็จ กรุณาลองใหม่" : "Image upload failed. Please try again.",
       uploadSuccess: isThai ? "อัปโหลดรูปเรียบร้อยแล้ว" : "Images uploaded successfully.",
-      instantSuccess: isThai ? "เริ่มโพสต์แล้ว ระบบกำลังส่งไปยังเพจที่เลือก" : "Post request started for the selected pages.",
-      scheduleSuccess: isThai ? "ตั้งเวลาโพสต์เรียบร้อยแล้ว" : "Post scheduled successfully.",
+      instantSuccess: isThai ? "เริ่มโพสต์แล้ว ระบบกำลังส่งไปยัง" : "Post request started for",
+      scheduleSuccess: isThai ? "ตั้งเวลาโพสต์เรียบร้อยแล้วสำหรับ" : "Post scheduled for",
+      pageUnit: isThai ? "เพจ" : "pages",
       instantFailed: isThai ? "โพสต์ทันทีไม่สำเร็จ กรุณาลองใหม่" : "Unable to start posting. Please try again.",
       scheduleFailed: isThai ? "ตั้งเวลาโพสต์ไม่สำเร็จ กรุณาลองใหม่" : "Unable to schedule the post. Please try again."
     }),
@@ -113,9 +118,18 @@ export function PostComposerForm() {
   }
 
   function togglePage(pageId: string) {
-    setSelectedPageIds((current) =>
-      current.includes(pageId) ? current.filter((item) => item !== pageId) : [...current, pageId]
-    );
+    setSelectedPageIds((current) => {
+      if (current.includes(pageId)) {
+        return current.filter((item) => item !== pageId);
+      }
+
+      if (current.length >= MAX_TARGET_PAGES) {
+        setFeedback(copy.pageLimitReached, "error");
+        return current;
+      }
+
+      return [...current, pageId];
+    });
   }
 
   async function handleUploadFiles(event: ChangeEvent<HTMLInputElement>) {
@@ -181,6 +195,7 @@ export function PostComposerForm() {
   }
 
   async function submitInstant() {
+    const targetCount = selectedPageIds.length;
     const response = await fetch("/api/posts/instant", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -194,10 +209,11 @@ export function PostComposerForm() {
     }
 
     resetComposer();
-    setFeedback(copy.instantSuccess, "success");
+    setFeedback(`${copy.instantSuccess} ${targetCount} ${copy.pageUnit}`, "success");
   }
 
   async function submitSchedule() {
+    const targetCount = selectedPageIds.length;
     const postResponse = await fetch("/api/posts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -229,7 +245,7 @@ export function PostComposerForm() {
     }
 
     resetComposer();
-    setFeedback(copy.scheduleSuccess, "success");
+    setFeedback(`${copy.scheduleSuccess} ${targetCount} ${copy.pageUnit}`, "success");
   }
 
   async function handleAction(mode: ActionMode) {
@@ -240,6 +256,11 @@ export function PostComposerForm() {
 
     if (selectedPageIds.length === 0) {
       setFeedback(copy.needPage, "error");
+      return;
+    }
+
+    if (selectedPageIds.length > MAX_TARGET_PAGES) {
+      setFeedback(copy.pageLimitReached, "error");
       return;
     }
 
@@ -327,15 +348,20 @@ export function PostComposerForm() {
           <label className="label">
             <span>{copy.pageLabel}</span>
             <span className="label-hint">{copy.pageHint}</span>
+            <span className="label-hint">
+              {copy.selectedPages} {selectedPageIds.length}/{MAX_TARGET_PAGES}
+            </span>
             <div className="chip-grid">
               {pages.map((page) => {
                 const active = selectedPageIds.includes(page.pageId);
+                const disabled = !active && selectedPageIds.length >= MAX_TARGET_PAGES;
                 return (
                   <button
                     key={page.pageId}
                     type="button"
                     className={`choice-chip ${active ? "active" : ""}`}
                     onClick={() => togglePage(page.pageId)}
+                    disabled={disabled}
                   >
                     {page.name}
                   </button>
