@@ -24,8 +24,20 @@ const autoPostConfigSchema = new Schema(
       enum: ["th", "en"],
       default: "th"
     },
+    autoPostStatus: {
+      type: String,
+      enum: ["idle", "running", "posting", "success", "failed", "retrying", "paused"],
+      default: "paused",
+      index: true
+    },
+    jobStatus: {
+      type: String,
+      enum: ["pending", "processing", "posted", "failed"],
+      default: "pending"
+    },
     nextRunAt: { type: Date, default: Date.now, index: true },
     lastRunAt: { type: Date },
+    retryCount: { type: Number, default: 0 },
     lastStatus: {
       type: String,
       enum: ["pending", "posted", "failed", "paused"],

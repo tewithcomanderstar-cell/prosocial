@@ -8,6 +8,9 @@ import { generateFacebookContent } from "@/lib/services/ai";
 import { logAction, logAndNotifyError } from "@/lib/services/logging";
 import { randomItem } from "@/lib/utils";
 
+type AutoPostStatus = "idle" | "running" | "posting" | "success" | "failed" | "retrying" | "paused";
+type JobStatus = "pending" | "processing" | "posted" | "failed";
+
 type LeanAutoPostConfig = {
   _id: string;
   userId: string;
@@ -49,6 +52,24 @@ function getRandomDelayMinutes(minMinutes = 0, maxMinutes = 0) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+async function updateAutoPostState(
+  configId: string,
+  updates: Partial<{
+    autoPostStatus: AutoPostStatus;
+    jobStatus: JobStatus;
+    lastRunAt: Date;
+    nextRunAt: Date;
+    lastError: string | null;
+    retryCount: number;
+    lastPostId: unknown;
+    lastSelectedImageId: string | null;
+    enabled: boolean;
+    lastStatus: "pending" | "posted" | "failed" | "paused";
+  }>
+) {
+  await AutoPostConfig.findByIdAndUpdate(configId, updates);
+}
+
 async function countSuccessfulAutoPostsToday(userId: string, configId: string, pageId?: string) {
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
@@ -72,7 +93,7 @@ async function buildCaption(config: LeanAutoPostConfig, image: DriveImage) {
   const strategy = config.captionStrategy ?? "hybrid";
 
   if (strategy === "manual") {
-    return manualCaption || `????????? ${config.folderName || "Google Drive"}`;
+    return manualCaption || `Fresh content from ${config.folderName || "Google Drive"}`;
   }
 
   const keyword = config.aiPrompt?.trim() || image.name || config.folderName || "Google Drive";
@@ -81,9 +102,9 @@ async function buildCaption(config: LeanAutoPostConfig, image: DriveImage) {
     const variants = await generateFacebookContent(
       keyword,
       {
-        audience: config.language === "en" ? "general audience" : "????????????",
+        audience: config.language === "en" ? "general audience" : "general audience",
         contentStyle: "social post",
-        tone: config.language === "en" ? "friendly" : "??????????",
+        tone: config.language === "en" ? "friendly" : "friendly",
         pageName: "Auto Post"
       },
       config.userId
@@ -103,7 +124,7 @@ async function buildCaption(config: LeanAutoPostConfig, image: DriveImage) {
 
   return config.language === "en"
     ? `Fresh update from ${config.folderName || "your Google Drive"}`
-    : `???????????????? ${config.folderName || "Google Drive ??????"}`;
+    : `Fresh update from ${config.folderName || "your Google Drive"}`;
 }
 
 export async function processDueAutoPosts() {
@@ -115,12 +136,25 @@ export async function processDueAutoPosts() {
   let processed = 0;
 
   for (const config of configs) {
+    const nextRunAt = getNextAutoRun(config.intervalHours);
+
     try {
+      await updateAutoPostState(config._id, {
+        autoPostStatus: "running",
+        jobStatus: "pending",
+        lastError: null
+      });
+
       if (!config.targetPageIds.length) {
-        await AutoPostConfig.findByIdAndUpdate(config._id, {
+        await updateAutoPostState(config._id, {
           enabled: false,
+          autoPostStatus: "failed",
+          jobStatus: "failed",
           lastStatus: "failed",
-          lastError: "??????????????????????? Auto Post"
+          lastError: "No Facebook pages selected for Auto Post",
+          lastRunAt: new Date(),
+          nextRunAt,
+          retryCount: 0
         });
         await logAndNotifyError({
           userId: config.userId,
@@ -132,10 +166,14 @@ export async function processDueAutoPosts() {
 
       const totalToday = await countSuccessfulAutoPostsToday(config.userId, config._id);
       if (totalToday >= (config.maxPostsPerDay ?? 12)) {
-        await AutoPostConfig.findByIdAndUpdate(config._id, {
-          nextRunAt: getNextAutoRun(config.intervalHours),
+        await updateAutoPostState(config._id, {
+          autoPostStatus: "idle",
+          jobStatus: "pending",
           lastStatus: "pending",
-          lastError: "????????????????????????????????"
+          lastError: "Daily Auto Post limit reached",
+          lastRunAt: new Date(),
+          nextRunAt,
+          retryCount: 0
         });
         continue;
       }
@@ -143,10 +181,14 @@ export async function processDueAutoPosts() {
       const pageId = randomItem(config.targetPageIds);
       const pageCount = await countSuccessfulAutoPostsToday(config.userId, config._id, pageId);
       if (pageCount >= (config.maxPostsPerPagePerDay ?? 4)) {
-        await AutoPostConfig.findByIdAndUpdate(config._id, {
-          nextRunAt: getNextAutoRun(config.intervalHours),
+        await updateAutoPostState(config._id, {
+          autoPostStatus: "idle",
+          jobStatus: "pending",
           lastStatus: "pending",
-          lastError: "???????????????????????????????????????????"
+          lastError: "Per-page daily Auto Post limit reached",
+          lastRunAt: new Date(),
+          nextRunAt,
+          retryCount: 0
         });
         continue;
       }
@@ -158,10 +200,14 @@ export async function processDueAutoPosts() {
       const images = folderPayload.files.filter((file) => (file.mimeType || "").includes("image/"));
 
       if (!images.length) {
-        await AutoPostConfig.findByIdAndUpdate(config._id, {
-          nextRunAt: getNextAutoRun(config.intervalHours),
+        await updateAutoPostState(config._id, {
+          autoPostStatus: "failed",
+          jobStatus: "failed",
           lastStatus: "failed",
-          lastError: "???????? JPG/PNG ??????????????????"
+          lastError: "No JPG or PNG images found in the selected folder",
+          lastRunAt: new Date(),
+          nextRunAt,
+          retryCount: 0
         });
         await logAndNotifyError({
           userId: config.userId,
@@ -175,6 +221,17 @@ export async function processDueAutoPosts() {
       const caption = await buildCaption(config, chosenImage);
       const delayMinutes = getRandomDelayMinutes(config.minRandomDelayMinutes ?? 0, config.maxRandomDelayMinutes ?? 0);
       const startAt = new Date(Date.now() + delayMinutes * 60 * 1000);
+
+      await updateAutoPostState(config._id, {
+        autoPostStatus: "posting",
+        jobStatus: "pending",
+        lastStatus: "pending",
+        lastError: null,
+        lastRunAt: new Date(),
+        nextRunAt,
+        retryCount: 0,
+        lastSelectedImageId: chosenImage.id
+      });
 
       const post = await Post.create({
         userId: config.userId,
@@ -202,11 +259,14 @@ export async function processDueAutoPosts() {
         }
       });
 
-      await AutoPostConfig.findByIdAndUpdate(config._id, {
-        lastRunAt: new Date(),
-        nextRunAt: getNextAutoRun(config.intervalHours),
+      await updateAutoPostState(config._id, {
+        autoPostStatus: "posting",
+        jobStatus: "pending",
         lastStatus: "pending",
         lastError: null,
+        lastRunAt: new Date(),
+        nextRunAt,
+        retryCount: 0,
         lastPostId: post._id,
         lastSelectedImageId: chosenImage.id
       });
@@ -223,15 +283,19 @@ export async function processDueAutoPosts() {
           imageId: chosenImage.id,
           queued,
           targetPageId: pageId,
-          scheduledDelayMinutes: delayMinutes
+          scheduledDelayMinutes: delayMinutes,
+          autoPostStatus: "posting",
+          jobStatus: "pending"
         }
       });
 
       processed += queued;
     } catch (error) {
-      await AutoPostConfig.findByIdAndUpdate(config._id, {
+      await updateAutoPostState(config._id, {
         lastRunAt: new Date(),
-        nextRunAt: getNextAutoRun(config.intervalHours),
+        nextRunAt,
+        autoPostStatus: "failed",
+        jobStatus: "failed",
         lastStatus: "failed",
         lastError: error instanceof Error ? error.message : "Auto Post failed"
       });

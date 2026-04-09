@@ -1,6 +1,9 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+
+type AutoPostStatus = "idle" | "running" | "posting" | "success" | "failed" | "retrying" | "paused";
+type AutoPostJobStatus = "pending" | "processing" | "posted" | "failed" | "retrying";
 
 type AutoPostConfig = {
   enabled: boolean;
@@ -16,10 +19,12 @@ type AutoPostConfig = {
   captions: string[];
   aiPrompt: string;
   language: "th" | "en";
+  autoPostStatus?: AutoPostStatus;
+  jobStatus?: AutoPostJobStatus;
   nextRunAt?: string;
   lastRunAt?: string;
-  lastStatus?: "pending" | "posted" | "failed" | "paused";
   lastError?: string | null;
+  retryCount?: number;
   lastSelectedImageId?: string | null;
 };
 
@@ -40,10 +45,15 @@ type FacebookPage = {
 
 type JobLog = {
   _id: string;
-  targetPageId?: string;
-  status: string;
+  targetPageId?: string | null;
+  status: AutoPostJobStatus;
+  rawStatus?: string;
   createdAt?: string;
-  lastError?: string;
+  processingStartedAt?: string;
+  completedAt?: string;
+  lastError?: string | null;
+  retryCount?: number;
+  maxAttempts?: number;
 };
 
 const defaults: AutoPostConfig = {
@@ -59,8 +69,86 @@ const defaults: AutoPostConfig = {
   captionStrategy: "hybrid",
   captions: [],
   aiPrompt: "",
-  language: "th"
+  language: "th",
+  autoPostStatus: "paused",
+  jobStatus: "pending",
+  retryCount: 0
 };
+
+function formatDateTime(value?: string) {
+  if (!value) return "-";
+  return new Date(value).toLocaleString();
+}
+
+function statusLabel(status?: AutoPostStatus) {
+  switch (status) {
+    case "running":
+      return "Running";
+    case "posting":
+      return "Posting";
+    case "success":
+      return "Success";
+    case "failed":
+      return "Failed";
+    case "retrying":
+      return "Retrying";
+    case "idle":
+      return "Idle";
+    case "paused":
+    default:
+      return "Paused";
+  }
+}
+
+function statusTone(status?: AutoPostStatus) {
+  switch (status) {
+    case "running":
+    case "posting":
+      return "badge-info";
+    case "success":
+      return "badge-success";
+    case "failed":
+      return "badge-warn";
+    case "retrying":
+      return "badge-neutral";
+    case "idle":
+      return "badge-neutral";
+    case "paused":
+    default:
+      return "badge-neutral";
+  }
+}
+
+function jobLabel(status: AutoPostJobStatus) {
+  switch (status) {
+    case "pending":
+      return "Pending";
+    case "processing":
+      return "Processing";
+    case "posted":
+      return "Posted";
+    case "retrying":
+      return "Retrying";
+    case "failed":
+    default:
+      return "Failed";
+  }
+}
+
+function jobTone(status: AutoPostJobStatus) {
+  switch (status) {
+    case "processing":
+      return "badge-info";
+    case "posted":
+      return "badge-success";
+    case "retrying":
+    case "pending":
+      return "badge-neutral";
+    case "failed":
+    default:
+      return "badge-warn";
+  }
+}
 
 export function AutoPostPanel() {
   const [config, setConfig] = useState<AutoPostConfig>(defaults);
@@ -73,46 +161,58 @@ export function AutoPostPanel() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    async function bootstrap() {
+  const loadSnapshot = useCallback(async (showLoader = false) => {
+    if (showLoader) {
       setLoading(true);
-      setError("");
-      try {
-        const [configRes, pagesRes, foldersRes, logsRes] = await Promise.all([
-          fetch("/api/auto-post"),
-          fetch("/api/facebook/pages"),
-          fetch("/api/google-drive/folders"),
-          fetch("/api/auto-post/logs")
-        ]);
+    }
 
-        const [configJson, pagesJson, foldersJson, logsJson] = await Promise.all([
-          configRes.json(),
-          pagesRes.json(),
-          foldersRes.json(),
-          logsRes.json()
-        ]);
+    try {
+      const [configRes, pagesRes, foldersRes, logsRes] = await Promise.all([
+        fetch("/api/auto-post", { cache: "no-store" }),
+        fetch("/api/facebook/pages", { cache: "no-store" }),
+        fetch("/api/google-drive/folders", { cache: "no-store" }),
+        fetch("/api/auto-post/logs", { cache: "no-store" })
+      ]);
 
-        if (configJson.ok && configJson.data?.config) {
-          setConfig({ ...defaults, ...configJson.data.config });
-        }
-        if (pagesJson.ok) {
-          setPages(pagesJson.data?.pages ?? []);
-        }
-        if (foldersJson.ok) {
-          setFolders(foldersJson.data?.folders ?? []);
-        }
-        if (logsJson.ok) {
-          setLogs(logsJson.data?.jobs ?? []);
-        }
-      } catch (bootstrapError) {
-        setError(bootstrapError instanceof Error ? bootstrapError.message : "Unable to load Auto Post settings");
-      } finally {
+      const [configJson, pagesJson, foldersJson, logsJson] = await Promise.all([
+        configRes.json(),
+        pagesRes.json(),
+        foldersRes.json(),
+        logsRes.json()
+      ]);
+
+      if (configJson.ok && configJson.data?.config) {
+        setConfig((current) => ({ ...current, ...defaults, ...configJson.data.config }));
+      }
+      if (pagesJson.ok) {
+        setPages(pagesJson.data?.pages ?? []);
+      }
+      if (foldersJson.ok) {
+        setFolders(foldersJson.data?.folders ?? []);
+      }
+      if (logsJson.ok) {
+        setLogs(logsJson.data?.jobs ?? []);
+      }
+    } catch (snapshotError) {
+      setError(snapshotError instanceof Error ? snapshotError.message : "Unable to load Auto Post settings");
+    } finally {
+      if (showLoader) {
         setLoading(false);
       }
     }
-
-    bootstrap();
   }, []);
+
+  useEffect(() => {
+    loadSnapshot(true);
+  }, [loadSnapshot]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      loadSnapshot(false);
+    }, 15000);
+
+    return () => window.clearInterval(interval);
+  }, [loadSnapshot]);
 
   useEffect(() => {
     async function loadImages() {
@@ -122,7 +222,9 @@ export function AutoPostPanel() {
       }
 
       try {
-        const response = await fetch(`/api/google-drive/images?folderId=${encodeURIComponent(config.folderId)}`);
+        const response = await fetch(`/api/google-drive/images?folderId=${encodeURIComponent(config.folderId)}`, {
+          cache: "no-store"
+        });
         const result = await response.json();
         if (result.ok) {
           setImages(result.data?.images ?? []);
@@ -178,12 +280,7 @@ export function AutoPostPanel() {
 
       setConfig({ ...defaults, ...result.data.config });
       setMessage(config.enabled ? "Auto Post settings saved" : "Auto Post paused");
-
-      const logsResponse = await fetch("/api/auto-post/logs");
-      const logsResult = await logsResponse.json();
-      if (logsResult.ok) {
-        setLogs(logsResult.data?.jobs ?? []);
-      }
+      await loadSnapshot(false);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Unable to save Auto Post settings");
     } finally {
@@ -392,29 +489,62 @@ export function AutoPostPanel() {
         <section className="card auto-post-card">
           <div className="split">
             <div>
-              <h3>Recent Auto Post status</h3>
-              <p className="muted">Track queued, posted, failed, and retrying jobs.</p>
+              <h3>System status</h3>
+              <p className="muted">Near real-time status synced with scheduler and posting jobs.</p>
             </div>
-            <span className={`badge ${config.lastStatus === "failed" ? "badge-warn" : "badge-neutral"}`}>{config.lastStatus ?? "paused"}</span>
+            <span className={`badge ${statusTone(config.autoPostStatus)}`}>{statusLabel(config.autoPostStatus)}</span>
+          </div>
+
+          <div className="grid cols-2 auto-post-metrics">
+            <div className="auto-post-metric-card">
+              <span className="muted">Current job</span>
+              <strong>{jobLabel(config.jobStatus ?? "pending")}</strong>
+            </div>
+            <div className="auto-post-metric-card">
+              <span className="muted">Retry count</span>
+              <strong>{config.retryCount ?? 0}</strong>
+            </div>
+            <div className="auto-post-metric-card">
+              <span className="muted">Last run</span>
+              <strong>{formatDateTime(config.lastRunAt)}</strong>
+            </div>
+            <div className="auto-post-metric-card">
+              <span className="muted">Next run</span>
+              <strong>{formatDateTime(config.nextRunAt)}</strong>
+            </div>
           </div>
 
           <div className="stack auto-post-status-box">
-            <div className="list-item"><span>Next run</span><strong>{config.nextRunAt ? new Date(config.nextRunAt).toLocaleString() : "-"}</strong></div>
-            <div className="list-item"><span>Last run</span><strong>{config.lastRunAt ? new Date(config.lastRunAt).toLocaleString() : "-"}</strong></div>
+            <div className="list-item"><span>Selected folder</span><strong>{config.folderName || "My Drive"}</strong></div>
+            <div className="list-item"><span>Pages selected</span><strong>{selectedPageNames.length || 0}</strong></div>
             <div className="list-item"><span>Last error</span><strong>{config.lastError || "None"}</strong></div>
           </div>
 
           <div className="stack">
-            {logs.length ? logs.map((job) => (
-              <article key={job._id} className="auto-post-log-item">
-                <div className="split">
-                  <strong>{job.status}</strong>
-                  <span className="muted">{job.createdAt ? new Date(job.createdAt).toLocaleString() : "-"}</span>
-                </div>
-                <div className="muted">Page: {job.targetPageId || "-"}</div>
-                {job.lastError ? <div className="auto-post-log-error">{job.lastError}</div> : null}
-              </article>
-            )) : <div className="composer-media-empty">No Auto Post logs yet.</div>}
+            <div className="split">
+              <div>
+                <h3>Activity log</h3>
+                <p className="muted">Queued, processing, posted, failed, and retrying jobs.</p>
+              </div>
+              <span className="badge badge-neutral">{logs.length} events</span>
+            </div>
+
+            <div className="auto-post-log-list">
+              {logs.length ? logs.map((job) => (
+                <article key={job._id} className="auto-post-log-item">
+                  <div className="split">
+                    <strong>{jobLabel(job.status)}</strong>
+                    <span className={`badge ${jobTone(job.status)}`}>{jobLabel(job.status)}</span>
+                  </div>
+                  <div className="muted">Created: {formatDateTime(job.createdAt)}</div>
+                  <div className="muted">Started: {formatDateTime(job.processingStartedAt)}</div>
+                  <div className="muted">Completed: {formatDateTime(job.completedAt)}</div>
+                  <div className="muted">Page: {job.targetPageId || "-"}</div>
+                  <div className="muted">Retries: {job.retryCount ?? 0}/{job.maxAttempts ?? 3}</div>
+                  {job.lastError ? <div className="auto-post-log-error">{job.lastError}</div> : null}
+                </article>
+              )) : <div className="composer-media-empty">No Auto Post logs yet.</div>}
+            </div>
           </div>
         </section>
       </div>

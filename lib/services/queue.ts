@@ -297,7 +297,10 @@ async function executePostJob(job: JobExecution) {
 
     if (job.payload?.autoPostConfigId) {
       await AutoPostConfig.findByIdAndUpdate(String(job.payload.autoPostConfigId), {
+        autoPostStatus: "retrying",
+        jobStatus: "pending",
         lastStatus: "failed",
+        retryCount: (job.attempts ?? 0) + 1,
         lastError: rateLimit.reason ?? "Rate limited"
       });
     }
@@ -330,7 +333,10 @@ async function executePostJob(job: JobExecution) {
       });
       if (job.payload?.autoPostConfigId) {
         await AutoPostConfig.findByIdAndUpdate(String(job.payload.autoPostConfigId), {
+          autoPostStatus: "failed",
+          jobStatus: "failed",
           lastStatus: "failed",
+          retryCount: job.attempts ?? 0,
           lastError: "Duplicate auto post was blocked by duplicate protection"
         });
       }
@@ -354,6 +360,15 @@ async function executePostJob(job: JobExecution) {
   const message = [chosenVariant.caption, chosenVariant.hashtags.join(" ")].filter(Boolean).join("\n\n");
   const imageRefs = post.randomizeImages && post.imageUrls.length > 0 ? [randomItem(post.imageUrls)] : post.imageUrls;
   const images = await resolveImages(job.userId, imageRefs);
+
+  if (job.payload?.autoPostConfigId) {
+    await AutoPostConfig.findByIdAndUpdate(String(job.payload.autoPostConfigId), {
+      autoPostStatus: "posting",
+      jobStatus: "processing",
+      lastStatus: "pending",
+      lastError: null
+    });
+  }
 
   const publishResult = await publishPostToFacebook({
     pageId: page.pageId,
@@ -398,9 +413,13 @@ async function executePostJob(job: JobExecution) {
 
   if (job.payload?.autoPostConfigId) {
     await AutoPostConfig.findByIdAndUpdate(String(job.payload.autoPostConfigId), {
+      autoPostStatus: "success",
+      jobStatus: "posted",
       lastStatus: "posted",
+      retryCount: 0,
       lastError: null,
-      lastPostId: post._id
+      lastPostId: post._id,
+      lastRunAt: new Date()
     });
   }
 
@@ -476,7 +495,10 @@ export async function processQueuedJobs(limit = 10) {
 
       if (job.payload?.autoPostConfigId) {
         await AutoPostConfig.findByIdAndUpdate(String(job.payload.autoPostConfigId), {
+          autoPostStatus: shouldRetry ? "retrying" : "failed",
+          jobStatus: "failed",
           lastStatus: shouldRetry ? "pending" : "failed",
+          retryCount: attempts,
           lastError: message
         });
       }
@@ -487,4 +509,7 @@ export async function processQueuedJobs(limit = 10) {
 
   return processed;
 }
+
+
+
 

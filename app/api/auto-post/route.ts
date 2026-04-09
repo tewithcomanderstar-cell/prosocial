@@ -7,8 +7,10 @@ import { AutoPostConfig } from "@/models/AutoPostConfig";
 type LeanAutoPostConfig = {
   enabled?: boolean;
   nextRunAt?: Date;
-  lastStatus?: "pending" | "posted" | "failed" | "paused";
+  autoPostStatus?: "idle" | "running" | "posting" | "success" | "failed" | "retrying" | "paused";
+  jobStatus?: "pending" | "processing" | "posted" | "failed";
   lastError?: string | null;
+  retryCount?: number;
 };
 
 const schema = z.object({
@@ -32,7 +34,15 @@ export async function GET() {
     const userId = await requireAuth();
     const config = await AutoPostConfig.findOneAndUpdate(
       { userId },
-      { $setOnInsert: { userId, nextRunAt: new Date() } },
+      {
+        $setOnInsert: {
+          userId,
+          nextRunAt: new Date(),
+          autoPostStatus: "paused",
+          jobStatus: "pending",
+          retryCount: 0
+        }
+      },
       { upsert: true, new: true }
     ).lean();
 
@@ -54,14 +64,23 @@ export async function POST(request: Request) {
         : new Date()
       : current?.nextRunAt ?? new Date();
 
+    const autoPostStatus = payload.enabled
+      ? current?.autoPostStatus && current.autoPostStatus !== "paused"
+        ? current.autoPostStatus
+        : "idle"
+      : "paused";
+
     const config = await AutoPostConfig.findOneAndUpdate(
       { userId },
       {
         ...payload,
         captions: (payload.captions ?? []).map((caption) => caption.trim()).filter(Boolean),
         nextRunAt,
-        lastStatus: payload.enabled ? (current?.lastStatus ?? "pending") : "paused",
-        lastError: payload.enabled ? current?.lastError ?? null : null
+        autoPostStatus,
+        jobStatus: payload.enabled ? current?.jobStatus ?? "pending" : "pending",
+        lastStatus: payload.enabled ? (current?.jobStatus === "posted" ? "posted" : current?.lastError ? "failed" : "pending") : "paused",
+        lastError: payload.enabled ? current?.lastError ?? null : null,
+        retryCount: payload.enabled ? current?.retryCount ?? 0 : 0
       },
       { upsert: true, new: true }
     ).lean();
@@ -76,7 +95,8 @@ export async function POST(request: Request) {
         folderId: payload.folderId,
         targetPageCount: (payload.targetPageIds ?? []).length,
         intervalHours: payload.intervalHours,
-        captionStrategy: payload.captionStrategy
+        captionStrategy: payload.captionStrategy,
+        autoPostStatus
       }
     });
 
@@ -85,5 +105,3 @@ export async function POST(request: Request) {
     return handleRoleError(error);
   }
 }
-
-

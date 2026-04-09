@@ -1499,3 +1499,42 @@ html:lang(th) .auth-title {
     grid-template-columns: 1fr;
   }
 }
+.auto-post-metrics {
+  margin-top: 12px;
+}
+
+.auto-post-metric-card {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.auto-post-log-list {
+  display: grid;
+  gap: 12px;
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.auto-post-log-item {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.badge-info {
+  background: rgba(43, 111, 255, 0.14);
+  color: var(--accent-strong);
+}
+
+.badge-success {
+  background: rgba(47, 125, 87, 0.12);
+  color: var(--success);
+}
