@@ -89,8 +89,31 @@ export function LoginForm({ initialMode = "login" }: LoginFormProps) {
   }
 
   return (
-    <form className="form" onSubmit={handleSubmit}>
-      <div className="social-login-grid">
+    <form className="form auth-form" onSubmit={handleSubmit}>
+      <div className="auth-form-head">
+        <div>
+          <div className="auth-form-kicker">{isThai ? "บัญชีผู้ใช้" : "User access"}</div>
+          <h2 className="auth-form-title">{mode === "login" ? t("loginSignIn") : t("loginCreate")}</h2>
+        </div>
+        <div className="auth-mode-toggle" role="tablist" aria-label={isThai ? "สลับโหมดบัญชี" : "Account mode"}>
+          <button
+            type="button"
+            className={mode === "login" ? "auth-mode-pill active" : "auth-mode-pill"}
+            onClick={() => setMode("login")}
+          >
+            {t("loginSignIn")}
+          </button>
+          <button
+            type="button"
+            className={mode === "register" ? "auth-mode-pill active" : "auth-mode-pill"}
+            onClick={() => setMode("register")}
+          >
+            {t("loginCreate")}
+          </button>
+        </div>
+      </div>
+
+      <div className="social-login-grid auth-social-grid">
         <button type="button" className="social-button social-google" onClick={() => startSocialLogin("google")} disabled={socialLoading !== null}>
           <AppIcon name="google" className="social-icon" />
           <span>{socialLoading === "google" ? (isThai ? "กำลังเชื่อมต่อ..." : "Connecting...") : (isThai ? "ดำเนินการต่อด้วย Google" : "Continue with Google")}</span>
@@ -102,18 +125,7 @@ export function LoginForm({ initialMode = "login" }: LoginFormProps) {
       </div>
 
       <div className="auth-divider">
-        <span>{isThai ? "หรือ" : "or"}</span>
-      </div>
-
-      <div className="split auth-mode-row">
-        <h2>{mode === "login" ? t("loginSignIn") : t("loginCreate")}</h2>
-        <button
-          type="button"
-          className="button-secondary"
-          onClick={() => setMode(mode === "login" ? "register" : "login")}
-        >
-          {mode === "login" ? t("loginCreate") : t("loginBack")}
-        </button>
+        <span>{isThai ? "หรือใช้อีเมล" : "or use email"}</span>
       </div>
 
       {mode === "register" ? (
@@ -133,11 +145,11 @@ export function LoginForm({ initialMode = "login" }: LoginFormProps) {
         <input className="input" name="password" type="password" minLength={6} required />
       </label>
 
-      <button className="button" disabled={loading} type="submit">
+      <button className="button auth-submit" disabled={loading} type="submit">
         {loading ? t("loginProcessing") : mode === "login" ? t("loginSubmit") : t("loginRegister")}
       </button>
 
-      {message ? <p className="muted">{message}</p> : null}
+      {message ? <p className="auth-feedback">{message}</p> : null}
     </form>
   );
 }

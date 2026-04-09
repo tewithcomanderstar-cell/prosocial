@@ -1,7 +1,7 @@
 ﻿import { NextResponse } from "next/server";
 import { createSession } from "@/lib/auth";
 import { connectDb } from "@/lib/db";
-import { logAction } from "@/lib/services/logging";
+import { logAction, logRouteError } from "@/lib/services/logging";
 import {
   buildLoginErrorUrl,
   buildLoginSuccessUrl,
@@ -10,6 +10,8 @@ import {
   verifyOAuthState
 } from "@/lib/social-auth";
 
+const AUTH_LOG_USER_ID = "anonymous";
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
@@ -17,14 +19,38 @@ export async function GET(request: Request) {
   const error = url.searchParams.get("error") || url.searchParams.get("error_reason");
 
   if (error) {
+    console.error("[facebook-login] provider returned error", { error, url: request.url });
+    await logRouteError({
+      userId: AUTH_LOG_USER_ID,
+      type: "auth",
+      message: "Facebook login provider returned an error",
+      error: new Error(String(error)),
+      metadata: { stage: "provider-error", url: request.url }
+    });
     return NextResponse.redirect(buildLoginErrorUrl(String(error)));
   }
 
   if (!(await verifyOAuthState("facebook", state))) {
+    console.error("[facebook-login] invalid state", { url: request.url });
+    await logRouteError({
+      userId: AUTH_LOG_USER_ID,
+      type: "auth",
+      message: "Facebook login state verification failed",
+      error: new Error("invalid_facebook_state"),
+      metadata: { stage: "state-check", url: request.url }
+    });
     return NextResponse.redirect(buildLoginErrorUrl("invalid_facebook_state"));
   }
 
   if (!code) {
+    console.error("[facebook-login] missing code", { url: request.url });
+    await logRouteError({
+      userId: AUTH_LOG_USER_ID,
+      type: "auth",
+      message: "Facebook login callback did not include authorization code",
+      error: new Error("missing_facebook_code"),
+      metadata: { stage: "code-check", url: request.url }
+    });
     return NextResponse.redirect(buildLoginErrorUrl("missing_facebook_code"));
   }
 
@@ -32,6 +58,18 @@ export async function GET(request: Request) {
   const clientSecret = process.env.FACEBOOK_APP_SECRET;
 
   if (!clientId || !clientSecret) {
+    console.error("[facebook-login] missing oauth env", { hasClientId: Boolean(clientId), hasClientSecret: Boolean(clientSecret) });
+    await logRouteError({
+      userId: AUTH_LOG_USER_ID,
+      type: "auth",
+      message: "Facebook login environment variables are missing",
+      error: new Error("missing_facebook_oauth"),
+      metadata: {
+        stage: "env-check",
+        hasClientId: Boolean(clientId),
+        hasClientSecret: Boolean(clientSecret)
+      }
+    });
     return NextResponse.redirect(buildLoginErrorUrl("missing_facebook_oauth"));
   }
 
@@ -45,6 +83,14 @@ export async function GET(request: Request) {
     const tokenResponse = await fetch(tokenUrl);
     const tokenData = await tokenResponse.json();
     if (!tokenResponse.ok || !tokenData.access_token) {
+      console.error("[facebook-login] token exchange failed", { status: tokenResponse.status, tokenData });
+      await logRouteError({
+        userId: AUTH_LOG_USER_ID,
+        type: "auth",
+        message: "Facebook token exchange failed",
+        error: new Error(`facebook_token_exchange_failed:${tokenResponse.status}`),
+        metadata: { stage: "token-exchange", status: tokenResponse.status, tokenData }
+      });
       return NextResponse.redirect(buildLoginErrorUrl("facebook_token_exchange_failed"));
     }
 
@@ -55,6 +101,14 @@ export async function GET(request: Request) {
     const profileResponse = await fetch(profileUrl);
     const profile = await profileResponse.json();
     if (!profileResponse.ok || !profile.id || !profile.name) {
+      console.error("[facebook-login] profile fetch failed", { status: profileResponse.status, profile });
+      await logRouteError({
+        userId: AUTH_LOG_USER_ID,
+        type: "auth",
+        message: "Facebook profile fetch failed",
+        error: new Error(`facebook_profile_failed:${profileResponse.status}`),
+        metadata: { stage: "profile-fetch", status: profileResponse.status, profile }
+      });
       return NextResponse.redirect(buildLoginErrorUrl("facebook_profile_failed"));
     }
 
@@ -81,6 +135,14 @@ export async function GET(request: Request) {
     });
     return NextResponse.redirect(await buildLoginSuccessUrl());
   } catch (error) {
+    console.error("[facebook-login] unexpected failure", error);
+    await logRouteError({
+      userId: AUTH_LOG_USER_ID,
+      type: "auth",
+      message: "Facebook login failed unexpectedly",
+      error,
+      metadata: { stage: "callback-catch", url: request.url }
+    });
     return NextResponse.redirect(buildLoginErrorUrl("facebook_login_failed"));
   }
 }
