@@ -1,12 +1,13 @@
-﻿import { NextResponse } from "next/server";
-import { createOAuthState, getSocialRedirectUri, setPostLoginRedirect } from "@/lib/social-auth";
+import { NextResponse } from "next/server";
+import { createOAuthState, getRequestBaseUrl, getSocialRedirectUri, setPostLoginRedirect } from "@/lib/social-auth";
 
 export async function GET(request: Request) {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const requestUrl = new URL(request.url);
+  const requestBaseUrl = getRequestBaseUrl(request);
 
   if (!clientId) {
-    return NextResponse.redirect(new URL("/login?error=missing_google_oauth", process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"));
+    return NextResponse.redirect(new URL("/login?error=missing_google_oauth", requestBaseUrl));
   }
 
   await setPostLoginRedirect(requestUrl.searchParams.get("next"));

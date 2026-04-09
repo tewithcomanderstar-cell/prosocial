@@ -1,4 +1,4 @@
-﻿import { cookies } from "next/headers";
+import { cookies } from "next/headers";
 import { randomUUID } from "crypto";
 import { User } from "@/models/User";
 import { connectDb } from "@/lib/db";
@@ -26,6 +26,22 @@ function sanitizeRedirectPath(path: string | null | undefined) {
 
 export function getBaseUrl() {
   return process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+}
+
+export function getRequestBaseUrl(requestOrUrl?: Request | URL | string | null) {
+  if (!requestOrUrl) {
+    return getBaseUrl();
+  }
+
+  if (typeof requestOrUrl === "string") {
+    return new URL(requestOrUrl).origin;
+  }
+
+  if (requestOrUrl instanceof URL) {
+    return requestOrUrl.origin;
+  }
+
+  return new URL(requestOrUrl.url).origin;
 }
 
 export function getSocialRedirectUri(provider: SocialProvider) {
@@ -122,8 +138,8 @@ export async function upsertSocialUser(profile: SocialProfile) {
   return user;
 }
 
-export function buildLoginErrorUrl(message: string, nextPath?: string | null) {
-  const url = new URL("/login", getBaseUrl());
+export function buildLoginErrorUrl(message: string, nextPath?: string | null, baseUrl?: string) {
+  const url = new URL("/login", baseUrl || getBaseUrl());
   url.searchParams.set("error", message);
 
   const redirectPath = sanitizeRedirectPath(nextPath);
@@ -137,4 +153,9 @@ export function buildLoginErrorUrl(message: string, nextPath?: string | null) {
 export async function buildLoginSuccessUrl() {
   const redirectPath = await consumePostLoginRedirect();
   return new URL(redirectPath, getBaseUrl());
+}
+
+export async function buildLoginSuccessUrlForRequest(requestOrUrl?: Request | URL | string | null) {
+  const redirectPath = await consumePostLoginRedirect();
+  return new URL(redirectPath, getRequestBaseUrl(requestOrUrl));
 }

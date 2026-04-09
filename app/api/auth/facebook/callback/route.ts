@@ -1,10 +1,10 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { createSession } from "@/lib/auth";
 import { connectDb } from "@/lib/db";
 import { logAction, logRouteError } from "@/lib/services/logging";
 import {
   buildLoginErrorUrl,
-  buildLoginSuccessUrl,
+  buildLoginSuccessUrlForRequest,
   getSocialRedirectUri,
   upsertSocialUser,
   verifyOAuthState
@@ -27,7 +27,7 @@ export async function GET(request: Request) {
       error: new Error(String(error)),
       metadata: { stage: "provider-error", url: request.url }
     });
-    return NextResponse.redirect(buildLoginErrorUrl(String(error)));
+    return NextResponse.redirect(buildLoginErrorUrl(String(error), null, url.origin));
   }
 
   if (!(await verifyOAuthState("facebook", state))) {
@@ -39,7 +39,7 @@ export async function GET(request: Request) {
       error: new Error("invalid_facebook_state"),
       metadata: { stage: "state-check", url: request.url }
     });
-    return NextResponse.redirect(buildLoginErrorUrl("invalid_facebook_state"));
+    return NextResponse.redirect(buildLoginErrorUrl("invalid_facebook_state", null, url.origin));
   }
 
   if (!code) {
@@ -51,7 +51,7 @@ export async function GET(request: Request) {
       error: new Error("missing_facebook_code"),
       metadata: { stage: "code-check", url: request.url }
     });
-    return NextResponse.redirect(buildLoginErrorUrl("missing_facebook_code"));
+    return NextResponse.redirect(buildLoginErrorUrl("missing_facebook_code", null, url.origin));
   }
 
   const clientId = process.env.FACEBOOK_APP_ID;
@@ -70,7 +70,7 @@ export async function GET(request: Request) {
         hasClientSecret: Boolean(clientSecret)
       }
     });
-    return NextResponse.redirect(buildLoginErrorUrl("missing_facebook_oauth"));
+    return NextResponse.redirect(buildLoginErrorUrl("missing_facebook_oauth", null, url.origin));
   }
 
   try {
@@ -91,7 +91,7 @@ export async function GET(request: Request) {
         error: new Error(`facebook_token_exchange_failed:${tokenResponse.status}`),
         metadata: { stage: "token-exchange", status: tokenResponse.status, tokenData }
       });
-      return NextResponse.redirect(buildLoginErrorUrl("facebook_token_exchange_failed"));
+      return NextResponse.redirect(buildLoginErrorUrl("facebook_token_exchange_failed", null, url.origin));
     }
 
     const profileUrl = new URL("https://graph.facebook.com/me");
@@ -109,7 +109,7 @@ export async function GET(request: Request) {
         error: new Error(`facebook_profile_failed:${profileResponse.status}`),
         metadata: { stage: "profile-fetch", status: profileResponse.status, profile }
       });
-      return NextResponse.redirect(buildLoginErrorUrl("facebook_profile_failed"));
+      return NextResponse.redirect(buildLoginErrorUrl("facebook_profile_failed", null, url.origin));
     }
 
     const email = typeof profile.email === "string" && profile.email.length > 0
@@ -133,7 +133,7 @@ export async function GET(request: Request) {
       message: "Facebook login successful",
       metadata: { provider: "facebook", email }
     });
-    return NextResponse.redirect(await buildLoginSuccessUrl());
+    return NextResponse.redirect(await buildLoginSuccessUrlForRequest(request));
   } catch (error) {
     console.error("[facebook-login] unexpected failure", error);
     await logRouteError({
@@ -143,6 +143,7 @@ export async function GET(request: Request) {
       error,
       metadata: { stage: "callback-catch", url: request.url }
     });
-    return NextResponse.redirect(buildLoginErrorUrl("facebook_login_failed"));
+    return NextResponse.redirect(buildLoginErrorUrl("facebook_login_failed", null, url.origin));
   }
 }
+
