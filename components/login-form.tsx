@@ -17,26 +17,37 @@ function mapAuthMessage(code: string, isThai: boolean) {
     facebook_profile_failed: isThai ? "ไม่สามารถดึงข้อมูลโปรไฟล์ Facebook ได้" : "Unable to load Facebook profile.",
     google_login_failed: isThai ? "Google Login ล้มเหลว กรุณาลองใหม่" : "Google login failed. Please try again.",
     facebook_login_failed: isThai ? "Facebook Login ล้มเหลว กรุณาลองใหม่" : "Facebook login failed. Please try again.",
-    unsupported_permission: isThai ? "แอป Facebook ยังไม่ได้รับสิทธิ์ที่จำเป็น กรุณาตรวจสอบ Login Configuration และ App Review" : "The Facebook app is missing required permissions. Review Login Configuration and app permissions."
+    unsupported_permission: isThai ? "แอป Facebook ยังไม่ได้รับสิทธิ์ที่จำเป็น กรุณาตรวจสอบ Login Configuration และ App Review" : "The Facebook app is missing required permissions. Review Login Configuration and app permissions.",
+    unauthorized: isThai ? "กรุณาเข้าสู่ระบบก่อนใช้งาน" : "Please sign in before continuing."
   };
 
   return messages[code] || code;
 }
 
-export function LoginForm() {
+type LoginFormProps = {
+  initialMode?: "login" | "register";
+};
+
+export function LoginForm({ initialMode = "login" }: LoginFormProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { language, t } = useI18n();
   const isThai = language === "th";
-  const [mode, setMode] = useState<"login" | "register">("login");
+  const [mode, setMode] = useState<"login" | "register">(initialMode);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [socialLoading, setSocialLoading] = useState<"google" | "facebook" | null>(null);
+
+  const nextPath = useMemo(() => searchParams.get("next") || "/dashboard", [searchParams]);
 
   const mappedError = useMemo(() => {
     const error = searchParams.get("error") || "";
     return error ? mapAuthMessage(error, isThai) : "";
   }, [searchParams, isThai]);
+
+  useEffect(() => {
+    setMode(initialMode);
+  }, [initialMode]);
 
   useEffect(() => {
     setMessage(mappedError);
@@ -67,14 +78,14 @@ export function LoginForm() {
     setMessage(result.message || (result.ok ? t("commonSuccess") : t("commonRequestFailed")));
 
     if (result.ok) {
-      router.push("/");
+      router.push(nextPath);
       router.refresh();
     }
   }
 
   function startSocialLogin(provider: "google" | "facebook") {
     setSocialLoading(provider);
-    window.location.href = `/api/auth/${provider}/start`;
+    window.location.href = `/api/auth/${provider}/start?next=${encodeURIComponent(nextPath)}`;
   }
 
   return (

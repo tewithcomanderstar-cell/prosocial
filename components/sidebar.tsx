@@ -28,7 +28,7 @@ export function Sidebar() {
       title: isThai ? "งานหลัก" : "Core",
       icon: "dashboard",
       items: [
-        { href: "/", label: t("navDashboard"), icon: "dashboard" },
+        { href: "/dashboard", label: t("navDashboard"), icon: "dashboard" },
         { href: "/posts/new", label: isThai ? "สร้างโพสต์" : "Create Post", icon: "compose" },
         { href: "/planner", label: isThai ? "ปฏิทินโพสต์" : "Planner", icon: "planner" },
         { href: "/media-library", label: isThai ? "คลังคอนเทนต์" : "Media Library", icon: "media" }

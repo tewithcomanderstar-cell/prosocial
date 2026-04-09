@@ -81,7 +81,7 @@ export async function GET(request: Request) {
       message: "Google login successful",
       metadata: { provider: "google", email: String(profile.email) }
     });
-    return NextResponse.redirect(buildLoginSuccessUrl());
+    return NextResponse.redirect(await buildLoginSuccessUrl());
   } catch (error) {
     return NextResponse.redirect(buildLoginErrorUrl("google_login_failed"));
   }

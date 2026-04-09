@@ -79,7 +79,7 @@ export async function GET(request: Request) {
       message: "Facebook login successful",
       metadata: { provider: "facebook", email }
     });
-    return NextResponse.redirect(buildLoginSuccessUrl());
+    return NextResponse.redirect(await buildLoginSuccessUrl());
   } catch (error) {
     return NextResponse.redirect(buildLoginErrorUrl("facebook_login_failed"));
   }

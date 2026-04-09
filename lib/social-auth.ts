@@ -14,6 +14,15 @@ type SocialProfile = {
 };
 
 const STATE_COOKIE_PREFIX = "social_oauth_state_";
+const POST_LOGIN_REDIRECT_COOKIE = "post_login_redirect";
+
+function sanitizeRedirectPath(path: string | null | undefined) {
+  if (!path || !path.startsWith("/") || path.startsWith("//")) {
+    return "/dashboard";
+  }
+
+  return path;
+}
 
 export function getBaseUrl() {
   return process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
@@ -38,6 +47,28 @@ export async function createOAuthState(provider: SocialProvider) {
     maxAge: 60 * 10
   });
   return state;
+}
+
+export async function setPostLoginRedirect(path: string | null | undefined) {
+  const store = await cookies();
+  store.set(POST_LOGIN_REDIRECT_COOKIE, sanitizeRedirectPath(path), {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 60 * 10
+  });
+}
+
+export async function consumePostLoginRedirect() {
+  const store = await cookies();
+  const redirectPath = sanitizeRedirectPath(store.get(POST_LOGIN_REDIRECT_COOKIE)?.value ?? null);
+  store.set(POST_LOGIN_REDIRECT_COOKIE, "", {
+    httpOnly: true,
+    expires: new Date(0),
+    path: "/"
+  });
+  return redirectPath;
 }
 
 export async function verifyOAuthState(provider: SocialProvider, state: string | null) {
@@ -91,12 +122,19 @@ export async function upsertSocialUser(profile: SocialProfile) {
   return user;
 }
 
-export function buildLoginErrorUrl(message: string) {
+export function buildLoginErrorUrl(message: string, nextPath?: string | null) {
   const url = new URL("/login", getBaseUrl());
   url.searchParams.set("error", message);
+
+  const redirectPath = sanitizeRedirectPath(nextPath);
+  if (redirectPath !== "/dashboard") {
+    url.searchParams.set("next", redirectPath);
+  }
+
   return url;
 }
 
-export function buildLoginSuccessUrl() {
-  return new URL("/", getBaseUrl());
+export async function buildLoginSuccessUrl() {
+  const redirectPath = await consumePostLoginRedirect();
+  return new URL(redirectPath, getBaseUrl());
 }
