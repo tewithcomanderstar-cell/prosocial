@@ -1,4 +1,4 @@
-import { z } from "zod";
+﻿import { z } from "zod";
 import { jsonError, jsonOk, parseBody } from "@/lib/api";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
 import { logAction } from "@/lib/services/logging";
@@ -18,12 +18,19 @@ const schema = z.object({
   retryCount: z.number().min(0).optional(),
   message: z.string().optional(),
   pageId: z.string().optional(),
-  source: z.string().optional()
+  source: z.string().optional(),
+  imageUsed: z.string().optional()
 });
 
+function normalizeSecret(value: string | null | undefined) {
+  return (value ?? "").trim();
+}
+
 export async function POST(request: Request) {
-  const apiKey = request.headers.get("x-api-key");
-  if (!process.env.N8N_SECRET || apiKey !== process.env.N8N_SECRET) {
+  const apiKey = normalizeSecret(request.headers.get("x-api-key"));
+  const expectedSecret = normalizeSecret(process.env.N8N_SECRET);
+
+  if (!expectedSecret || apiKey !== expectedSecret) {
     return jsonError("Unauthorized", 401);
   }
 
@@ -45,6 +52,7 @@ export async function POST(request: Request) {
     if (payload.currentJobStatus === "posted") updates.lastStatus = "posted";
     if (payload.currentJobStatus === "failed") updates.lastStatus = "failed";
     if (payload.autoPostStatus === "paused") updates.enabled = false;
+    if (payload.imageUsed) updates.lastSelectedImageId = payload.imageUsed;
 
     await AutoPostConfig.findByIdAndUpdate(payload.configId, updates);
 
@@ -59,6 +67,7 @@ export async function POST(request: Request) {
         autoPostStatus: payload.autoPostStatus,
         currentJobStatus: payload.currentJobStatus,
         pageId: payload.pageId,
+        imageUsed: payload.imageUsed,
         source: payload.source || "n8n"
       }
     });
