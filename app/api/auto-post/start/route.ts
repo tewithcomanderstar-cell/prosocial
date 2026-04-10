@@ -18,6 +18,28 @@ type LeanAutoPostConfig = {
   autoPostStatus?: string;
 };
 
+function extractReadableError(value: string | null | undefined) {
+  const raw = (value ?? "").trim();
+  if (!raw) return "";
+
+  const withoutTags = raw
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const normalized = withoutTags || raw;
+
+  if (/cloudflare/i.test(raw) || /error 5\d\d/i.test(raw) || /requested url returned error/i.test(raw)) {
+    const codeMatch = raw.match(/error\s*(\d{3})/i) || raw.match(/err(?:or)?code[_:=\s-]*(\d{3})/i);
+    const code = codeMatch?.[1];
+    return code ? "Cloudflare " + code + " error" : "Cloudflare error";
+  }
+
+  return normalized.length > 240 ? normalized.slice(0, 237) + "..." : normalized;
+}
+
 function getNextAutoRun(intervalMinutes: number) {
   const minutes = [15, 30, 60, 120].includes(intervalMinutes) ? intervalMinutes : 60;
   return new Date(Date.now() + minutes * 60 * 1000);
@@ -100,12 +122,13 @@ export async function POST() {
 
     if (!response.ok) {
       const body = await response.text();
+      const readableError = extractReadableError(body) || `n8n webhook failed with ${response.status}`;
       await AutoPostConfig.findByIdAndUpdate(config._id, {
         autoPostStatus: "failed",
         jobStatus: "failed",
-        lastError: body || `n8n webhook failed with ${response.status}`
+        lastError: readableError
       });
-      return jsonError(body || "Unable to trigger n8n workflow", response.status);
+      return jsonError(readableError || "Unable to trigger n8n workflow", response.status);
     }
 
     await AutoPostConfig.findByIdAndUpdate(config._id, {
@@ -160,3 +183,5 @@ export async function POST() {
     return jsonError(error instanceof Error ? error.message : "Unable to trigger Auto Post", 500);
   }
 }
+
+
