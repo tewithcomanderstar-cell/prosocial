@@ -18,6 +18,13 @@ type LeanAutoPostConfig = {
   autoPostStatus?: string;
 };
 
+const BROKEN_FOLDER_ID = "1sbp9Ql8moMDs9xBSha5IWoKdE1WlEEWz";
+const FIXED_FOLDER_ID = "1sbp9Ql8moMDs9xBSha5lWoKdE1WiEEWz";
+
+function normalizeFolderId(value: string) {
+  const trimmed = value.trim();
+  return trimmed === BROKEN_FOLDER_ID ? FIXED_FOLDER_ID : trimmed;
+}
 function extractReadableError(value: string | null | undefined) {
   const raw = (value ?? "").trim();
   if (!raw) return "";
@@ -49,12 +56,18 @@ export async function POST() {
   try {
     const { userId } = await requireRole(["admin", "editor"]);
     const config = (await AutoPostConfig.findOne({ userId }).lean()) as LeanAutoPostConfig | null;
+    const normalizedFolderId = config?.folderId ? normalizeFolderId(config.folderId) : config?.folderId;
+
+    if (config && normalizedFolderId && normalizedFolderId !== config.folderId) {
+      await AutoPostConfig.findByIdAndUpdate(config._id, { folderId: normalizedFolderId });
+      config.folderId = normalizedFolderId;
+    }
 
     if (!config) {
       return jsonError("Auto Post settings not found", 404);
     }
 
-    if (!config.folderId) {
+    if (!normalizedFolderId) {
       return jsonError("Select a Google Drive folder first", 400);
     }
 
@@ -95,7 +108,7 @@ export async function POST() {
       action: "start",
       userId,
       configId: config._id,
-      folderId: config.folderId,
+      folderId: normalizedFolderId,
       folderName: config.folderName,
       pageIds: config.targetPageIds,
       intervalMinutes: config.intervalMinutes,
@@ -146,7 +159,7 @@ export async function POST() {
       metadata: {
         autoPost: true,
         autoPostConfigId: config._id,
-        folderId: config.folderId,
+        folderId: normalizedFolderId,
         targetPageCount: config.targetPageIds.length,
         intervalMinutes: config.intervalMinutes,
         source: "manual-start",
@@ -183,5 +196,7 @@ export async function POST() {
     return jsonError(error instanceof Error ? error.message : "Unable to trigger Auto Post", 500);
   }
 }
+
+
 
 

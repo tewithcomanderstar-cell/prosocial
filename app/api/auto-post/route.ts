@@ -1,4 +1,4 @@
-﻿import { z } from "zod";
+import { z } from "zod";
 import { jsonError, jsonOk, parseBody } from "@/lib/api";
 import { handleRoleError, requireRole } from "@/lib/services/permissions";
 import { logAction } from "@/lib/services/logging";
@@ -11,6 +11,7 @@ type LeanAutoPostConfig = {
   jobStatus?: "pending" | "processing" | "posted" | "failed";
   lastError?: string | null;
   retryCount?: number;
+  folderId?: string;
 };
 
 const intervalSchema = z.union([
@@ -19,6 +20,14 @@ const intervalSchema = z.union([
   z.literal(60),
   z.literal(120)
 ]);
+
+const BROKEN_FOLDER_ID = "1sbp9Ql8moMDs9xBSha5IWoKdE1WlEEWz";
+const FIXED_FOLDER_ID = "1sbp9Ql8moMDs9xBSha5lWoKdE1WiEEWz";
+
+function normalizeFolderId(value: string) {
+  const trimmed = value.trim();
+  return trimmed === BROKEN_FOLDER_ID ? FIXED_FOLDER_ID : trimmed;
+}
 
 const schema = z.object({
   enabled: z.boolean(),
@@ -36,7 +45,7 @@ export async function GET() {
   try {
     const { requireAuth } = await import("@/lib/api");
     const userId = await requireAuth();
-    const config = await AutoPostConfig.findOneAndUpdate(
+    const config = (await AutoPostConfig.findOneAndUpdate(
       { userId },
       {
         $setOnInsert: {
@@ -49,7 +58,12 @@ export async function GET() {
         }
       },
       { upsert: true, new: true }
-    ).lean();
+    ).lean()) as LeanAutoPostConfig | null;
+
+    if (config?.folderId === BROKEN_FOLDER_ID) {
+      await AutoPostConfig.findOneAndUpdate({ userId }, { folderId: FIXED_FOLDER_ID });
+      config.folderId = FIXED_FOLDER_ID;
+    }
 
     return jsonOk({ config });
   } catch {
@@ -61,6 +75,7 @@ export async function POST(request: Request) {
   try {
     const { userId } = await requireRole(["admin", "editor"]);
     const payload = parseBody(schema, await request.json());
+    const normalizedFolderId = normalizeFolderId(payload.folderId ?? "root");
     const current = (await AutoPostConfig.findOne({ userId }).lean()) as LeanAutoPostConfig | null;
 
     const nextRunAt = payload.enabled
@@ -79,6 +94,7 @@ export async function POST(request: Request) {
       { userId },
       {
         ...payload,
+        folderId: normalizedFolderId,
         captions: (payload.captions ?? []).map((caption) => caption.trim()).filter(Boolean),
         nextRunAt,
         autoPostStatus,
@@ -97,7 +113,7 @@ export async function POST(request: Request) {
       message: payload.enabled ? "Auto Post configuration updated" : "Auto Post paused",
       metadata: {
         autoPost: true,
-        folderId: payload.folderId,
+        folderId: normalizedFolderId,
         targetPageCount: (payload.targetPageIds ?? []).length,
         intervalMinutes: payload.intervalMinutes,
         captionStrategy: payload.captionStrategy,
@@ -112,3 +128,4 @@ export async function POST(request: Request) {
     return handleRoleError(error);
   }
 }
+
