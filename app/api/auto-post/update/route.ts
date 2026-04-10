@@ -1,5 +1,6 @@
-﻿import { z } from "zod";
+import { z } from "zod";
 import { jsonError, jsonOk, parseBody } from "@/lib/api";
+import { connectDb } from "@/lib/db";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
 import { logAction } from "@/lib/services/logging";
 
@@ -61,6 +62,7 @@ export async function POST(request: Request) {
   }
 
   try {
+    await connectDb();
     const parsedPayload = parseBody(schema, await request.json());
     const payload = {
       ...parsedPayload,
@@ -109,6 +111,8 @@ export async function POST(request: Request) {
     return jsonError(error instanceof Error ? error.message : "Unable to update Auto Post status", 500);
   }
 }
+
+
 
 
 
