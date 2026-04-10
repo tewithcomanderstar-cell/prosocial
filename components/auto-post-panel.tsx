@@ -67,6 +67,22 @@ function formatDateTime(value?: string) {
   return new Date(value).toLocaleString();
 }
 
+function sanitizeText(value?: string | null) {
+  if (!value) return "";
+  const raw = value.trim();
+  if (!raw) return "";
+
+  const withoutTags = raw
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const normalized = withoutTags || raw;
+  return normalized.length > 240 ? normalized.slice(0, 237) + "..." : normalized;
+}
+
 function statusLabel(status?: AutoPostStatus) {
   switch (status) {
     case "running":
@@ -154,7 +170,7 @@ export function AutoPostPanel() {
       if (statusJson.ok) {
         const statusData = statusJson.data as StatusResponse;
         setConfig((current) => ({ ...current, ...defaults, ...statusData.config }));
-        setLogs((statusData.logs ?? []).slice(0, 10));
+        setLogs((statusData.logs ?? []).slice(0, 10).map((log) => ({ ...log, message: sanitizeText(log.message) })));
       }
 
       if (pagesJson.ok) setPages(pagesJson.data?.pages ?? []);
@@ -443,7 +459,7 @@ export function AutoPostPanel() {
           <div className="auto-post-metric-card"><span className="muted">Last run</span><strong>{formatDateTime(config.lastRunAt)}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Next run</span><strong>{formatDateTime(config.nextRunAt)}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Current job</span><strong>{jobStatusLabel(config.jobStatus)}</strong></div>
-          <div className="auto-post-metric-card"><span className="muted">Last error</span><strong>{config.lastError || "None"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Last error</span><strong>{sanitizeText(config.lastError) || "None"}</strong></div>
         </div>
 
         <div className="stack compact-stack">
@@ -473,3 +489,6 @@ export function AutoPostPanel() {
     </div>
   );
 }
+
+
+

@@ -26,6 +26,32 @@ function normalizeSecret(value: string | null | undefined) {
   return (value ?? "").trim();
 }
 
+function normalizeConfigId(value: string) {
+  return value.trim().replace(/^=+/, "");
+}
+
+function extractReadableError(value: string | null | undefined) {
+  const raw = (value ?? "").trim();
+  if (!raw) return null;
+
+  const withoutTags = raw
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const normalized = withoutTags || raw;
+
+  if (/cloudflare/i.test(raw) || /error 5\d\d/i.test(raw) || /requested url returned error/i.test(raw)) {
+    const codeMatch = raw.match(/error\s*(\d{3})/i) || raw.match(/err(?:or)?code[_:=\s-]*(\d{3})/i);
+    const code = codeMatch?.[1];
+    return code ? "Cloudflare " + code + " error" : "Cloudflare error";
+  }
+
+  return normalized.length > 240 ? normalized.slice(0, 237) + "..." : normalized;
+}
+
 export async function POST(request: Request) {
   const apiKey = normalizeSecret(request.headers.get("x-api-key"));
   const expectedSecret = normalizeSecret(process.env.N8N_SECRET);
@@ -35,7 +61,13 @@ export async function POST(request: Request) {
   }
 
   try {
-    const payload = parseBody(schema, await request.json());
+    const parsedPayload = parseBody(schema, await request.json());
+    const payload = {
+      ...parsedPayload,
+      configId: normalizeConfigId(parsedPayload.configId),
+      lastError: extractReadableError(parsedPayload.lastError),
+      message: extractReadableError(parsedPayload.message) ?? parsedPayload.message
+    };
     const config = (await AutoPostConfig.findById(payload.configId).lean()) as LeanAutoPostConfig | null;
 
     if (!config) {
@@ -77,3 +109,6 @@ export async function POST(request: Request) {
     return jsonError(error instanceof Error ? error.message : "Unable to update Auto Post status", 500);
   }
 }
+
+
+
