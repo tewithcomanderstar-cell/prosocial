@@ -1,3 +1,5 @@
+import { randomUUID } from 'crypto';
+import { publishQueue } from '@/src/jobs/queues';
 import { prisma } from '@/src/lib/db/prisma';
 import { InvariantViolationError } from '@/src/lib/errors';
 
@@ -13,10 +15,12 @@ export type PublishIntentDto = {
   contentItemId: string;
   publishJobIds: string[];
   workflowRunId: string;
+  correlationId: string;
 };
 
 export class PublishingOrchestratorService {
   async publishNow(input: PublishNowInput): Promise<PublishIntentDto> {
+    const correlationId = randomUUID();
     const contentItem = await prisma.contentItem.findFirst({
       where: { id: input.contentItemId, workspaceId: input.workspaceId },
       include: { contentDestinations: true },
@@ -59,13 +63,16 @@ export class PublishingOrchestratorService {
         triggerType: 'manual',
         triggerSource: 'api.publish-now',
         status: 'queued',
-        inputJson: { idempotencyKey: input.idempotencyKey ?? null, requestedById: input.requestedById },
+        inputJson: {
+          idempotencyKey: input.idempotencyKey ?? null,
+          requestedById: input.requestedById,
+        },
       },
     });
 
-    const jobs = [] as string[];
+    const jobs: string[] = [];
     for (const target of contentItem.contentDestinations) {
-      const job = await prisma.publishJob.create({
+      const publishJob = await prisma.publishJob.create({
         data: {
           workspaceId: input.workspaceId,
           contentDestinationId: target.id,
@@ -73,12 +80,29 @@ export class PublishingOrchestratorService {
           status: 'queued',
         },
       });
-      jobs.push(job.id);
+      jobs.push(publishJob.id);
+
+      await publishQueue.add(
+        'publishContentDestination',
+        {
+          workspaceId: input.workspaceId,
+          contentDestinationId: target.id,
+          workflowRunId: workflowRun.id,
+          publishIntentKey: input.idempotencyKey ?? `publish-now:${contentItem.id}:${target.id}`,
+          correlationId,
+        },
+        {
+          jobId: `publish:${target.id}:${input.idempotencyKey ?? 'default'}`,
+        }
+      );
     }
 
     await prisma.contentItem.update({
       where: { id: contentItem.id },
-      data: { publishStatus: 'queued', status: 'scheduled' },
+      data: {
+        publishStatus: 'queued',
+        status: 'scheduled',
+      },
     });
 
     return {
@@ -86,6 +110,7 @@ export class PublishingOrchestratorService {
       contentItemId: contentItem.id,
       publishJobIds: jobs,
       workflowRunId: workflowRun.id,
+      correlationId,
     };
   }
 }

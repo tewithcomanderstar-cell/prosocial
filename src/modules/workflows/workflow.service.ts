@@ -1,3 +1,5 @@
+import { randomUUID } from 'crypto';
+import { workflowTriggerQueue } from '@/src/jobs/queues';
 import { prisma } from '@/src/lib/db/prisma';
 import { NotFoundError } from '@/src/lib/errors';
 import type { RequestContext } from '@/src/lib/auth/request-context';
@@ -80,7 +82,8 @@ export class WorkflowService {
 
   async testRunWorkflow(context: RequestContext, id: string, input: any) {
     await this.getWorkflowById(context, id);
-    return prisma.workflowRun.create({
+
+    const workflowRun = await prisma.workflowRun.create({
       data: {
         workspaceId: context.workspaceId,
         workflowId: id,
@@ -92,6 +95,28 @@ export class WorkflowService {
         contextJson: input.contextJson,
       },
     });
+
+    const correlationId = randomUUID();
+    await workflowTriggerQueue.add(
+      'enqueueManualWorkflowRun',
+      {
+        workspaceId: context.workspaceId,
+        workflowId: id,
+        workflowRunId: workflowRun.id,
+        triggerSource: 'manual',
+        triggerFingerprint: `manual:${workflowRun.id}:${context.idempotencyKey ?? 'default'}`,
+        correlationId,
+        inputJson: input.inputJson,
+      },
+      {
+        jobId: `manual-workflow:${workflowRun.id}`,
+      }
+    );
+
+    return {
+      ...workflowRun,
+      correlationId,
+    };
   }
 
   async listWorkflowRuns(context: RequestContext, workflowId: string) {
