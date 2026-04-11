@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { jsonError, jsonOk, parseBody } from "@/lib/api";
 import { connectDb } from "@/lib/db";
+import { updateAutoPostRecords } from "@/lib/services/automation-records";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
 import { logAction } from "@/lib/services/logging";
 
@@ -89,6 +90,7 @@ export async function POST(request: Request) {
     if (payload.imageUsed) updates.lastSelectedImageId = payload.imageUsed;
 
     await AutoPostConfig.findByIdAndUpdate(payload.configId, updates);
+    await updateAutoPostRecords(payload);
 
     await logAction({
       userId: String(config.userId),
@@ -111,8 +113,3 @@ export async function POST(request: Request) {
     return jsonError(error instanceof Error ? error.message : "Unable to update Auto Post status", 500);
   }
 }
-
-
-
-
-

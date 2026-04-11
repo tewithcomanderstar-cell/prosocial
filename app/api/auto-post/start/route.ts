@@ -1,4 +1,5 @@
-﻿import { jsonError, jsonOk } from "@/lib/api";
+import { jsonError, jsonOk } from "@/lib/api";
+import { createAutoPostRecords } from "@/lib/services/automation-records";
 import { handleRoleError, requireRole } from "@/lib/services/permissions";
 import { logAction, logAndNotifyError } from "@/lib/services/logging";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
@@ -95,13 +96,30 @@ export async function POST() {
       return jsonError("n8n webhook is not configured", 500);
     }
 
+    const triggeredAt = new Date().toISOString();
+
     await AutoPostConfig.findByIdAndUpdate(config._id, {
       enabled: true,
       autoPostStatus: "running",
       jobStatus: "pending",
       lastError: null,
       retryCount: 0,
-      lastRunAt: new Date()
+      lastRunAt: new Date(triggeredAt)
+    });
+
+    const records = await createAutoPostRecords({
+      userId,
+      configId: config._id,
+      folderId: normalizedFolderId,
+      folderName: config.folderName,
+      pageIds: config.targetPageIds,
+      intervalMinutes: config.intervalMinutes,
+      captionStrategy: config.captionStrategy,
+      captions: config.captions,
+      aiPrompt: config.aiPrompt,
+      language: config.language,
+      source: "manual-start",
+      triggeredAt
     });
 
     const payload = {
@@ -119,8 +137,11 @@ export async function POST() {
       imageAssignmentMode: "unique-per-page",
       allowImageReuseAfterPoolExhausted: true,
       maxTargetPages: 100,
-      triggeredAt: new Date().toISOString(),
-      source: "manual-start"
+      triggeredAt,
+      source: "manual-start",
+      workflowId: records.workflowId,
+      workflowRunId: records.workflowRunId,
+      contentItemId: records.contentItemId
     };
 
     const response = await fetch(webhookUrl, {
@@ -166,11 +187,14 @@ export async function POST() {
         destination: "n8n",
         action: "start",
         imageAssignmentMode: "unique-per-page",
-        allowImageReuseAfterPoolExhausted: true
+        allowImageReuseAfterPoolExhausted: true,
+        workflowId: records.workflowId,
+        workflowRunId: records.workflowRunId,
+        contentItemId: records.contentItemId
       }
     });
 
-    return jsonOk({ started: true }, "Auto Post triggered successfully");
+    return jsonOk({ started: true, ...records }, "Auto Post triggered successfully");
   } catch (error) {
     if (error instanceof Error && error.message === "FORBIDDEN") {
       return handleRoleError(error);
@@ -196,7 +220,3 @@ export async function POST() {
     return jsonError(error instanceof Error ? error.message : "Unable to trigger Auto Post", 500);
   }
 }
-
-
-
-

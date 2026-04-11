@@ -1,4 +1,4 @@
-﻿import { Schema, model, models } from "mongoose";
+import { Schema, model, models } from "mongoose";
 
 const autoPostConfigSchema = new Schema(
   {
@@ -49,7 +49,10 @@ const autoPostConfigSchema = new Schema(
     },
     lastError: { type: String, default: null },
     lastPostId: { type: Schema.Types.ObjectId, ref: "Post" },
-    lastSelectedImageId: { type: String, default: null }
+    lastSelectedImageId: { type: String, default: null },
+    lastWorkflowId: { type: Schema.Types.ObjectId, ref: "Workflow" },
+    lastWorkflowRunId: { type: Schema.Types.ObjectId, ref: "WorkflowRun" },
+    lastContentItemId: { type: Schema.Types.ObjectId, ref: "ContentItem" }
   },
   { timestamps: true }
 );

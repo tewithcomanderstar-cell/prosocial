@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useI18n } from "@/components/language-provider";
 
@@ -53,42 +54,42 @@ export function DashboardData() {
   }
 
   const primaryStats = [
-    { label: "Connected pages", value: summary.connectedPages },
-    { label: "Pending approvals", value: summary.pendingApprovals },
-    { label: "Failed runs", value: summary.failedRuns },
-    { label: "Token warnings", value: summary.tokenWarnings }
+    { label: "Connected pages", value: summary.connectedPages, href: "/connections/facebook" },
+    { label: "Pending approvals", value: summary.pendingApprovals, href: "/approvals" },
+    { label: "Failed runs", value: summary.failedRuns, href: "/runs?status=failed" },
+    { label: "Token warnings", value: summary.tokenWarnings, href: "/connections/facebook" }
   ];
 
   const secondaryStats = [
-    { label: t("dashScheduledPosts"), value: summary.scheduledPosts },
-    { label: t("dashRecurringPosts"), value: summary.recurringPosts },
-    { label: t("dashOneTimePosts"), value: summary.oneTimePosts },
-    { label: t("dashTotalPosts"), value: summary.totalPosts }
+    { label: t("dashScheduledPosts"), value: summary.scheduledPosts, href: "/planner" },
+    { label: t("dashRecurringPosts"), value: summary.recurringPosts, href: "/auto-post" },
+    { label: t("dashOneTimePosts"), value: summary.oneTimePosts, href: "/posts/new" },
+    { label: t("dashTotalPosts"), value: summary.totalPosts, href: "/queue" }
   ];
 
   const recommendedAction = summary.tokenWarnings > 0
-    ? "Reconnect destinations with token warnings"
+    ? { label: "Reconnect destinations with token warnings", href: "/connections/facebook" }
     : summary.failedRuns > 0
-      ? "Review failed runs and retry"
-      : "System healthy";
+      ? { label: "Review failed runs and retry", href: "/runs?status=failed" }
+      : { label: "System healthy", href: "/dashboard" };
 
   return (
     <div className="stack">
       <div className="grid stats-grid">
         {primaryStats.map((stat) => (
-          <div key={stat.label} className="card stat stat-card">
+          <Link key={stat.label} href={stat.href} className="card stat stat-card">
             <strong>{stat.value}</strong>
             <span>{stat.label}</span>
-          </div>
+          </Link>
         ))}
       </div>
 
       <div className="grid stats-grid">
         {secondaryStats.map((stat) => (
-          <div key={stat.label} className="card stat stat-card">
+          <Link key={stat.label} href={stat.href} className="card stat stat-card">
             <strong>{stat.value}</strong>
             <span>{stat.label}</span>
-          </div>
+          </Link>
         ))}
       </div>
 
@@ -103,7 +104,7 @@ export function DashboardData() {
           <div className="list-item"><span>Publishing now</span><strong>{summary.runningRuns}</strong></div>
           <div className="list-item"><span>Unread alerts</span><strong>{summary.unreadAlerts}</strong></div>
           <div className="list-item"><span>Active connections</span><strong>{summary.activeConnections}</strong></div>
-          <div className="list-item"><span>Recommended action</span><strong>{recommendedAction}</strong></div>
+          <div className="list-item"><span>Recommended action</span><Link href={recommendedAction.href}><strong>{recommendedAction.label}</strong></Link></div>
         </div>
       </section>
     </div>
