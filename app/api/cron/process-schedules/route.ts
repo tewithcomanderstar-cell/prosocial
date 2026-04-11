@@ -1,6 +1,8 @@
 import { connectDb } from "@/lib/db";
 import { jsonError, jsonOk } from "@/lib/api";
-import { processDueSchedules } from "@/lib/services/scheduler";
+import { processDueAutoPosts } from "@/lib/services/auto-post";
+import { processQueuedJobs } from "@/lib/services/queue";
+import { queueDueSchedules } from "@/lib/services/scheduler";
 
 export async function GET(request: Request) {
   const authHeader = request.headers.get("authorization");
@@ -12,8 +14,20 @@ export async function GET(request: Request) {
 
   try {
     await connectDb();
-    const processed = await processDueSchedules();
-    return jsonOk({ processed }, "Schedules processed");
+    const [scheduledQueued, autoPostsQueued] = await Promise.all([
+      queueDueSchedules(),
+      processDueAutoPosts()
+    ]);
+    const processedJobs = await processQueuedJobs(50);
+
+    return jsonOk(
+      {
+        scheduledQueued,
+        autoPostsQueued,
+        processedJobs
+      },
+      "Automation tick processed"
+    );
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : "Unable to process schedules", 500);
   }

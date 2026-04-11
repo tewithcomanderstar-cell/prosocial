@@ -265,7 +265,7 @@ export function AutoPostPanel() {
       const response = await fetch("/api/auto-post/start", { method: "POST" });
       const result = await response.json();
       if (!result.ok) throw new Error(result.message || "Unable to start Auto Post");
-      setMessage("Start signal sent to n8n");
+      setMessage("Automation started");
       await loadStatus(false);
     } catch (startError) {
       setError(startError instanceof Error ? startError.message : "Unable to start Auto Post");
@@ -424,7 +424,7 @@ export function AutoPostPanel() {
           />
         </label>
 
-        <div className="muted">Unique image assignment per page is handled in n8n for each run.</div>
+        <div className="muted">Unique image assignment per page is handled by the in-app automation engine for each run.</div>
 
         <button className="button" type="submit" disabled={saving}>
           {saving ? "Saving..." : "Save Settings"}

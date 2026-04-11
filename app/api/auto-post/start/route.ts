@@ -1,7 +1,7 @@
 import { jsonError, jsonOk } from "@/lib/api";
-import { createAutoPostRecords } from "@/lib/services/automation-records";
-import { handleRoleError, requireRole } from "@/lib/services/permissions";
+import { processAutoPostConfigNow } from "@/lib/services/auto-post";
 import { logAction, logAndNotifyError } from "@/lib/services/logging";
+import { handleRoleError, requireRole } from "@/lib/services/permissions";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
 
 type LeanAutoPostConfig = {
@@ -25,32 +25,6 @@ const FIXED_FOLDER_ID = "1sbp9Ql8moMDs9xBSha5lWoKdE1WiEEWz";
 function normalizeFolderId(value: string) {
   const trimmed = value.trim();
   return trimmed === BROKEN_FOLDER_ID ? FIXED_FOLDER_ID : trimmed;
-}
-function extractReadableError(value: string | null | undefined) {
-  const raw = (value ?? "").trim();
-  if (!raw) return "";
-
-  const withoutTags = raw
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  const normalized = withoutTags || raw;
-
-  if (/cloudflare/i.test(raw) || /error 5\d\d/i.test(raw) || /requested url returned error/i.test(raw)) {
-    const codeMatch = raw.match(/error\s*(\d{3})/i) || raw.match(/err(?:or)?code[_:=\s-]*(\d{3})/i);
-    const code = codeMatch?.[1];
-    return code ? "Cloudflare " + code + " error" : "Cloudflare error";
-  }
-
-  return normalized.length > 240 ? normalized.slice(0, 237) + "..." : normalized;
-}
-
-function getNextAutoRun(intervalMinutes: number) {
-  const minutes = [15, 30, 60, 120].includes(intervalMinutes) ? intervalMinutes : 60;
-  return new Date(Date.now() + minutes * 60 * 1000);
 }
 
 export async function POST() {
@@ -84,99 +58,22 @@ export async function POST() {
       return jsonError("Auto Post is already running", 409);
     }
 
-    const webhookUrl = process.env.N8N_WEBHOOK_URL;
-    const webhookSecret = process.env.N8N_SECRET;
-
-    if (!webhookUrl || !webhookSecret) {
-      await AutoPostConfig.findByIdAndUpdate(config._id, {
-        autoPostStatus: "failed",
-        jobStatus: "failed",
-        lastError: "n8n webhook is not configured"
-      });
-      return jsonError("n8n webhook is not configured", 500);
-    }
-
-    const triggeredAt = new Date().toISOString();
-
     await AutoPostConfig.findByIdAndUpdate(config._id, {
       enabled: true,
       autoPostStatus: "running",
-      jobStatus: "pending",
+      jobStatus: "processing",
       lastError: null,
       retryCount: 0,
-      lastRunAt: new Date(triggeredAt)
+      lastRunAt: new Date()
     });
 
-    const records = await createAutoPostRecords({
-      userId,
-      configId: config._id,
-      folderId: normalizedFolderId,
-      folderName: config.folderName,
-      pageIds: config.targetPageIds,
-      intervalMinutes: config.intervalMinutes,
-      captionStrategy: config.captionStrategy,
-      captions: config.captions,
-      aiPrompt: config.aiPrompt,
-      language: config.language,
-      source: "manual-start",
-      triggeredAt
-    });
-
-    const payload = {
-      action: "start",
-      userId,
-      configId: config._id,
-      folderId: normalizedFolderId,
-      folderName: config.folderName,
-      pageIds: config.targetPageIds,
-      intervalMinutes: config.intervalMinutes,
-      captionStrategy: config.captionStrategy,
-      captions: config.captions,
-      aiPrompt: config.aiPrompt,
-      language: config.language,
-      imageAssignmentMode: "unique-per-page",
-      allowImageReuseAfterPoolExhausted: true,
-      maxTargetPages: 100,
-      triggeredAt,
-      source: "manual-start",
-      workflowId: records.workflowId,
-      workflowRunId: records.workflowRunId,
-      contentItemId: records.contentItemId
-    };
-
-    const response = await fetch(webhookUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": webhookSecret
-      },
-      body: JSON.stringify(payload),
-      cache: "no-store"
-    });
-
-    if (!response.ok) {
-      const body = await response.text();
-      const readableError = extractReadableError(body) || `n8n webhook failed with ${response.status}`;
-      await AutoPostConfig.findByIdAndUpdate(config._id, {
-        autoPostStatus: "failed",
-        jobStatus: "failed",
-        lastError: readableError
-      });
-      return jsonError(readableError || "Unable to trigger n8n workflow", response.status);
-    }
-
-    await AutoPostConfig.findByIdAndUpdate(config._id, {
-      autoPostStatus: "waiting",
-      jobStatus: "pending",
-      nextRunAt: getNextAutoRun(config.intervalMinutes),
-      lastError: null
-    });
+    const result = await processAutoPostConfigNow(userId, config._id);
 
     await logAction({
       userId,
       type: "queue",
       level: "success",
-      message: "Auto Post triggered via Start Now",
+      message: "Auto Post triggered in-app",
       metadata: {
         autoPost: true,
         autoPostConfigId: config._id,
@@ -184,17 +81,26 @@ export async function POST() {
         targetPageCount: config.targetPageIds.length,
         intervalMinutes: config.intervalMinutes,
         source: "manual-start",
-        destination: "n8n",
-        action: "start",
-        imageAssignmentMode: "unique-per-page",
-        allowImageReuseAfterPoolExhausted: true,
-        workflowId: records.workflowId,
-        workflowRunId: records.workflowRunId,
-        contentItemId: records.contentItemId
+        destination: "in-app-automation-engine",
+        queued: result.queued,
+        processedJobs: result.processedJobs.length,
+        workflowId: result.workflowId,
+        workflowRunId: result.workflowRunId,
+        contentItemId: result.contentItemId
       }
     });
 
-    return jsonOk({ started: true, ...records }, "Auto Post triggered successfully");
+    return jsonOk(
+      {
+        started: true,
+        queued: result.queued,
+        processedJobs: result.processedJobs,
+        workflowId: result.workflowId,
+        workflowRunId: result.workflowRunId,
+        contentItemId: result.contentItemId
+      },
+      "Auto Post started successfully"
+    );
   } catch (error) {
     if (error instanceof Error && error.message === "FORBIDDEN") {
       return handleRoleError(error);
@@ -210,7 +116,7 @@ export async function POST() {
       await logAndNotifyError({
         userId,
         message: error instanceof Error ? error.message : "Unable to trigger Auto Post",
-        metadata: { autoPost: true, source: "manual-start", destination: "n8n", action: "start" },
+        metadata: { autoPost: true, source: "manual-start", destination: "in-app-automation-engine", action: "start" },
         error
       });
     } catch {

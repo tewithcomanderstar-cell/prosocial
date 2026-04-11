@@ -52,7 +52,7 @@ function mapRunStatus(input: UpdateAutoPostRecordInput): "pending" | "running" |
   if (input.currentJobStatus === "failed" || input.autoPostStatus === "failed") return "failed";
   if (input.currentJobStatus === "posted" || input.autoPostStatus === "success") return "succeeded";
   if (input.currentJobStatus === "processing" || ["running", "posting", "retrying"].includes(input.autoPostStatus || "")) return "running";
-  if (input.autoPostStatus === "paused") return "cancelled";
+  if (["paused", "idle"].includes(input.autoPostStatus || "")) return "cancelled";
   return "pending";
 }
 

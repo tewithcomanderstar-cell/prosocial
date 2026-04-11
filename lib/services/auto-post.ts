@@ -1,12 +1,13 @@
+import { createAutoPostRecords } from "@/lib/services/automation-records";
+import { generateFacebookContent } from "@/lib/services/ai";
+import { fetchImagesFromFolder } from "@/lib/services/google-drive";
+import { ensureValidFacebookConnection, ensureValidGoogleDriveConnection } from "@/lib/services/integration-auth";
+import { logAction, logAndNotifyError } from "@/lib/services/logging";
+import { enqueuePostJobsForPost, processQueuedJobs } from "@/lib/services/queue";
+import { randomItem } from "@/lib/utils";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
 import { Job } from "@/models/Job";
 import { Post } from "@/models/Post";
-import { ensureValidFacebookConnection, ensureValidGoogleDriveConnection } from "@/lib/services/integration-auth";
-import { fetchImagesFromFolder } from "@/lib/services/google-drive";
-import { enqueuePostJobsForPost } from "@/lib/services/queue";
-import { generateFacebookContent } from "@/lib/services/ai";
-import { logAction, logAndNotifyError } from "@/lib/services/logging";
-import { randomItem } from "@/lib/utils";
 
 type AutoPostStatus = "idle" | "running" | "posting" | "success" | "failed" | "retrying" | "paused" | "waiting";
 type JobStatus = "pending" | "processing" | "posted" | "failed";
@@ -18,7 +19,7 @@ type LeanAutoPostConfig = {
   folderId: string;
   folderName?: string;
   targetPageIds: string[];
-  intervalHours: number;
+  intervalMinutes: number;
   minRandomDelayMinutes?: number;
   maxRandomDelayMinutes?: number;
   maxPostsPerDay?: number;
@@ -41,9 +42,23 @@ type DriveImage = {
   mimeType?: string;
 };
 
-function getNextAutoRun(intervalHours: number) {
-  const hours = Math.max(1, intervalHours || 1);
-  return new Date(Date.now() + hours * 60 * 60 * 1000);
+type AutoPostRunSource = "manual-start" | "schedule";
+
+type QueueAutoPostsOptions = {
+  source: AutoPostRunSource;
+  immediate: boolean;
+};
+
+type QueueAutoPostsResult = {
+  queued: number;
+  workflowId: string;
+  workflowRunId: string;
+  contentItemId: string;
+};
+
+function getNextAutoRun(intervalMinutes: number) {
+  const minutes = [15, 30, 60, 120].includes(intervalMinutes) ? intervalMinutes : 60;
+  return new Date(Date.now() + minutes * 60 * 1000);
 }
 
 function getRandomDelayMinutes(minMinutes = 0, maxMinutes = 0) {
@@ -65,6 +80,9 @@ async function updateAutoPostState(
     lastSelectedImageId: string | null;
     enabled: boolean;
     lastStatus: "pending" | "posted" | "failed" | "paused";
+    lastWorkflowId: unknown;
+    lastWorkflowRunId: unknown;
+    lastContentItemId: unknown;
   }>
 ) {
   await AutoPostConfig.findByIdAndUpdate(configId, updates);
@@ -102,9 +120,9 @@ async function buildCaption(config: LeanAutoPostConfig, image: DriveImage) {
     const variants = await generateFacebookContent(
       keyword,
       {
-        audience: config.language === "en" ? "general audience" : "general audience",
+        audience: "general audience",
         contentStyle: "social post",
-        tone: config.language === "en" ? "friendly" : "friendly",
+        tone: "friendly",
         pageName: "Auto Post"
       },
       config.userId
@@ -122,178 +140,226 @@ async function buildCaption(config: LeanAutoPostConfig, image: DriveImage) {
     return manualCaption;
   }
 
-  return config.language === "en"
-    ? `Fresh update from ${config.folderName || "your Google Drive"}`
-    : `Fresh update from ${config.folderName || "your Google Drive"}`;
+  return `Fresh update from ${config.folderName || "your Google Drive"}`;
+}
+
+async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: QueueAutoPostsOptions): Promise<QueueAutoPostsResult> {
+  const triggeredAt = new Date();
+  const nextRunAt = getNextAutoRun(config.intervalMinutes);
+
+  await updateAutoPostState(config._id, {
+    autoPostStatus: "running",
+    jobStatus: "pending",
+    lastStatus: "pending",
+    lastError: null,
+    retryCount: 0,
+    lastRunAt: triggeredAt,
+    nextRunAt
+  });
+
+  if (!config.targetPageIds.length) {
+    throw new Error("No Facebook pages selected for Auto Post");
+  }
+
+  const totalToday = await countSuccessfulAutoPostsToday(config.userId, config._id);
+  if (totalToday >= (config.maxPostsPerDay ?? 12)) {
+    await updateAutoPostState(config._id, {
+      autoPostStatus: "waiting",
+      jobStatus: "pending",
+      lastStatus: "pending",
+      lastError: "Daily Auto Post limit reached",
+      lastRunAt: triggeredAt,
+      nextRunAt
+    });
+
+    throw new Error("Daily Auto Post limit reached");
+  }
+
+  const eligiblePageIds: string[] = [];
+  for (const pageId of config.targetPageIds) {
+    const pageCount = await countSuccessfulAutoPostsToday(config.userId, config._id, pageId);
+    if (pageCount < (config.maxPostsPerPagePerDay ?? 4)) {
+      eligiblePageIds.push(pageId);
+    }
+  }
+
+  if (!eligiblePageIds.length) {
+    await updateAutoPostState(config._id, {
+      autoPostStatus: "waiting",
+      jobStatus: "pending",
+      lastStatus: "pending",
+      lastError: "Per-page daily Auto Post limit reached",
+      lastRunAt: triggeredAt,
+      nextRunAt
+    });
+
+    throw new Error("Per-page daily Auto Post limit reached");
+  }
+
+  const driveConnection = (await ensureValidGoogleDriveConnection(config.userId)) as LeanDriveConnection;
+  await ensureValidFacebookConnection(config.userId);
+
+  const folderPayload = await fetchImagesFromFolder(driveConnection.accessToken, config.folderId || "root");
+  const images = folderPayload.files.filter((file) => (file.mimeType || "").includes("image/"));
+
+  if (!images.length) {
+    await updateAutoPostState(config._id, {
+      autoPostStatus: "failed",
+      jobStatus: "failed",
+      lastStatus: "failed",
+      lastError: "No JPG or PNG images found in the selected folder",
+      lastRunAt: triggeredAt,
+      nextRunAt,
+      retryCount: 0
+    });
+
+    throw new Error("No JPG or PNG images found in the selected folder");
+  }
+
+  const records = await createAutoPostRecords({
+    userId: config.userId,
+    configId: config._id,
+    folderId: config.folderId,
+    folderName: config.folderName || "Google Drive",
+    pageIds: eligiblePageIds,
+    intervalMinutes: config.intervalMinutes,
+    captionStrategy: config.captionStrategy,
+    captions: config.captions,
+    aiPrompt: config.aiPrompt || "",
+    language: config.language || "th",
+    source: options.source,
+    triggeredAt: triggeredAt.toISOString()
+  });
+
+  let queued = 0;
+  let lastPostId: unknown = null;
+  let lastSelectedImageId: string | null = null;
+
+  for (let index = 0; index < eligiblePageIds.length; index += 1) {
+    const pageId = eligiblePageIds[index];
+    const chosenImage = images[index % images.length];
+    const caption = await buildCaption(config, chosenImage);
+    const delayMinutes = options.immediate ? 0 : getRandomDelayMinutes(config.minRandomDelayMinutes ?? 0, config.maxRandomDelayMinutes ?? 0);
+    const startAt = new Date(Date.now() + delayMinutes * 60 * 1000);
+
+    const post = await Post.create({
+      userId: config.userId,
+      title: `Auto Post ${pageId} ${triggeredAt.toISOString()}`,
+      content: caption,
+      hashtags: [],
+      imageUrls: [`drive:${chosenImage.id}`],
+      targetPageIds: [pageId],
+      randomizeImages: false,
+      randomizeCaption: false,
+      postingMode: "broadcast",
+      variants: [],
+      status: "scheduled"
+    });
+
+    lastPostId = post._id;
+    lastSelectedImageId = chosenImage.id;
+
+    const queuedForPost = await enqueuePostJobsForPost(config.userId, String(post._id), {
+      applyRandomDelay: false,
+      startAt,
+      payloadExtras: {
+        autoPostConfigId: config._id,
+        autoSource: "google-drive",
+        selectedFolderId: config.folderId,
+        selectedImageId: chosenImage.id,
+        scheduledDelayMinutes: delayMinutes,
+        workflowId: records.workflowId,
+        workflowRunId: records.workflowRunId,
+        contentItemId: records.contentItemId
+      }
+    });
+
+    queued += queuedForPost;
+  }
+
+  await updateAutoPostState(config._id, {
+    autoPostStatus: "posting",
+    jobStatus: "pending",
+    lastStatus: "pending",
+    lastError: null,
+    lastRunAt: triggeredAt,
+    nextRunAt,
+    retryCount: 0,
+    lastPostId,
+    lastSelectedImageId,
+    lastWorkflowId: records.workflowId,
+    lastWorkflowRunId: records.workflowRunId,
+    lastContentItemId: records.contentItemId
+  });
+
+  await logAction({
+    userId: config.userId,
+    type: "queue",
+    level: "info",
+    message: options.source === "manual-start" ? "Auto Post started in-app" : "Scheduled Auto Post queued",
+    relatedPostId: lastPostId ? String(lastPostId) : undefined,
+    metadata: {
+      autoPost: true,
+      autoPostConfigId: config._id,
+      folderId: config.folderId,
+      source: options.source,
+      queued,
+      eligiblePageIds,
+      lastSelectedImageId,
+      workflowId: records.workflowId,
+      workflowRunId: records.workflowRunId,
+      contentItemId: records.contentItemId
+    }
+  });
+
+  return {
+    queued,
+    ...records
+  };
+}
+
+export async function processAutoPostConfigNow(userId: string, configId: string) {
+  const config = (await AutoPostConfig.findOne({ _id: configId, userId }).lean()) as unknown as LeanAutoPostConfig | null;
+
+  if (!config) {
+    throw new Error("Auto Post settings not found");
+  }
+
+  const result = await queueAutoPostsForConfig(config, {
+    source: "manual-start",
+    immediate: true
+  });
+
+  const processedJobs = await processQueuedJobs(Math.max(config.targetPageIds.length, 1));
+
+  return {
+    ...result,
+    processedJobs
+  };
 }
 
 export async function processDueAutoPosts() {
   const configs = (await AutoPostConfig.find({
     enabled: true,
+    autoPostStatus: { $nin: ["paused"] },
     nextRunAt: { $lte: new Date() }
-  }).sort({ nextRunAt: 1 }).lean()) as unknown as LeanAutoPostConfig[];
+  })
+    .sort({ nextRunAt: 1 })
+    .lean()) as unknown as LeanAutoPostConfig[];
 
   let processed = 0;
 
   for (const config of configs) {
-    const nextRunAt = getNextAutoRun(config.intervalHours);
-
     try {
-      await updateAutoPostState(config._id, {
-        autoPostStatus: "running",
-        jobStatus: "pending",
-        lastError: null
+      const result = await queueAutoPostsForConfig(config, {
+        source: "schedule",
+        immediate: false
       });
-
-      if (!config.targetPageIds.length) {
-        await updateAutoPostState(config._id, {
-          enabled: false,
-          autoPostStatus: "failed",
-          jobStatus: "failed",
-          lastStatus: "failed",
-          lastError: "No Facebook pages selected for Auto Post",
-          lastRunAt: new Date(),
-          nextRunAt,
-          retryCount: 0
-        });
-        await logAndNotifyError({
-          userId: config.userId,
-          message: "Auto Post stopped because no Facebook pages were selected",
-          metadata: { autoPostConfigId: config._id }
-        });
-        continue;
-      }
-
-      const totalToday = await countSuccessfulAutoPostsToday(config.userId, config._id);
-      if (totalToday >= (config.maxPostsPerDay ?? 12)) {
-        await updateAutoPostState(config._id, {
-          autoPostStatus: "waiting",
-          jobStatus: "pending",
-          lastStatus: "pending",
-          lastError: "Daily Auto Post limit reached",
-          lastRunAt: new Date(),
-          nextRunAt,
-          retryCount: 0
-        });
-        continue;
-      }
-
-      const pageId = randomItem(config.targetPageIds);
-      const pageCount = await countSuccessfulAutoPostsToday(config.userId, config._id, pageId);
-      if (pageCount >= (config.maxPostsPerPagePerDay ?? 4)) {
-        await updateAutoPostState(config._id, {
-          autoPostStatus: "waiting",
-          jobStatus: "pending",
-          lastStatus: "pending",
-          lastError: "Per-page daily Auto Post limit reached",
-          lastRunAt: new Date(),
-          nextRunAt,
-          retryCount: 0
-        });
-        continue;
-      }
-
-      const driveConnection = (await ensureValidGoogleDriveConnection(config.userId)) as LeanDriveConnection;
-      await ensureValidFacebookConnection(config.userId);
-
-      const folderPayload = await fetchImagesFromFolder(driveConnection.accessToken, config.folderId || "root");
-      const images = folderPayload.files.filter((file) => (file.mimeType || "").includes("image/"));
-
-      if (!images.length) {
-        await updateAutoPostState(config._id, {
-          autoPostStatus: "failed",
-          jobStatus: "failed",
-          lastStatus: "failed",
-          lastError: "No JPG or PNG images found in the selected folder",
-          lastRunAt: new Date(),
-          nextRunAt,
-          retryCount: 0
-        });
-        await logAndNotifyError({
-          userId: config.userId,
-          message: "Auto Post failed because the selected Google Drive folder has no images",
-          metadata: { autoPostConfigId: config._id, folderId: config.folderId }
-        });
-        continue;
-      }
-
-      const chosenImage = randomItem(images);
-      const caption = await buildCaption(config, chosenImage);
-      const delayMinutes = getRandomDelayMinutes(config.minRandomDelayMinutes ?? 0, config.maxRandomDelayMinutes ?? 0);
-      const startAt = new Date(Date.now() + delayMinutes * 60 * 1000);
-
-      await updateAutoPostState(config._id, {
-        autoPostStatus: "posting",
-        jobStatus: "pending",
-        lastStatus: "pending",
-        lastError: null,
-        lastRunAt: new Date(),
-        nextRunAt,
-        retryCount: 0,
-        lastSelectedImageId: chosenImage.id
-      });
-
-      const post = await Post.create({
-        userId: config.userId,
-        title: `Auto Post ${new Date().toISOString()}`,
-        content: caption,
-        hashtags: [],
-        imageUrls: [`drive:${chosenImage.id}`],
-        targetPageIds: config.targetPageIds,
-        randomizeImages: false,
-        randomizeCaption: false,
-        postingMode: "random-page",
-        variants: [],
-        status: "scheduled"
-      });
-
-      const queued = await enqueuePostJobsForPost(config.userId, String(post._id), {
-        applyRandomDelay: false,
-        startAt,
-        payloadExtras: {
-          autoPostConfigId: config._id,
-          autoSource: "google-drive",
-          selectedFolderId: config.folderId,
-          selectedImageId: chosenImage.id,
-          scheduledDelayMinutes: delayMinutes
-        }
-      });
-
-      await updateAutoPostState(config._id, {
-        autoPostStatus: "posting",
-        jobStatus: "pending",
-        lastStatus: "pending",
-        lastError: null,
-        lastRunAt: new Date(),
-        nextRunAt,
-        retryCount: 0,
-        lastPostId: post._id,
-        lastSelectedImageId: chosenImage.id
-      });
-
-      await logAction({
-        userId: config.userId,
-        type: "queue",
-        level: "info",
-        message: "Auto Post queued from Google Drive",
-        relatedPostId: String(post._id),
-        metadata: {
-          autoPostConfigId: config._id,
-          folderId: config.folderId,
-          imageId: chosenImage.id,
-          queued,
-          targetPageId: pageId,
-          scheduledDelayMinutes: delayMinutes,
-          autoPostStatus: "waiting",
-          jobStatus: "pending"
-        }
-      });
-
-      processed += queued;
+      processed += result.queued;
     } catch (error) {
       await updateAutoPostState(config._id, {
         lastRunAt: new Date(),
-        nextRunAt,
+        nextRunAt: getNextAutoRun(config.intervalMinutes),
         autoPostStatus: "failed",
         jobStatus: "failed",
         lastStatus: "failed",
@@ -303,7 +369,7 @@ export async function processDueAutoPosts() {
       await logAndNotifyError({
         userId: config.userId,
         message: error instanceof Error ? error.message : "Unable to process Auto Post",
-        metadata: { autoPostConfigId: config._id },
+        metadata: { autoPost: true, autoPostConfigId: config._id, source: "schedule" },
         error
       });
     }
@@ -311,5 +377,3 @@ export async function processDueAutoPosts() {
 
   return processed;
 }
-
-
