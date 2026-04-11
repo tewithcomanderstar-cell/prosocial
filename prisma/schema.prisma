@@ -1,0 +1,594 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum WorkspaceStatus {
+  active
+  suspended
+  archived
+}
+
+enum UserStatus {
+  invited
+  active
+  disabled
+  archived
+}
+
+enum MembershipRole {
+  owner
+  admin
+  editor
+  reviewer
+  operator
+  viewer
+}
+
+enum PlatformStatus {
+  active
+  inactive
+  deprecated
+}
+
+enum AccountStatus {
+  active
+  inactive
+  permission_error
+  disconnected
+  needs_reconnect
+}
+
+enum CredentialStatus {
+  active
+  expired
+  invalid
+  revoked
+  needs_reconnect
+}
+
+enum DestinationStatus {
+  active
+  inactive
+  permission_error
+  disconnected
+}
+
+enum ContentStatus {
+  draft
+  pending_review
+  approved
+  scheduled
+  publishing
+  published
+  failed
+  archived
+}
+
+enum ReviewStatus {
+  not_required
+  pending
+  approved
+  rejected
+}
+
+enum PublishStatus {
+  not_scheduled
+  queued
+  publishing
+  published
+  failed
+  retry_scheduled
+  cancelled
+}
+
+enum WorkflowStatus {
+  draft
+  active
+  paused
+  archived
+}
+
+enum RunStatus {
+  queued
+  running
+  succeeded
+  failed
+  cancelled
+  skipped
+}
+
+enum ApprovalStatus {
+  pending
+  approved
+  rejected
+  cancelled
+}
+
+enum PublishJobStatus {
+  queued
+  locked
+  running
+  succeeded
+  failed
+  retry_scheduled
+  dead_letter
+  cancelled
+}
+
+enum WebhookProcessingStatus {
+  received
+  deduplicated
+  queued
+  processing
+  processed
+  failed
+  ignored
+  invalid_signature
+}
+
+enum NotificationChannel {
+  in_app
+  email
+  line
+  slack
+}
+
+enum NotificationStatus {
+  queued
+  sent
+  failed
+  read
+}
+
+enum AuditActorType {
+  user
+  system
+  job
+  webhook
+}
+
+enum MediaType {
+  image
+  video
+  document
+}
+
+enum MediaProcessingStatus {
+  pending
+  processing
+  ready
+  failed
+}
+
+enum ApprovalDecision {
+  approved
+  rejected
+  cancelled
+}
+
+model Workspace {
+  id                String             @id @default(cuid())
+  name              String
+  slug              String             @unique
+  status            WorkspaceStatus    @default(active)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  memberships       Membership[]
+  accounts          Account[]
+  destinations      Destination[]
+  contentItems      ContentItem[]
+  mediaAssets       MediaAsset[]
+  workflows         Workflow[]
+  workflowRuns      WorkflowRun[]
+  approvalRequests  ApprovalRequest[]
+  publishJobs       PublishJob[]
+  webhookEvents     WebhookEvent[]
+  notifications     Notification[]
+  auditLogs         AuditLog[]
+
+  @@map("workspaces")
+}
+
+model User {
+  id                       String            @id @default(cuid())
+  email                    String            @unique
+  name                     String
+  avatarUrl                String?
+  status                   UserStatus        @default(invited)
+  createdAt                DateTime          @default(now())
+  updatedAt                DateTime          @updatedAt
+  memberships              Membership[]
+  createdContentItems      ContentItem[]     @relation("ContentItemCreatedBy")
+  updatedContentItems      ContentItem[]     @relation("ContentItemUpdatedBy")
+  createdWorkflows         Workflow[]        @relation("WorkflowCreatedBy")
+  updatedWorkflows         Workflow[]        @relation("WorkflowUpdatedBy")
+  approvalRequestsMade     ApprovalRequest[] @relation("ApprovalRequestedBy")
+  approvalRequestsAssigned ApprovalRequest[] @relation("ApprovalAssignedTo")
+  notifications            Notification[]
+  auditLogs                AuditLog[]        @relation("AuditActorUser")
+
+  @@map("users")
+}
+
+model Membership {
+  id          String         @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        MembershipRole
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  workspace   Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([workspaceId, role])
+  @@map("memberships")
+}
+
+model Platform {
+  id            String         @id @default(cuid())
+  key           String         @unique
+  name          String
+  status        PlatformStatus @default(active)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  accounts      Account[]
+  destinations  Destination[]
+  webhookEvents WebhookEvent[]
+
+  @@map("platforms")
+}
+
+model Account {
+  id                String        @id @default(cuid())
+  workspaceId       String
+  platformId        String
+  providerAccountId String
+  displayName       String
+  status            AccountStatus @default(active)
+  metadataJson      Json?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  workspace         Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  platform          Platform      @relation(fields: [platformId], references: [id], onDelete: Restrict)
+  credentials       Credential[]
+  destinations      Destination[]
+
+  @@unique([platformId, providerAccountId])
+  @@index([workspaceId, platformId, status])
+  @@map("accounts")
+}
+
+model Credential {
+  id                    String           @id @default(cuid())
+  accountId             String
+  credentialType        String
+  accessTokenEncrypted  String
+  refreshTokenEncrypted String?
+  expiresAt             DateTime?
+  scopesJson            Json?
+  status                CredentialStatus @default(active)
+  lastValidatedAt       DateTime?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+  account               Account          @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, status, expiresAt])
+  @@map("credentials")
+}
+
+model Destination {
+  id                    String            @id @default(cuid())
+  workspaceId           String
+  platformId            String
+  accountId             String
+  externalId            String
+  type                  String
+  name                  String
+  status                DestinationStatus @default(active)
+  permissionsJson       Json?
+  metadataJson          Json?
+  isPaused              Boolean           @default(false)
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+  workspace             Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  platform              Platform          @relation(fields: [platformId], references: [id], onDelete: Restrict)
+  account               Account           @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  contentDestinations   ContentDestination[]
+
+  @@unique([platformId, externalId])
+  @@index([workspaceId, platformId, status, isPaused])
+  @@map("destinations")
+}
+
+model ContentItem {
+  id                  String               @id @default(cuid())
+  workspaceId         String
+  title               String?
+  bodyText            String?
+  status              ContentStatus        @default(draft)
+  reviewStatus        ReviewStatus         @default(not_required)
+  publishStatus       PublishStatus        @default(not_scheduled)
+  sourceType          String?
+  sourceRef           String?
+  scheduledAt         DateTime?
+  publishedAt         DateTime?
+  createdById         String
+  updatedById         String?
+  metadataJson        Json?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  workspace           Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy           User                 @relation("ContentItemCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy           User?                @relation("ContentItemUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  contentDestinations ContentDestination[]
+  mediaAssets         MediaAsset[]
+  workflowRuns        WorkflowRun[]
+  approvalRequests    ApprovalRequest[]
+
+  @@index([workspaceId, status, scheduledAt])
+  @@index([workspaceId, reviewStatus, createdAt])
+  @@map("content_items")
+}
+
+model ContentDestination {
+  id                  String         @id @default(cuid())
+  contentItemId       String
+  destinationId       String
+  platformPayloadJson Json?
+  publishStatus       PublishStatus  @default(not_scheduled)
+  scheduledAt         DateTime?
+  publishedAt         DateTime?
+  externalPostId      String?
+  lastError           String?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  contentItem         ContentItem    @relation(fields: [contentItemId], references: [id], onDelete: Cascade)
+  destination         Destination    @relation(fields: [destinationId], references: [id], onDelete: Cascade)
+  publishJobs         PublishJob[]
+
+  @@unique([contentItemId, destinationId])
+  @@index([destinationId, publishStatus, scheduledAt])
+  @@index([contentItemId, publishStatus, scheduledAt])
+  @@map("content_destinations")
+}
+
+model MediaAsset {
+  id               String                @id @default(cuid())
+  workspaceId      String
+  contentItemId    String?
+  type             MediaType
+  storageKey       String
+  publicUrl        String
+  mimeType         String
+  sizeBytes        BigInt
+  width            Int?
+  height           Int?
+  durationMs       Int?
+  checksum         String?
+  processingStatus MediaProcessingStatus @default(pending)
+  metadataJson     Json?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+  workspace        Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  contentItem      ContentItem?          @relation(fields: [contentItemId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, processingStatus, createdAt])
+  @@index([contentItemId])
+  @@map("media_assets")
+}
+
+model Workflow {
+  id           String         @id @default(cuid())
+  workspaceId  String
+  name         String
+  description  String?
+  status       WorkflowStatus @default(draft)
+  triggerType  String
+  version      Int            @default(1)
+  configJson   Json?
+  createdById  String
+  updatedById  String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  workspace    Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy    User           @relation("WorkflowCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy    User?          @relation("WorkflowUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  steps        WorkflowStep[]
+  runs         WorkflowRun[]
+
+  @@index([workspaceId, status])
+  @@map("workflows")
+}
+
+model WorkflowStep {
+  id               String            @id @default(cuid())
+  workflowId       String
+  stepOrder        Int
+  stepType         String
+  stepKey          String
+  configJson       Json?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  workflow         Workflow          @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  workflowRunSteps WorkflowRunStep[]
+
+  @@unique([workflowId, stepOrder])
+  @@index([workflowId, stepKey])
+  @@map("workflow_steps")
+}
+
+model WorkflowRun {
+  id             String            @id @default(cuid())
+  workspaceId    String
+  workflowId     String
+  contentItemId  String?
+  triggerType    String
+  triggerSource  String?
+  triggerEventId String?
+  status         RunStatus         @default(queued)
+  inputJson      Json?
+  contextJson    Json?
+  outputJson     Json?
+  errorCode      String?
+  errorMessage   String?
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  workspace      Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workflow       Workflow          @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  contentItem    ContentItem?      @relation(fields: [contentItemId], references: [id], onDelete: SetNull)
+  triggerEvent   WebhookEvent?     @relation(fields: [triggerEventId], references: [id], onDelete: SetNull)
+  runSteps       WorkflowRunStep[]
+  publishJobs    PublishJob[]
+
+  @@index([workspaceId, workflowId, status, createdAt])
+  @@index([status, startedAt])
+  @@map("workflow_runs")
+}
+
+model WorkflowRunStep {
+  id             String       @id @default(cuid())
+  workflowRunId  String
+  workflowStepId String?
+  stepOrder      Int
+  stepType       String
+  status         RunStatus    @default(queued)
+  inputJson      Json?
+  outputJson     Json?
+  errorCode      String?
+  errorMessage   String?
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  workflowRun    WorkflowRun  @relation(fields: [workflowRunId], references: [id], onDelete: Cascade)
+  workflowStep   WorkflowStep? @relation(fields: [workflowStepId], references: [id], onDelete: SetNull)
+
+  @@unique([workflowRunId, stepOrder])
+  @@index([workflowRunId, stepOrder])
+  @@index([status, startedAt])
+  @@map("workflow_run_steps")
+}
+
+model ApprovalRequest {
+  id            String           @id @default(cuid())
+  workspaceId   String
+  contentItemId String
+  requestedById String
+  assignedToId  String?
+  status        ApprovalStatus   @default(pending)
+  decision      ApprovalDecision?
+  comment       String?
+  decidedAt     DateTime?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  workspace     Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  contentItem   ContentItem      @relation(fields: [contentItemId], references: [id], onDelete: Cascade)
+  requestedBy   User             @relation("ApprovalRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
+  assignedTo    User?            @relation("ApprovalAssignedTo", fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  @@index([contentItemId, status, createdAt])
+  @@index([workspaceId, status, createdAt])
+  @@index([assignedToId, status, createdAt])
+  @@map("approval_requests")
+}
+
+model PublishJob {
+  id                 String           @id @default(cuid())
+  workspaceId        String
+  contentDestinationId String
+  workflowRunId      String?
+  status             PublishJobStatus @default(queued)
+  attemptCount       Int              @default(0)
+  maxAttempts        Int              @default(5)
+  nextAttemptAt      DateTime?
+  lockKey            String?
+  lastError          String?
+  providerErrorCode  String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  workspace          Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  contentDestination ContentDestination @relation(fields: [contentDestinationId], references: [id], onDelete: Cascade)
+  workflowRun        WorkflowRun?     @relation(fields: [workflowRunId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, status, nextAttemptAt])
+  @@index([status, nextAttemptAt])
+  @@index([contentDestinationId, status])
+  @@map("publish_jobs")
+}
+
+model WebhookEvent {
+  id               String                  @id @default(cuid())
+  workspaceId      String?
+  platformId       String?
+  provider         String
+  eventType        String
+  eventKey         String?
+  deliveryId       String?
+  signatureValid   Boolean                 @default(false)
+  receivedAt       DateTime                @default(now())
+  payloadJson      Json
+  headersJson      Json?
+  dedupKey         String
+  processingStatus WebhookProcessingStatus @default(received)
+  processedAt      DateTime?
+  errorMessage     String?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+  workspace        Workspace?              @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  platform         Platform?               @relation(fields: [platformId], references: [id], onDelete: SetNull)
+  workflowRuns     WorkflowRun[]
+
+  @@unique([provider, dedupKey])
+  @@index([provider, processingStatus, receivedAt])
+  @@index([deliveryId])
+  @@map("webhook_events")
+}
+
+model Notification {
+  id          String              @id @default(cuid())
+  workspaceId String
+  userId      String?
+  type        String
+  channel     NotificationChannel
+  status      NotificationStatus  @default(queued)
+  title       String
+  body        String
+  payloadJson Json?
+  sentAt      DateTime?
+  readAt      DateTime?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  workspace   Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, userId, status, createdAt])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id          String         @id @default(cuid())
+  workspaceId String
+  actorUserId String?
+  actorType   AuditActorType
+  action      String
+  entityType  String
+  entityId    String
+  ipAddress   String?
+  userAgent   String?
+  metadataJson Json?
+  createdAt   DateTime       @default(now())
+  workspace   Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  actorUser   User?          @relation("AuditActorUser", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, entityType, entityId, createdAt])
+  @@index([actorUserId, createdAt])
+  @@map("audit_logs")
+}
