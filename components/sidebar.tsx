@@ -24,48 +24,61 @@ export function Sidebar() {
 
   const groups: NavGroup[] = [
     {
-      title: "Core",
+      title: "Overview",
       icon: "dashboard",
       items: [
         { href: "/dashboard", label: t("navDashboard"), icon: "dashboard" },
-        { href: "/posts/new", label: "Create Post", icon: "compose" },
-        { href: "/auto-post", label: "Auto Post", icon: "planner" },
-        { href: "/planner", label: "Planner", icon: "planner" },
-        { href: "/media-library", label: "Media Library", icon: "media" }
+        { href: "/runs", label: "Runs", icon: "logs" },
+        { href: "/notifications", label: "Alerts", icon: "integrations" }
+      ]
+    },
+    {
+      title: "Automation",
+      icon: "planner",
+      items: [
+        { href: "/auto-post", label: "Workflows", icon: "planner" },
+        { href: "/templates", label: "Templates", icon: "template" }
       ]
     },
     {
       title: "Content",
-      icon: "template",
+      icon: "compose",
       items: [
-        { href: "/analytics", label: t("navAnalytics"), icon: "analytics" },
-        { href: "/recommendations", label: "Recommendations", icon: "recommend" },
-        { href: "/templates", label: "Templates", icon: "template" },
-        { href: "/bulk", label: "Bulk Upload", icon: "bulk" }
+        { href: "/posts/new", label: "Create Post", icon: "compose" },
+        { href: "/queue", label: "Queue", icon: "bulk" },
+        { href: "/planner", label: "Planner", icon: "planner" },
+        { href: "/media-library", label: "Media Library", icon: "media" },
+        { href: "/ai", label: "AI Tools", icon: "recommend" }
       ]
     },
     {
-      title: "Workspace",
-      icon: "team",
+      title: "Facebook",
+      icon: "facebook",
       items: [
-        { href: "/profile", label: "Profile", icon: "profile" },
-        { href: "/connected-accounts", label: "Connected Accounts", icon: "accounts" },
-        { href: "/team", label: "Team & Workspace", icon: "team" },
-        { href: "/personas", label: t("navPersonas"), icon: "personas" },
+        { href: "/connected-accounts", label: "Pages", icon: "accounts" },
         { href: "/connections/facebook", label: t("navFacebook"), icon: "facebook" },
         { href: "/connections/google-drive", label: t("navGoogle"), icon: "drive" }
+      ]
+    },
+    {
+      title: "Team",
+      icon: "team",
+      items: [
+        { href: "/approvals", label: "Approvals", icon: "team" },
+        { href: "/team", label: "Members & Roles", icon: "team" },
+        { href: "/personas", label: t("navPersonas"), icon: "personas" }
       ]
     },
     {
       title: "System",
       icon: "system",
       items: [
-        { href: "/integrations", label: "Integrations & Notifications", icon: "integrations" },
+        { href: "/integrations", label: "API / Webhooks", icon: "integrations" },
+        { href: "/analytics", label: t("navAnalytics"), icon: "analytics" },
         { href: "/settings", label: t("navSettings"), icon: "settings" },
         { href: "/logs", label: t("navLogs"), icon: "logs" },
         { href: "/setup", label: t("navSetup"), icon: "setup" },
-        { href: "/privacy-policy", label: "Privacy Policy", icon: "privacy" },
-        { href: "/login", label: t("navLogin"), icon: "login" }
+        { href: "/profile", label: "Profile", icon: "profile" }
       ]
     }
   ];
