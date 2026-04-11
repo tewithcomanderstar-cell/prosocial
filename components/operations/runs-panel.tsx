@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 type RunItem = {
@@ -104,13 +105,14 @@ export function RunsPanel() {
                   <td>{run.startedAt ? new Date(run.startedAt).toLocaleString() : "-"}</td>
                   <td>{run.finishedAt ? new Date(run.finishedAt).toLocaleString() : "-"}</td>
                   <td>
-                    {run.status === "failed" ? (
-                      <button type="button" className="button-secondary" onClick={() => retryRun(run.id)} disabled={retryingId === run.id}>
-                        {retryingId === run.id ? "Retrying..." : "Retry"}
-                      </button>
-                    ) : (
-                      <span className="muted">Healthy</span>
-                    )}
+                    <div className="split" style={{ gap: 8, justifyContent: "flex-start" }}>
+                      <Link href={`/runs/${run.id}`} className="button-secondary">Inspect</Link>
+                      {run.status === "failed" ? (
+                        <button type="button" className="button-secondary" onClick={() => retryRun(run.id)} disabled={retryingId === run.id}>
+                          {retryingId === run.id ? "Retrying..." : "Retry"}
+                        </button>
+                      ) : null}
+                    </div>
                   </td>
                 </tr>
               ))}

@@ -8,6 +8,13 @@ type Summary = {
   scheduledPosts: number;
   recurringPosts: number;
   oneTimePosts: number;
+  pendingApprovals: number;
+  failedRuns: number;
+  runningRuns: number;
+  unreadAlerts: number;
+  connectedPages: number;
+  tokenWarnings: number;
+  activeConnections: number;
 };
 
 export function DashboardData() {
@@ -45,21 +52,60 @@ export function DashboardData() {
     );
   }
 
-  const stats = [
+  const primaryStats = [
+    { label: "Connected pages", value: summary.connectedPages },
+    { label: "Pending approvals", value: summary.pendingApprovals },
+    { label: "Failed runs", value: summary.failedRuns },
+    { label: "Token warnings", value: summary.tokenWarnings }
+  ];
+
+  const secondaryStats = [
     { label: t("dashScheduledPosts"), value: summary.scheduledPosts },
     { label: t("dashRecurringPosts"), value: summary.recurringPosts },
     { label: t("dashOneTimePosts"), value: summary.oneTimePosts },
     { label: t("dashTotalPosts"), value: summary.totalPosts }
   ];
 
+  const recommendedAction = summary.tokenWarnings > 0
+    ? "Reconnect destinations with token warnings"
+    : summary.failedRuns > 0
+      ? "Review failed runs and retry"
+      : "System healthy";
+
   return (
-    <div className="grid stats-grid">
-      {stats.map((stat) => (
-        <div key={stat.label} className="card stat stat-card">
-          <strong>{stat.value}</strong>
-          <span>{stat.label}</span>
+    <div className="stack">
+      <div className="grid stats-grid">
+        {primaryStats.map((stat) => (
+          <div key={stat.label} className="card stat stat-card">
+            <strong>{stat.value}</strong>
+            <span>{stat.label}</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid stats-grid">
+        {secondaryStats.map((stat) => (
+          <div key={stat.label} className="card stat stat-card">
+            <strong>{stat.value}</strong>
+            <span>{stat.label}</span>
+          </div>
+        ))}
+      </div>
+
+      <section className="card stack">
+        <div className="section-head">
+          <div>
+            <h3>Operational snapshot</h3>
+            <span className="muted">A quick read on queue pressure, workflow health, and connector readiness.</span>
+          </div>
         </div>
-      ))}
+        <div className="list">
+          <div className="list-item"><span>Publishing now</span><strong>{summary.runningRuns}</strong></div>
+          <div className="list-item"><span>Unread alerts</span><strong>{summary.unreadAlerts}</strong></div>
+          <div className="list-item"><span>Active connections</span><strong>{summary.activeConnections}</strong></div>
+          <div className="list-item"><span>Recommended action</span><strong>{recommendedAction}</strong></div>
+        </div>
+      </section>
     </div>
   );
 }
