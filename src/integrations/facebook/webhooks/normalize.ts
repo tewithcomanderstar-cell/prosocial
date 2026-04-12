@@ -4,7 +4,7 @@ import type { NormalizedWebhookEvent } from '@/src/jobs/contracts/webhook.contra
 export function normalizeFacebookWebhookEvent(payload: any): NormalizedWebhookEvent[] {
   const entries = Array.isArray(payload?.entry) ? payload.entry : [];
 
-  return entries.flatMap((entry) => {
+  return entries.flatMap((entry: any) => {
     const changes = Array.isArray(entry?.changes) ? entry.changes : [];
     return changes.map((change: any) => {
       const rawFingerprint = JSON.stringify({ object: payload?.object, entryId: entry?.id, field: change?.field, value: change?.value });

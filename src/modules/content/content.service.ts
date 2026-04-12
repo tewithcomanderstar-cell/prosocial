@@ -12,7 +12,7 @@ import type { ContentItemDto } from './content.types';
 function toContentDto(record: Awaited<ReturnType<typeof prisma.contentItem.findFirstOrThrow>> & { contentDestinations?: Array<any>; mediaAssets?: Array<any> }): ContentItemDto {
   return {
     ...record,
-    destinations: (record.contentDestinations ?? []).map((item) => ({
+    destinations: (record.contentDestinations ?? []).map((item: NonNullable<typeof record.contentDestinations>[number]) => ({
       id: item.id,
       destinationId: item.destinationId,
       publishStatus: item.publishStatus,
@@ -22,7 +22,7 @@ function toContentDto(record: Awaited<ReturnType<typeof prisma.contentItem.findF
       lastError: item.lastError,
       platformPayloadJson: item.platformPayloadJson,
     })),
-    mediaAssetIds: (record.mediaAssets ?? []).map((item) => item.id),
+    mediaAssetIds: (record.mediaAssets ?? []).map((item: NonNullable<typeof record.mediaAssets>[number]) => item.id),
   };
 }
 
@@ -33,7 +33,7 @@ export class ContentService {
     private readonly auditLogService = new AuditLogService()
   ) {}
 
-  async listContent(context: RequestContext, filters: { status?: string; reviewStatus?: string; publishStatus?: string; destinationId?: string; take: number }): Promise<ContentItemDto[]> {
+  async listContent(context: RequestContext, filters: { status?: string; reviewStatus?: string; publishStatus?: string; destinationId?: string; take?: number }): Promise<ContentItemDto[]> {
     await assertPermission(context, permissions.contentRead);
     const rows = await prisma.contentItem.findMany({
       where: {
@@ -44,10 +44,10 @@ export class ContentService {
         contentDestinations: filters.destinationId ? { some: { destinationId: filters.destinationId } } : undefined,
       },
       include: { contentDestinations: true, mediaAssets: true },
-      take: filters.take,
+      take: filters.take ?? 50,
       orderBy: { createdAt: 'desc' },
     });
-    return rows.map((row) => toContentDto(row as any));
+    return rows.map((row: typeof rows[number]) => toContentDto(row as any));
   }
 
   async getContentById(context: RequestContext, id: string): Promise<ContentItemDto> {
@@ -60,8 +60,10 @@ export class ContentService {
     return toContentDto(row as any);
   }
 
-  async createContent(context: RequestContext, input: { title?: string | null; bodyText?: string | null; sourceType?: string | null; sourceRef?: string | null; metadataJson?: unknown; destinationAssignments: Array<{ destinationId: string; scheduledAt?: Date; platformPayloadJson?: unknown }>; mediaAssetIds: string[]; }): Promise<ContentItemDto> {
+  async createContent(context: RequestContext, input: { title?: string | null; bodyText?: string | null; sourceType?: string | null; sourceRef?: string | null; metadataJson?: unknown; destinationAssignments?: Array<{ destinationId: string; scheduledAt?: Date; platformPayloadJson?: unknown }>; mediaAssetIds?: string[]; }): Promise<ContentItemDto> {
     const authorized = await assertPermission(context, permissions.contentCreate);
+    const destinationAssignments = input.destinationAssignments ?? [];
+    const mediaAssetIds = input.mediaAssetIds ?? [];
     const record = await prisma.contentItem.create({
       data: {
         workspaceId: context.workspaceId,
@@ -72,18 +74,18 @@ export class ContentService {
         metadataJson: input.metadataJson,
         createdById: context.userId,
         updatedById: context.userId,
-        contentDestinations: input.destinationAssignments.length
+        contentDestinations: destinationAssignments.length
           ? {
-              create: input.destinationAssignments.map((assignment) => ({
+              create: destinationAssignments.map((assignment) => ({
                 destinationId: assignment.destinationId,
                 scheduledAt: assignment.scheduledAt,
                 platformPayloadJson: assignment.platformPayloadJson,
               })),
             }
           : undefined,
-        mediaAssets: input.mediaAssetIds.length
+        mediaAssets: mediaAssetIds.length
           ? {
-              connect: input.mediaAssetIds.map((id) => ({ id })),
+              connect: mediaAssetIds.map((id) => ({ id })),
             }
           : undefined,
       },
@@ -91,11 +93,11 @@ export class ContentService {
     });
 
     await this.auditLogService.recordContentAction(authorized, {
-      action: 'content.created',
-      contentItemId: record.id,
-      metadataJson: {
-        destinationCount: input.destinationAssignments.length,
-        mediaAssetIds: input.mediaAssetIds,
+        action: 'content.created',
+        contentItemId: record.id,
+        metadataJson: {
+        destinationCount: destinationAssignments.length,
+        mediaAssetIds,
       },
     });
 
@@ -114,7 +116,7 @@ export class ContentService {
       await prisma.contentDestination.deleteMany({ where: { contentItemId: id } });
       if (input.destinationAssignments.length) {
         await prisma.contentDestination.createMany({
-          data: input.destinationAssignments.map((assignment) => ({
+      data: input.destinationAssignments.map((assignment) => ({
             contentItemId: id,
             destinationId: assignment.destinationId,
             scheduledAt: assignment.scheduledAt,
@@ -319,7 +321,7 @@ export class ContentService {
       select: { id: true },
     });
     if (pausedDestinations.length) {
-      throw new PolicyViolationError('Cannot schedule content to paused destinations', { destinationIds: pausedDestinations.map((item) => item.id) });
+      throw new PolicyViolationError('Cannot schedule content to paused destinations', { destinationIds: pausedDestinations.map((item: typeof pausedDestinations[number]) => item.id) });
     }
 
     await prisma.contentDestination.updateMany({
@@ -356,7 +358,7 @@ export class ContentService {
       select: { id: true },
     });
     if (pausedDestinations.length) {
-      throw new PolicyViolationError('Cannot publish content to paused destinations', { destinationIds: pausedDestinations.map((destination) => destination.id) });
+      throw new PolicyViolationError('Cannot publish content to paused destinations', { destinationIds: pausedDestinations.map((destination: typeof pausedDestinations[number]) => destination.id) });
     }
 
     const result = await this.publishingService.publishNow({

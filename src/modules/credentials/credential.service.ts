@@ -26,6 +26,6 @@ export class CredentialService {
       select: { id: true },
       take: 200,
     });
-    return credentials.map((credential) => credential.id);
+    return credentials.map((credential: typeof credentials[number]) => credential.id);
   }
 }

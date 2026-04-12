@@ -18,10 +18,23 @@ async function processor(job: Job<ProcessFacebookWebhookEventJob | ProcessGoogle
     const events = Array.isArray(normalized) ? normalized : [normalized];
 
     for (const event of events) {
+      const workspaceId = event.workspaceRef ?? job.data.workspaceId;
+      if (!workspaceId) {
+        logger.warn('webhook event missing workspace mapping; skipping downstream trigger', {
+          queue: queueNames.webhookProcessingQueue,
+          jobId: job.id,
+          correlationId,
+          webhookEventId: job.data.webhookEventId,
+          provider: job.data.provider,
+          dedupKey: event.dedupKey,
+        });
+        continue;
+      }
+
       await workflowTriggerQueue.add(
         'enqueueWebhookTriggeredWorkflow',
         {
-          workspaceId: event.workspaceRef ?? job.data.workspaceId,
+          workspaceId,
           workflowId: event.eventType,
           workflowRunId: undefined,
           triggerSource: 'webhook',

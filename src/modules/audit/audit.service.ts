@@ -3,7 +3,7 @@ import type { RequestContext } from '@/src/lib/auth/request-context';
 import type { AuditLogDto, AuditRecordContext, CreateAuditLogInput } from './audit.types';
 
 export class AuditLogService {
-  async listAuditLogs(context: RequestContext, filters: { entityType?: string; entityId?: string; actorUserId?: string; take: number }): Promise<AuditLogDto[]> {
+  async listAuditLogs(context: RequestContext, filters: { entityType?: string; entityId?: string; actorUserId?: string; take?: number }): Promise<AuditLogDto[]> {
     return prisma.auditLog.findMany({
       where: {
         workspaceId: context.workspaceId,
@@ -11,7 +11,7 @@ export class AuditLogService {
         entityId: filters.entityId,
         actorUserId: filters.actorUserId,
       },
-      take: filters.take,
+      take: filters.take ?? 50,
       orderBy: { createdAt: 'desc' },
     });
   }

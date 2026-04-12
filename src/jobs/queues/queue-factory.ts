@@ -1,4 +1,4 @@
-import { Queue, Worker, QueueEvents, JobsOptions, WorkerOptions } from 'bullmq';
+import { Queue, Worker, QueueEvents, JobsOptions, WorkerOptions, Processor } from 'bullmq';
 import { getRedisClient } from '@/src/lib/redis/client';
 import type { QueueName } from './queue-names';
 
@@ -11,7 +11,7 @@ export function createQueue<T = unknown>(name: QueueName, defaultJobOptions?: Jo
   });
 }
 
-export function createWorker<T = unknown>(name: QueueName, processor: Parameters<typeof Worker<T>>[1], options?: WorkerOptions) {
+export function createWorker<T = unknown>(name: QueueName, processor: Processor<T, any, string>, options?: Omit<WorkerOptions, 'connection'>) {
   return new Worker<T>(name, processor, {
     connection: sharedConnection,
     ...options,

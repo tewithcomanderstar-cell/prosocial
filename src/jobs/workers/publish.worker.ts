@@ -39,16 +39,16 @@ async function updateContentItemPublishState(contentItemId: string) {
 
   if (!statuses.length) return;
 
-  const publishStatuses = statuses.map((item) => item.publishStatus);
-  const nextStatus = publishStatuses.every((status) => status === 'published')
+  const publishStatuses = statuses.map((item: typeof statuses[number]) => item.publishStatus);
+    const nextStatus = publishStatuses.every((status: typeof publishStatuses[number]) => status === 'published')
     ? 'published'
-    : publishStatuses.some((status) => status === 'publishing')
+    : publishStatuses.some((status: typeof publishStatuses[number]) => status === 'publishing')
       ? 'publishing'
-      : publishStatuses.some((status) => status === 'retry_scheduled')
+      : publishStatuses.some((status: typeof publishStatuses[number]) => status === 'retry_scheduled')
         ? 'retry_scheduled'
-        : publishStatuses.some((status) => status === 'failed')
+        : publishStatuses.some((status: typeof publishStatuses[number]) => status === 'failed')
           ? 'failed'
-          : publishStatuses.some((status) => status === 'queued')
+          : publishStatuses.some((status: typeof publishStatuses[number]) => status === 'queued')
             ? 'queued'
             : 'not_scheduled';
 
@@ -120,7 +120,7 @@ async function processor(job: Job<PublishContentDestinationJob | RetryPublishCon
     const payload = {
       title: publishJob.contentDestination.contentItem.title,
       bodyText: publishJob.contentDestination.contentItem.bodyText,
-      media: publishJob.contentDestination.contentItem.mediaAssets.map((asset) => ({ publicUrl: asset.publicUrl, type: asset.type, mimeType: asset.mimeType })),
+      media: publishJob.contentDestination.contentItem.mediaAssets.map((asset: (typeof publishJob.contentDestination.contentItem.mediaAssets)[number]) => ({ publicUrl: asset.publicUrl, type: asset.type, mimeType: asset.mimeType })),
       platformPayload: publishJob.contentDestination.platformPayloadJson,
     };
 

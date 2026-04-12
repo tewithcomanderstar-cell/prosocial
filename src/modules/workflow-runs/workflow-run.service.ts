@@ -4,10 +4,10 @@ import type { RequestContext } from '@/src/lib/auth/request-context';
 import type { WorkflowRunDto } from './workflow-run.types';
 
 export class WorkflowRunService {
-  async listRuns(context: RequestContext, filters: { workflowId?: string; status?: string; take: number }): Promise<WorkflowRunDto[]> {
+  async listRuns(context: RequestContext, filters: { workflowId?: string; status?: string; take?: number }): Promise<WorkflowRunDto[]> {
     return prisma.workflowRun.findMany({
       where: { workspaceId: context.workspaceId, workflowId: filters.workflowId, status: filters.status as never },
-      take: filters.take,
+      take: filters.take ?? 50,
       orderBy: { createdAt: 'desc' },
     });
   }
