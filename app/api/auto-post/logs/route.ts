@@ -12,6 +12,22 @@ function normalizeJobStatus(status: RawJobStatus): UiJobStatus {
   return "failed";
 }
 
+function sanitizeLegacyMessage(value?: string | null) {
+  if (!value) return value ?? null;
+
+  const normalized = value.toLowerCase();
+  if (
+    normalized.includes("n8n") ||
+    normalized.includes("requested webhook") ||
+    normalized.includes("workflow must be active") ||
+    normalized.includes("webhook")
+  ) {
+    return "Legacy automation status detected.";
+  }
+
+  return value;
+}
+
 export async function GET() {
   try {
     const userId = await requireAuth();
@@ -31,7 +47,7 @@ export async function GET() {
       createdAt: job.createdAt,
       processingStartedAt: job.processingStartedAt,
       completedAt: job.completedAt,
-      lastError: job.lastError ?? null,
+      lastError: sanitizeLegacyMessage(job.lastError ?? null),
       retryCount: job.attempts ?? 0,
       maxAttempts: job.maxAttempts ?? 3
     }));

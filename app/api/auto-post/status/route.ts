@@ -18,6 +18,18 @@ function sanitizeLegacyMessage(value?: string | null) {
   return value;
 }
 
+function isLegacyMessage(value?: string | null) {
+  if (!value) return false;
+
+  const normalized = value.toLowerCase();
+  return (
+    normalized.includes("n8n") ||
+    normalized.includes("requested webhook") ||
+    normalized.includes("workflow must be active") ||
+    normalized.includes("webhook")
+  );
+}
+
 export async function GET() {
   try {
     const { requireAuth } = await import("@/lib/api");
@@ -46,10 +58,20 @@ export async function GET() {
         .lean()
     ]);
 
+    const legacyLastError = config?.lastError ?? null;
+    const sanitizedLastError = sanitizeLegacyMessage(legacyLastError);
+
+    if (config && isLegacyMessage(legacyLastError)) {
+      await AutoPostConfig.findByIdAndUpdate(config._id, {
+        lastError: null,
+        lastStatus: config.autoPostStatus === "paused" ? "paused" : config.lastStatus ?? "pending"
+      });
+    }
+
     const sanitizedConfig = config
       ? {
           ...config,
-          lastError: sanitizeLegacyMessage(config.lastError ?? null)
+          lastError: sanitizedLastError
         }
       : config;
 
