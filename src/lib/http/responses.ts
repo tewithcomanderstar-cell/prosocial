@@ -36,14 +36,12 @@ export function apiError(error: unknown) {
   );
 }
 
-export function withRouteHandler(handler: (request: NextRequest) => Promise<Response>): (request: NextRequest) => Promise<Response>;
-export function withRouteHandler<T>(handler: (request: NextRequest, ctx: T) => Promise<Response>): (request: NextRequest, ctx: T) => Promise<Response>;
-export function withRouteHandler<T>(handler: (request: NextRequest, ctx?: T) => Promise<Response>) {
-  return async (request: NextRequest, ctx?: T) => {
+export function withRouteHandler<H extends (request: NextRequest, ...args: any[]) => Promise<Response>>(handler: H): H {
+  return (async (request: NextRequest, ...args: Parameters<H> extends [NextRequest, ...infer Rest] ? Rest : never) => {
     try {
-      return await handler(request, ctx);
+      return await handler(request, ...args);
     } catch (error) {
       return apiError(error);
     }
-  };
+  }) as H;
 }
