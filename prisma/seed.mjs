@@ -13,6 +13,14 @@ async function main() {
       name: 'Demo Workspace',
       slug: 'demo-workspace',
       status: 'active',
+      settingsJson: {
+        approvalRequiredBeforePublish: true,
+        approvalRequiredBeforeSchedule: false,
+        allowEditorsToSchedule: true,
+        allowOperatorsToPublish: true,
+        tokenExpiryAlertThresholdHours: 24,
+        maxPublishRetryAttempts: 5,
+      },
     },
   });
 

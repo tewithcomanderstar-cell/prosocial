@@ -6,6 +6,8 @@ export type RequestContext = {
   workspaceId: string;
   roles: string[];
   idempotencyKey?: string;
+  ipAddress?: string;
+  userAgent?: string;
 };
 
 export async function getRequestContext(request: NextRequest): Promise<RequestContext> {
@@ -14,12 +16,14 @@ export async function getRequestContext(request: NextRequest): Promise<RequestCo
   const rolesHeader = request.headers.get('x-roles') ?? 'owner';
   const roles = rolesHeader.split(',').map((value) => value.trim()).filter(Boolean);
   const idempotencyKey = request.headers.get('idempotency-key') ?? undefined;
+  const ipAddress = request.headers.get('x-forwarded-for') ?? request.headers.get('x-real-ip') ?? undefined;
+  const userAgent = request.headers.get('user-agent') ?? undefined;
 
   if (!userId || !workspaceId) {
     throw new AuthenticationError('Missing workspace or user context');
   }
 
-  return { userId, workspaceId, roles, idempotencyKey };
+  return { userId, workspaceId, roles, idempotencyKey, ipAddress, userAgent };
 }
 
 export function requireRole(context: RequestContext, allowedRoles: string[]) {

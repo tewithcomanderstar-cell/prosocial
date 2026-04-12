@@ -23,3 +23,11 @@ export type CreateAuditLogInput = {
   userAgent?: string | null;
   metadataJson?: unknown;
 };
+
+export type AuditRecordContext = {
+  workspaceId: string;
+  actorUserId?: string | null;
+  actorType?: 'user' | 'system' | 'job' | 'webhook';
+  ipAddress?: string | null;
+  userAgent?: string | null;
+};

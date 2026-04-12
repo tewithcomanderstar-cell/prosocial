@@ -176,6 +176,7 @@ model Workspace {
   name              String
   slug              String             @unique
   status            WorkspaceStatus    @default(active)
+  settingsJson      Json?
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
   memberships       Membership[]

@@ -2,6 +2,9 @@ export type ErrorCode =
   | 'VALIDATION_ERROR'
   | 'AUTHENTICATION_ERROR'
   | 'PERMISSION_ERROR'
+  | 'POLICY_VIOLATION'
+  | 'INVALID_STATE_TRANSITION'
+  | 'APPROVAL_REQUIRED'
   | 'NOT_FOUND'
   | 'CONFLICT'
   | 'INVARIANT_VIOLATION'
@@ -36,6 +39,24 @@ export class AuthenticationError extends AppError {
 export class PermissionError extends AppError {
   constructor(message = 'You do not have permission to perform this action', details?: unknown) {
     super('PERMISSION_ERROR', message, 403, details);
+  }
+}
+
+export class PolicyViolationError extends AppError {
+  constructor(message = 'Workspace policy prevents this action', details?: unknown) {
+    super('POLICY_VIOLATION', message, 403, details);
+  }
+}
+
+export class InvalidStateTransitionError extends AppError {
+  constructor(message = 'Invalid state transition', details?: unknown) {
+    super('INVALID_STATE_TRANSITION', message, 409, details);
+  }
+}
+
+export class ApprovalRequiredError extends AppError {
+  constructor(message = 'Approval is required before this action', details?: unknown) {
+    super('APPROVAL_REQUIRED', message, 409, details);
   }
 }
 
