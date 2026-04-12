@@ -30,13 +30,22 @@ export async function GET() {
         .lean()
     ]);
 
-    const normalizedLogs = logs.map((log) => ({
+    const normalizedLogs = logs
+      .filter((log) => {
+        const message = String(log.message ?? "").toLowerCase();
+        const metadata = (log.metadata ?? {}) as Record<string, unknown>;
+        const source = String(metadata.source ?? "").toLowerCase();
+        const destination = String(metadata.destination ?? "").toLowerCase();
+
+        return !message.includes("n8n") && source !== "n8n" && destination !== "n8n";
+      })
+      .map((log) => ({
       _id: String(log._id),
       level: log.level,
       message: log.message,
       createdAt: log.createdAt,
       metadata: log.metadata ?? {}
-    }));
+      }));
 
     return jsonOk({ config, logs: normalizedLogs });
   } catch {
