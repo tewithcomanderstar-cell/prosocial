@@ -43,7 +43,7 @@ export async function GET() {
     const { requireAuth } = await import("@/lib/api");
     const userId = await requireAuth();
 
-    const config = await AutoPostConfig.findOneAndUpdate(
+    const configResult = await AutoPostConfig.findOneAndUpdate(
       { userId },
       {
         $setOnInsert: {
@@ -55,7 +55,9 @@ export async function GET() {
         }
       },
       { upsert: true, new: true }
-    ).lean<AutoPostConfigStatusDoc>();
+    ).lean();
+
+    const config = (configResult as AutoPostConfigStatusDoc | null) ?? null;
 
     const logs = await ActionLog.find({
       userId,
