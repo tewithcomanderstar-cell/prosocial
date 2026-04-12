@@ -19,6 +19,22 @@ type LeanAutoPostConfig = {
   autoPostStatus?: string;
 };
 
+function sanitizeLegacyMessage(value?: string | null) {
+  if (!value) return value ?? null;
+
+  const normalized = value.toLowerCase();
+  if (
+    normalized.includes("n8n") ||
+    normalized.includes("requested webhook") ||
+    normalized.includes("workflow must be active") ||
+    normalized.includes("webhook")
+  ) {
+    return "Legacy automation state detected. Please refresh and trigger Start Now again.";
+  }
+
+  return value;
+}
+
 const BROKEN_FOLDER_ID = "1sbp9Ql8moMDs9xBSha5IWoKdE1WlEEWz";
 const FIXED_FOLDER_ID = "1sbp9Ql8moMDs9xBSha5lWoKdE1WiEEWz";
 
@@ -123,6 +139,7 @@ export async function POST() {
       return jsonError("Unauthorized", 401);
     }
 
-    return jsonError(error instanceof Error ? error.message : "Unable to trigger Auto Post", 500);
+    const sanitizedMessage = sanitizeLegacyMessage(error instanceof Error ? error.message : null);
+    return jsonError(sanitizedMessage ?? "Unable to trigger Auto Post", 500);
   }
 }

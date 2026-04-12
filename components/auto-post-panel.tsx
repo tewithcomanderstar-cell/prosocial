@@ -83,6 +83,22 @@ function sanitizeText(value?: string | null) {
   return normalized.length > 240 ? normalized.slice(0, 237) + "..." : normalized;
 }
 
+function sanitizeAutomationError(value?: string | null) {
+  if (!value) return "";
+
+  const normalized = value.toLowerCase();
+  if (
+    normalized.includes("n8n") ||
+    normalized.includes("requested webhook") ||
+    normalized.includes("workflow must be active") ||
+    normalized.includes("webhook")
+  ) {
+    return "Legacy automation state detected. Please refresh and trigger Start Now again.";
+  }
+
+  return sanitizeText(value);
+}
+
 function statusLabel(status?: AutoPostStatus) {
   switch (status) {
     case "running":
@@ -268,7 +284,7 @@ export function AutoPostPanel() {
       setMessage("Automation started");
       await loadStatus(false);
     } catch (startError) {
-      setError(startError instanceof Error ? startError.message : "Unable to start Auto Post");
+      setError(sanitizeAutomationError(startError instanceof Error ? startError.message : "Unable to start Auto Post"));
     } finally {
       setStarting(false);
     }
@@ -286,7 +302,7 @@ export function AutoPostPanel() {
       setMessage("Auto Post paused");
       await loadStatus(false);
     } catch (pauseError) {
-      setError(pauseError instanceof Error ? pauseError.message : "Unable to pause Auto Post");
+      setError(sanitizeAutomationError(pauseError instanceof Error ? pauseError.message : "Unable to pause Auto Post"));
     } finally {
       setPausing(false);
     }
@@ -304,7 +320,7 @@ export function AutoPostPanel() {
       setMessage("Auto Post stopped");
       await loadStatus(false);
     } catch (stopError) {
-      setError(stopError instanceof Error ? stopError.message : "Unable to stop Auto Post");
+      setError(sanitizeAutomationError(stopError instanceof Error ? stopError.message : "Unable to stop Auto Post"));
     } finally {
       setStopping(false);
     }
