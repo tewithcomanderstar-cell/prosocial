@@ -74,4 +74,4 @@
 - [ ] SSL is active
 - [ ] Logs dashboard shows auth, queue, and error events
 - [ ] Rotate any secret that was shared in chat or screenshots
-- [ ] Confirm Hobby cron expectation: current `vercel.json` runs once daily at 09:00 UTC
+- [ ] Confirm Vercel plan supports the selected cron frequency (current `vercel.json` runs every 5 minutes)

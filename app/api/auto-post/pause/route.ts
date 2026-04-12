@@ -1,6 +1,7 @@
 import { jsonError, jsonOk } from "@/lib/api";
 import { handleRoleError, requireRole } from "@/lib/services/permissions";
 import { logAction } from "@/lib/services/logging";
+import { updateAutoPostRecords } from "@/lib/services/automation-records";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
 
 type LeanAutoPostConfig = {
@@ -8,22 +9,6 @@ type LeanAutoPostConfig = {
   folderId: string;
   targetPageIds: string[];
 };
-
-async function notifyN8n(action: "pause", payload: Record<string, unknown>) {
-  if (!process.env.N8N_WEBHOOK_URL || !process.env.N8N_SECRET) {
-    return;
-  }
-
-  await fetch(process.env.N8N_WEBHOOK_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": process.env.N8N_SECRET
-    },
-    body: JSON.stringify({ action, source: "control-panel", ...payload }),
-    cache: "no-store"
-  }).catch(() => null);
-}
 
 export async function POST() {
   try {
@@ -43,11 +28,11 @@ export async function POST() {
       return jsonError("Auto Post settings not found", 404);
     }
 
-    await notifyN8n("pause", {
-      userId,
+    await updateAutoPostRecords({
       configId: String(config._id),
-      folderId: config.folderId,
-      pageIds: config.targetPageIds
+      autoPostStatus: "paused",
+      currentJobStatus: "pending",
+      message: "Auto post paused"
     });
 
     await logAction({

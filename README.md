@@ -190,7 +190,7 @@ GOOGLE_AUTH_REDIRECT_URI=https://your-domain.com/api/auth/google/callback
 
 ### Vercel Cron
 
-`vercel.json` is included and currently runs `/api/cron/process-schedules` once daily at `09:00 UTC` to stay compatible with the Hobby plan.
+`vercel.json` is included and currently runs `/api/cron/process-schedules` every 5 minutes to keep automation responsive in production. If you are on the Vercel Hobby plan, adjust the schedule to match the plan limits.
 
 ## Production Notes
 

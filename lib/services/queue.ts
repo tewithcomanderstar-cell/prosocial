@@ -3,6 +3,7 @@ import { Job } from "@/models/Job";
 import { MediaCache } from "@/models/MediaCache";
 import { Post } from "@/models/Post";
 import { Schedule } from "@/models/Schedule";
+import { updateAutoPostRecords } from "@/lib/services/automation-records";
 import { publishPostToFacebook } from "@/lib/services/facebook";
 import { ensureValidFacebookConnection, ensureValidGoogleDriveConnection } from "@/lib/services/integration-auth";
 import { fetchDriveImageBinary } from "@/lib/services/google-drive";
@@ -303,6 +304,15 @@ async function executePostJob(job: JobExecution) {
         retryCount: (job.attempts ?? 0) + 1,
         lastError: rateLimit.reason ?? "Rate limited"
       });
+      await updateAutoPostRecords({
+        configId: String(job.payload.autoPostConfigId),
+        autoPostStatus: "retrying",
+        currentJobStatus: "pending",
+        lastError: rateLimit.reason ?? "Rate limited",
+        message: rateLimit.reason ?? "Rate limited",
+        pageId: job.targetPageId,
+        imageUsed: typeof job.payload?.selectedImageId === "string" ? job.payload.selectedImageId : undefined
+      });
     }
 
     return { status: "rate_limited" };
@@ -339,6 +349,15 @@ async function executePostJob(job: JobExecution) {
           retryCount: job.attempts ?? 0,
           lastError: "Duplicate auto post was blocked by duplicate protection"
         });
+        await updateAutoPostRecords({
+          configId: String(job.payload.autoPostConfigId),
+          autoPostStatus: "failed",
+          currentJobStatus: "failed",
+          lastError: "Duplicate auto post was blocked by duplicate protection",
+          message: "Duplicate auto post was blocked by duplicate protection",
+          pageId: job.targetPageId,
+          imageUsed: typeof job.payload?.selectedImageId === "string" ? job.payload.selectedImageId : undefined
+        });
       }
       return { status: "duplicate_blocked" };
     }
@@ -367,6 +386,15 @@ async function executePostJob(job: JobExecution) {
       jobStatus: "processing",
       lastStatus: "pending",
       lastError: null
+    });
+    await updateAutoPostRecords({
+      configId: String(job.payload.autoPostConfigId),
+      autoPostStatus: "posting",
+      currentJobStatus: "processing",
+      lastError: null,
+      message: "Publishing to Facebook page",
+      pageId: job.targetPageId,
+      imageUsed: typeof job.payload?.selectedImageId === "string" ? job.payload.selectedImageId : undefined
     });
   }
 
@@ -420,6 +448,16 @@ async function executePostJob(job: JobExecution) {
       lastError: null,
       lastPostId: post._id,
       lastRunAt: new Date()
+    });
+    await updateAutoPostRecords({
+      configId: String(job.payload.autoPostConfigId),
+      autoPostStatus: "waiting",
+      currentJobStatus: "posted",
+      lastError: null,
+      message: "Post published successfully",
+      pageId: page.pageId,
+      imageUsed: typeof job.payload?.selectedImageId === "string" ? job.payload.selectedImageId : undefined,
+      lastRunAt: new Date().toISOString()
     });
   }
 
@@ -500,6 +538,17 @@ export async function processQueuedJobs(limit = 10) {
           lastStatus: shouldRetry ? "pending" : "failed",
           retryCount: attempts,
           lastError: message
+        });
+        await updateAutoPostRecords({
+          configId: String(job.payload.autoPostConfigId),
+          autoPostStatus: shouldRetry ? "retrying" : "failed",
+          currentJobStatus: shouldRetry ? "pending" : "failed",
+          lastError: message,
+          message: shouldRetry
+            ? `Publish failed and will retry (${attempts}/${job.maxAttempts})`
+            : `Publish failed after ${attempts} attempts`,
+          pageId: job.targetPageId,
+          imageUsed: typeof job.payload?.selectedImageId === "string" ? job.payload.selectedImageId : undefined
         });
       }
 

@@ -2,6 +2,34 @@ import { jsonError, jsonOk } from "@/lib/api";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
 import { ActionLog } from "@/models/ActionLog";
 
+function sanitizeLegacyMessage(value?: string | null) {
+  if (!value) return value ?? null;
+
+  const normalized = value.toLowerCase();
+  if (
+    normalized.includes("n8n") ||
+    normalized.includes("requested webhook") ||
+    normalized.includes("workflow must be active") ||
+    normalized.includes("webhook")
+  ) {
+    return "Legacy automation status detected. Please trigger Start Now again after redeploy.";
+  }
+
+  return value;
+}
+
+function isLegacyMessage(value?: string | null) {
+  if (!value) return false;
+
+  const normalized = value.toLowerCase();
+  return (
+    normalized.includes("n8n") ||
+    normalized.includes("requested webhook") ||
+    normalized.includes("workflow must be active") ||
+    normalized.includes("webhook")
+  );
+}
+
 export async function GET() {
   try {
     const { requireAuth } = await import("@/lib/api");
@@ -30,15 +58,41 @@ export async function GET() {
         .lean()
     ]);
 
-    const normalizedLogs = logs.map((log) => ({
+    const legacyLastError = config?.lastError ?? null;
+    const sanitizedLastError = sanitizeLegacyMessage(legacyLastError);
+
+    if (config && isLegacyMessage(legacyLastError)) {
+      await AutoPostConfig.findByIdAndUpdate(config._id, {
+        lastError: null,
+        lastStatus: config.autoPostStatus === "paused" ? "paused" : config.lastStatus ?? "pending"
+      });
+    }
+
+    const sanitizedConfig = config
+      ? {
+          ...config,
+          lastError: sanitizedLastError
+        }
+      : config;
+
+    const normalizedLogs = logs
+      .filter((log) => {
+        const message = String(log.message ?? "").toLowerCase();
+        const metadata = (log.metadata ?? {}) as Record<string, unknown>;
+        const source = String(metadata.source ?? "").toLowerCase();
+        const destination = String(metadata.destination ?? "").toLowerCase();
+
+        return !message.includes("n8n") && source !== "n8n" && destination !== "n8n";
+      })
+      .map((log) => ({
       _id: String(log._id),
       level: log.level,
       message: log.message,
       createdAt: log.createdAt,
       metadata: log.metadata ?? {}
-    }));
+      }));
 
-    return jsonOk({ config, logs: normalizedLogs });
+    return jsonOk({ config: sanitizedConfig, logs: normalizedLogs });
   } catch {
     return jsonError("Unauthorized", 401);
   }

@@ -29,6 +29,22 @@ function normalizeFolderId(value: string) {
   return trimmed === BROKEN_FOLDER_ID ? FIXED_FOLDER_ID : trimmed;
 }
 
+function sanitizeLegacyMessage(value?: string | null) {
+  if (!value) return value ?? null;
+
+  const normalized = value.toLowerCase();
+  if (
+    normalized.includes("n8n") ||
+    normalized.includes("requested webhook") ||
+    normalized.includes("workflow must be active") ||
+    normalized.includes("webhook")
+  ) {
+    return null;
+  }
+
+  return value;
+}
+
 const schema = z.object({
   enabled: z.boolean(),
   folderId: z.string().min(1).default("root"),
@@ -63,6 +79,14 @@ export async function GET() {
     if (config?.folderId === BROKEN_FOLDER_ID) {
       await AutoPostConfig.findOneAndUpdate({ userId }, { folderId: FIXED_FOLDER_ID });
       config.folderId = FIXED_FOLDER_ID;
+    }
+
+    if (config?.lastError) {
+      const sanitizedLastError = sanitizeLegacyMessage(config.lastError);
+      if (sanitizedLastError !== config.lastError) {
+        await AutoPostConfig.findOneAndUpdate({ userId }, { lastError: sanitizedLastError });
+        config.lastError = sanitizedLastError;
+      }
     }
 
     return jsonOk({ config });
@@ -100,7 +124,7 @@ export async function POST(request: Request) {
         autoPostStatus,
         jobStatus: payload.enabled ? current?.jobStatus ?? "pending" : "pending",
         lastStatus: payload.enabled ? (current?.jobStatus === "posted" ? "posted" : current?.lastError ? "failed" : "pending") : "paused",
-        lastError: payload.enabled ? current?.lastError ?? null : null,
+        lastError: payload.enabled ? sanitizeLegacyMessage(current?.lastError ?? null) : null,
         retryCount: payload.enabled ? current?.retryCount ?? 0 : 0
       },
       { upsert: true, new: true }

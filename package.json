@@ -6,10 +6,17 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate:dev": "prisma migrate dev",
+    "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:seed": "node prisma/seed.mjs"
   },
   "dependencies": {
+    "@prisma/client": "^6.7.0",
     "bcryptjs": "^2.4.3",
+    "bullmq": "^5.57.0",
+    "ioredis": "^5.8.1",
     "jose": "^5.9.6",
     "mongoose": "^8.10.1",
     "next": "^15.2.8",
@@ -25,6 +32,10 @@
     "@types/react-dom": "^19.0.2",
     "eslint": "^9.17.0",
     "eslint-config-next": "^15.2.8",
+    "prisma": "^6.7.0",
     "typescript": "^5.7.2"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.mjs"
   }
 }
