@@ -12,6 +12,29 @@ const publishers = {
   facebook: new FacebookPublisher(),
 };
 
+function toPersistableJson(value: unknown): any {
+  if (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => toPersistableJson(item));
+  }
+
+  if (typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, toPersistableJson(item)])
+    );
+  }
+
+  return String(value);
+}
+
 function classifyPublishFailure(error: unknown): { kind: PublishErrorKind; retryable: boolean; message: string } {
   const message = error instanceof Error ? error.message : 'Unknown publish error';
   if (message.includes('rate limit')) return { kind: 'rate_limit_error', retryable: true, message };
@@ -143,11 +166,11 @@ async function processor(job: Job<PublishContentDestinationJob | RetryPublishCon
         publishedAt: new Date(),
         externalPostId: result.externalPostId,
         lastError: null,
-        platformPayloadJson: {
+        platformPayloadJson: toPersistableJson({
           ...((publishJob.contentDestination.platformPayloadJson as Record<string, unknown> | null) ?? {}),
           providerResponse: result.rawResponse,
           lastSuccessfulCorrelationId: correlationId,
-        },
+        }),
       },
     });
 
