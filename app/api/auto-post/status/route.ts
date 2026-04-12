@@ -2,6 +2,22 @@ import { jsonError, jsonOk } from "@/lib/api";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
 import { ActionLog } from "@/models/ActionLog";
 
+function sanitizeLegacyMessage(value?: string | null) {
+  if (!value) return value ?? null;
+
+  const normalized = value.toLowerCase();
+  if (
+    normalized.includes("n8n") ||
+    normalized.includes("requested webhook") ||
+    normalized.includes("workflow must be active") ||
+    normalized.includes("webhook")
+  ) {
+    return "Legacy automation status detected. Please trigger Start Now again after redeploy.";
+  }
+
+  return value;
+}
+
 export async function GET() {
   try {
     const { requireAuth } = await import("@/lib/api");
@@ -30,6 +46,13 @@ export async function GET() {
         .lean()
     ]);
 
+    const sanitizedConfig = config
+      ? {
+          ...config,
+          lastError: sanitizeLegacyMessage(config.lastError ?? null)
+        }
+      : config;
+
     const normalizedLogs = logs
       .filter((log) => {
         const message = String(log.message ?? "").toLowerCase();
@@ -47,7 +70,7 @@ export async function GET() {
       metadata: log.metadata ?? {}
       }));
 
-    return jsonOk({ config, logs: normalizedLogs });
+    return jsonOk({ config: sanitizedConfig, logs: normalizedLogs });
   } catch {
     return jsonError("Unauthorized", 401);
   }
