@@ -2,6 +2,14 @@ import { jsonError, jsonOk } from "@/lib/api";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
 import { ActionLog } from "@/models/ActionLog";
 
+type AutoPostConfigStatusDoc = {
+  _id: unknown;
+  autoPostStatus?: string | null;
+  lastStatus?: string | null;
+  lastError?: string | null;
+  [key: string]: unknown;
+};
+
 function sanitizeLegacyMessage(value?: string | null) {
   if (!value) return value ?? null;
 
@@ -48,7 +56,7 @@ export async function GET() {
           }
         },
         { upsert: true, new: true }
-      ).lean(),
+      ).lean<AutoPostConfigStatusDoc>(),
       ActionLog.find({
         userId,
         "metadata.autoPost": true
