@@ -36,6 +36,8 @@ export function apiError(error: unknown) {
   );
 }
 
+export function withRouteHandler(handler: (request: NextRequest) => Promise<Response>): (request: NextRequest) => Promise<Response>;
+export function withRouteHandler<T>(handler: (request: NextRequest, ctx: T) => Promise<Response>): (request: NextRequest, ctx: T) => Promise<Response>;
 export function withRouteHandler<T>(handler: (request: NextRequest, ctx?: T) => Promise<Response>) {
   return async (request: NextRequest, ctx?: T) => {
     try {
