@@ -43,28 +43,27 @@ export async function GET() {
     const { requireAuth } = await import("@/lib/api");
     const userId = await requireAuth();
 
-    const [config, logs] = await Promise.all([
-      AutoPostConfig.findOneAndUpdate(
-        { userId },
-        {
-          $setOnInsert: {
-            userId,
-            nextRunAt: new Date(),
-            autoPostStatus: "paused",
-            jobStatus: "pending",
-            retryCount: 0
-          }
-        },
-        { upsert: true, new: true }
-      ).lean<AutoPostConfigStatusDoc>(),
-      ActionLog.find({
-        userId,
-        "metadata.autoPost": true
-      })
-        .sort({ createdAt: -1 })
-        .limit(30)
-        .lean()
-    ]);
+    const config = await AutoPostConfig.findOneAndUpdate(
+      { userId },
+      {
+        $setOnInsert: {
+          userId,
+          nextRunAt: new Date(),
+          autoPostStatus: "paused",
+          jobStatus: "pending",
+          retryCount: 0
+        }
+      },
+      { upsert: true, new: true }
+    ).lean<AutoPostConfigStatusDoc>();
+
+    const logs = await ActionLog.find({
+      userId,
+      "metadata.autoPost": true
+    })
+      .sort({ createdAt: -1 })
+      .limit(30)
+      .lean();
 
     const legacyLastError = config?.lastError ?? null;
     const sanitizedLastError = sanitizeLegacyMessage(legacyLastError);
