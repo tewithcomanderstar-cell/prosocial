@@ -1,6 +1,7 @@
 import type { RequestContext } from '@/src/lib/auth/request-context';
 import { prisma } from '@/src/lib/db/prisma';
 import { NotFoundError } from '@/src/lib/errors';
+import { toPersistableJson } from '@/src/lib/json/persistable';
 import { AuditLogService } from '@/src/modules/audit/audit.service';
 import { assertPermission } from '@/src/modules/rbac/assert';
 import { permissions } from '@/src/modules/rbac/permissions';
@@ -47,7 +48,7 @@ export class SettingsService {
     await prisma.workspace.update({
       where: { id: context.workspaceId },
       data: {
-        settingsJson: next,
+        settingsJson: toPersistableJson(next),
       },
     });
 

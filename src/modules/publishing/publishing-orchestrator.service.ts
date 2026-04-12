@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { publishQueue } from '@/src/jobs/queues';
 import { prisma } from '@/src/lib/db/prisma';
 import { InvariantViolationError } from '@/src/lib/errors';
+import { toPersistableJson } from '@/src/lib/json/persistable';
 
 export type PublishNowInput = {
   workspaceId: string;
@@ -49,7 +50,7 @@ export class PublishingOrchestratorService {
         description: 'System workflow for immediate publish orchestration.',
         status: 'active',
         triggerType: 'manual',
-        configJson: { systemManaged: true },
+        configJson: toPersistableJson({ systemManaged: true }),
         createdById: input.requestedById,
         updatedById: input.requestedById,
       },
@@ -63,10 +64,10 @@ export class PublishingOrchestratorService {
         triggerType: 'manual',
         triggerSource: 'api.publish-now',
         status: 'queued',
-        inputJson: {
+        inputJson: toPersistableJson({
           idempotencyKey: input.idempotencyKey ?? null,
           requestedById: input.requestedById,
-        },
+        }),
       },
     });
 
