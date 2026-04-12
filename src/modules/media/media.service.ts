@@ -1,6 +1,7 @@
 import { prisma } from '@/src/lib/db/prisma';
 import { NotFoundError } from '@/src/lib/errors';
 import type { RequestContext } from '@/src/lib/auth/request-context';
+import { toPersistableJson } from '@/src/lib/json/persistable';
 import type { MediaAssetDto } from './media.types';
 
 export class MediaService {
@@ -18,7 +19,7 @@ export class MediaService {
         height: input.height,
         durationMs: input.durationMs,
         checksum: input.checksum,
-        metadataJson: input.metadataJson,
+        metadataJson: input.metadataJson === undefined ? undefined : toPersistableJson(input.metadataJson),
       },
     });
   }

@@ -7,6 +7,7 @@ import { PublishingOrchestratorService } from '@/src/modules/publishing/publishi
 import { assertPermission } from '@/src/modules/rbac/assert';
 import { permissions } from '@/src/modules/rbac/permissions';
 import { ensureApprovalActionAllowed, ensureContentNotArchivedOrPublished, ensureContentReadyForReview, ensurePublishAllowed, ensureScheduleAllowed, requireApprovalForContent } from '@/src/modules/rbac/policy';
+import { toPersistableJson } from '@/src/lib/json/persistable';
 import type { ContentItemDto } from './content.types';
 
 function toContentDto(record: Awaited<ReturnType<typeof prisma.contentItem.findFirstOrThrow>> & { contentDestinations?: Array<any>; mediaAssets?: Array<any> }): ContentItemDto {
@@ -71,7 +72,7 @@ export class ContentService {
         bodyText: input.bodyText ?? null,
         sourceType: input.sourceType ?? null,
         sourceRef: input.sourceRef ?? null,
-        metadataJson: input.metadataJson,
+        metadataJson: input.metadataJson === undefined ? undefined : toPersistableJson(input.metadataJson),
         createdById: context.userId,
         updatedById: context.userId,
         contentDestinations: destinationAssignments.length
@@ -79,7 +80,10 @@ export class ContentService {
               create: destinationAssignments.map((assignment) => ({
                 destinationId: assignment.destinationId,
                 scheduledAt: assignment.scheduledAt,
-                platformPayloadJson: assignment.platformPayloadJson,
+                platformPayloadJson:
+                  assignment.platformPayloadJson === undefined
+                    ? undefined
+                    : toPersistableJson(assignment.platformPayloadJson),
               })),
             }
           : undefined,
@@ -120,7 +124,10 @@ export class ContentService {
             contentItemId: id,
             destinationId: assignment.destinationId,
             scheduledAt: assignment.scheduledAt,
-            platformPayloadJson: assignment.platformPayloadJson,
+            platformPayloadJson:
+              assignment.platformPayloadJson === undefined
+                ? undefined
+                : toPersistableJson(assignment.platformPayloadJson),
           })),
         });
       }
@@ -138,7 +145,7 @@ export class ContentService {
       data: {
         title: input.title,
         bodyText: input.bodyText,
-        metadataJson: input.metadataJson,
+        metadataJson: input.metadataJson === undefined ? undefined : toPersistableJson(input.metadataJson),
         updatedById: context.userId,
       },
       include: { contentDestinations: true, mediaAssets: true },

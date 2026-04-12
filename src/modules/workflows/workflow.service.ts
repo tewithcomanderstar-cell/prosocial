@@ -3,6 +3,7 @@ import { workflowTriggerQueue } from '@/src/jobs/queues';
 import { prisma } from '@/src/lib/db/prisma';
 import { NotFoundError } from '@/src/lib/errors';
 import type { RequestContext } from '@/src/lib/auth/request-context';
+import { toPersistableJson } from '@/src/lib/json/persistable';
 import { AuditLogService } from '@/src/modules/audit/audit.service';
 import { assertPermission } from '@/src/modules/rbac/assert';
 import { permissions } from '@/src/modules/rbac/permissions';
@@ -38,7 +39,7 @@ export class WorkflowService {
         name: input.name,
         description: input.description,
         triggerType: input.triggerType,
-        configJson: input.configJson,
+        configJson: input.configJson === undefined ? undefined : toPersistableJson(input.configJson),
         createdById: context.userId,
         updatedById: context.userId,
         steps: {
@@ -46,7 +47,7 @@ export class WorkflowService {
             stepOrder: step.stepOrder,
             stepType: step.stepType,
             stepKey: step.stepKey,
-            configJson: step.configJson,
+            configJson: step.configJson === undefined ? undefined : toPersistableJson(step.configJson),
           })),
         },
       },
@@ -75,7 +76,13 @@ export class WorkflowService {
     if (input.steps) {
       await prisma.workflowStep.deleteMany({ where: { workflowId: id } });
       await prisma.workflowStep.createMany({
-        data: input.steps.map((step: any) => ({ workflowId: id, stepOrder: step.stepOrder, stepType: step.stepType, stepKey: step.stepKey, configJson: step.configJson })),
+        data: input.steps.map((step: any) => ({
+          workflowId: id,
+          stepOrder: step.stepOrder,
+          stepType: step.stepType,
+          stepKey: step.stepKey,
+          configJson: step.configJson === undefined ? undefined : toPersistableJson(step.configJson),
+        })),
       });
     }
 
@@ -85,7 +92,7 @@ export class WorkflowService {
         name: input.name,
         description: input.description,
         triggerType: input.triggerType,
-        configJson: input.configJson,
+        configJson: input.configJson === undefined ? undefined : toPersistableJson(input.configJson),
         status: input.status,
         updatedById: context.userId,
         version: { increment: 1 },
@@ -152,8 +159,8 @@ export class WorkflowService {
         triggerType: 'manual',
         triggerSource: 'api.test-run',
         status: 'queued',
-        inputJson: input.inputJson,
-        contextJson: input.contextJson,
+        inputJson: input.inputJson === undefined ? undefined : toPersistableJson(input.inputJson),
+        contextJson: input.contextJson === undefined ? undefined : toPersistableJson(input.contextJson),
       },
     });
 
@@ -167,7 +174,7 @@ export class WorkflowService {
         triggerSource: 'manual',
         triggerFingerprint: `manual:${workflowRun.id}:${context.idempotencyKey ?? 'default'}`,
         correlationId,
-        inputJson: input.inputJson,
+        inputJson: input.inputJson === undefined ? undefined : toPersistableJson(input.inputJson),
       },
       {
         jobId: `manual-workflow:${workflowRun.id}`,
