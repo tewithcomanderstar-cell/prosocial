@@ -1,5 +1,6 @@
 ﻿"use client";
 
+import Link from "next/link";
 import { ReactNode } from "react";
 import { useI18n } from "@/components/language-provider";
 
@@ -14,17 +15,11 @@ export function AuthShell({ title, subtitle, eyebrow, children }: AuthShellProps
   const { language } = useI18n();
   const isThai = language === "th";
 
-  const highlights = isThai
-    ? [
-        "เชื่อม Facebook และ Google ได้ในหน้าเดียว",
-        "จัดการโพสต์ ตารางเวลา และคิวงานแบบรวมศูนย์",
-        "พร้อมต่อยอดเป็น SaaS สำหรับหลายผู้ใช้"
-      ]
-    : [
-        "Connect Facebook and Google from one place",
-        "Manage posts, schedules, and queues centrally",
-        "Ready to grow into a multi-user SaaS workflow"
-      ];
+  const highlights = [
+    isThai ? "Connect Facebook and Google in one place" : "Connect Facebook and Google from one place",
+    isThai ? "Manage posts, schedules, and queues centrally" : "Manage posts, schedules, and queues centrally",
+    isThai ? "Ready to grow into a multi-user SaaS workflow" : "Ready to grow into a multi-user SaaS workflow"
+  ];
 
   return (
     <div className="auth-shell">
@@ -42,7 +37,14 @@ export function AuthShell({ title, subtitle, eyebrow, children }: AuthShellProps
         </div>
       </section>
 
-      <section className="auth-form-card">{children}</section>
+      <section className="auth-form-card stack" style={{ gap: 16 }}>
+        {children}
+        <div className="muted" style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+          <Link href="/privacy-policy">{isThai ? "Privacy Policy" : "Privacy Policy"}</Link>
+          <Link href="/terms-of-service">{isThai ? "Terms of Service" : "Terms of Service"}</Link>
+          <Link href="/data-deletion">{isThai ? "Data Deletion" : "Data Deletion"}</Link>
+        </div>
+      </section>
     </div>
   );
 }
