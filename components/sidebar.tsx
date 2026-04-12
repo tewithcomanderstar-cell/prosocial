@@ -78,7 +78,9 @@ export function Sidebar() {
         { href: "/settings", label: t("navSettings"), icon: "settings" },
         { href: "/logs", label: t("navLogs"), icon: "logs" },
         { href: "/setup", label: t("navSetup"), icon: "setup" },
-        { href: "/profile", label: "Profile", icon: "profile" }
+        { href: "/profile", label: "Profile", icon: "profile" },
+        { href: "/login", label: "Login", icon: "login" },
+        { href: "/privacy-policy", label: "Privacy Policy", icon: "privacy" }
       ]
     }
   ];
