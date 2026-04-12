@@ -2,6 +2,29 @@ import { prisma } from '@/src/lib/db/prisma';
 import type { RequestContext } from '@/src/lib/auth/request-context';
 import type { AuditLogDto, AuditRecordContext, CreateAuditLogInput } from './audit.types';
 
+function toPersistableJson(value: unknown): any {
+  if (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => toPersistableJson(item));
+  }
+
+  if (typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, toPersistableJson(item)])
+    );
+  }
+
+  return String(value);
+}
+
 export class AuditLogService {
   async listAuditLogs(context: RequestContext, filters: { entityType?: string; entityId?: string; actorUserId?: string; take?: number }): Promise<AuditLogDto[]> {
     return prisma.auditLog.findMany({
@@ -17,7 +40,13 @@ export class AuditLogService {
   }
 
   async createAuditLog(input: CreateAuditLogInput): Promise<AuditLogDto> {
-    return prisma.auditLog.create({ data: input });
+    return prisma.auditLog.create({
+      data: {
+        ...input,
+        metadataJson:
+          input.metadataJson === undefined ? undefined : toPersistableJson(input.metadataJson),
+      },
+    });
   }
 
   async record(input: CreateAuditLogInput): Promise<AuditLogDto> {
