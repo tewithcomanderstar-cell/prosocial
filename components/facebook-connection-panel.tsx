@@ -81,6 +81,7 @@ export function FacebookConnectionPanel() {
   const [pages, setPages] = useState<ConnectedPage[]>([]);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authResolved, setAuthResolved] = useState(false);
 
@@ -157,10 +158,43 @@ export function FacebookConnectionPanel() {
     setMessage(mapFacebookMessage(errorCode, isThai));
   }
 
+  async function disconnectStaleConnection() {
+    setDisconnecting(true);
+    setMessage("");
+
+    const response = await fetch("/api/auth/connected-accounts/disconnect", {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ provider: "facebook-pages" })
+    });
+
+    const result = await response.json().catch(() => null);
+    setDisconnecting(false);
+
+    if (result?.ok) {
+      setPages([]);
+      setMessage(
+        isThai
+          ? "ล้างการเชื่อมต่อ Facebook เดิมแล้ว กรุณากดเชื่อมต่อใหม่อีกครั้ง"
+          : "The old Facebook connection has been cleared. Please connect again."
+      );
+      return;
+    }
+
+    setMessage(result?.message || (isThai ? "ไม่สามารถล้างการเชื่อมต่อ Facebook ได้" : "Unable to clear the Facebook connection."));
+  }
+
   const showPermissionChecklist =
     message.includes("pages_show_list") ||
     message.includes("Business Integrations") ||
     message.includes("admin, developer, or tester");
+  const showResetConnection =
+    /bad auth/i.test(message) ||
+    /authentication failed/i.test(message) ||
+    /token expired/i.test(message);
 
   return (
     <div className="stack">
@@ -194,6 +228,12 @@ export function FacebookConnectionPanel() {
       </button>
 
       {message ? <p className="muted">{message}</p> : null}
+
+      {showResetConnection ? (
+        <button className="button button-ghost" onClick={disconnectStaleConnection} type="button" disabled={disconnecting || !authUser}>
+          {disconnecting ? "Clearing..." : "Clear old Facebook connection"}
+        </button>
+      ) : null}
 
       {showPermissionChecklist ? (
         <div
