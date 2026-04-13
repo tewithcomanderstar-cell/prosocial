@@ -11,7 +11,7 @@ export function getFacebookOAuthUrl() {
   const url = new URL("https://www.facebook.com/v21.0/dialog/oauth");
   url.searchParams.set("client_id", process.env.FACEBOOK_APP_ID ?? "");
   url.searchParams.set("redirect_uri", process.env.FACEBOOK_REDIRECT_URI ?? "");
-  url.searchParams.set("scope", "pages_show_list,pages_read_engagement,pages_manage_posts");
+  url.searchParams.set("scope", process.env.FACEBOOK_PAGE_CONNECT_SCOPE ?? "pages_show_list");
   return url.toString();
 }
 
