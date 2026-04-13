@@ -20,7 +20,6 @@
 - [ ] `OPENAI_LIGHT_MODEL`
 - [ ] `FACEBOOK_APP_ID`
 - [ ] `FACEBOOK_APP_SECRET`
-- [ ] `FACEBOOK_LOGIN_CONFIG_ID`
 - [ ] `FACEBOOK_REDIRECT_URI`
 - [ ] `FACEBOOK_AUTH_REDIRECT_URI`
 - [ ] `GOOGLE_CLIENT_ID`
@@ -40,7 +39,6 @@
 - [ ] Add app domain
 - [ ] Add `https://your-domain.com/api/auth/facebook/callback`
 - [ ] Add `https://your-domain.com/api/facebook/oauth/callback`
-- [ ] Add Facebook Login Configuration ID to Vercel
 - [ ] Confirm test user has app role while app is in development mode
 - [ ] Request production permissions if needed
 

@@ -97,7 +97,6 @@ Copy-Item .env.example .env.local
 - `OPENAI_LIGHT_MODEL`
 - `FACEBOOK_APP_ID`
 - `FACEBOOK_APP_SECRET`
-- `FACEBOOK_LOGIN_CONFIG_ID`
 - `FACEBOOK_REDIRECT_URI`
 - `FACEBOOK_AUTH_REDIRECT_URI`
 - `GOOGLE_CLIENT_ID`
@@ -132,7 +131,6 @@ Open [http://localhost:3002](http://localhost:3002)
 
 - Create an app in Meta for Developers
 - Enable Facebook Login
-- Create a Facebook Login Configuration and save its ID as `FACEBOOK_LOGIN_CONFIG_ID`
 - Add valid OAuth redirect URI:
   - `http://localhost:3002/api/auth/facebook/callback`
 - Permissions used for login:
@@ -181,7 +179,6 @@ Users who sign in with Google or Facebook are created automatically on first log
 ```env
 NEXT_PUBLIC_APP_URL=https://your-domain.com
 MONGODB_URI=mongodb+srv://USER:PASSWORD@cluster.mongodb.net/facebook-auto-posting
-FACEBOOK_LOGIN_CONFIG_ID=your-facebook-login-config-id
 FACEBOOK_REDIRECT_URI=https://your-domain.com/api/facebook/oauth/callback
 FACEBOOK_AUTH_REDIRECT_URI=https://your-domain.com/api/auth/facebook/callback
 GOOGLE_REDIRECT_URI=https://your-domain.com/api/google-drive/oauth/callback

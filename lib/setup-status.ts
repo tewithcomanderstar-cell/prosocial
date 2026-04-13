@@ -50,8 +50,7 @@ export function getSetupStatus() {
         hasValue(process.env.FACEBOOK_APP_ID, "your-facebook-app-id") &&
         hasValue(process.env.FACEBOOK_APP_SECRET, "your-facebook-app-secret") &&
         hasValue(process.env.FACEBOOK_AUTH_REDIRECT_URI) &&
-        hasValue(process.env.FACEBOOK_REDIRECT_URI) &&
-        hasValue(process.env.FACEBOOK_LOGIN_CONFIG_ID),
+        hasValue(process.env.FACEBOOK_REDIRECT_URI),
       message: "Required for login, page connections, and live publishing."
     },
     {
