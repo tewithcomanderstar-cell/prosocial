@@ -53,6 +53,7 @@ const schema = z.object({
   intervalMinutes: intervalSchema.default(60),
   captionStrategy: z.enum(["manual", "ai", "hybrid"]),
   captions: z.array(z.string()).default([]),
+  hashtags: z.array(z.string()).default([]),
   aiPrompt: z.string().default(""),
   language: z.enum(["th", "en"]).default("th")
 });
@@ -120,6 +121,7 @@ export async function POST(request: Request) {
         ...payload,
         folderId: normalizedFolderId,
         captions: (payload.captions ?? []).map((caption) => caption.trim()).filter(Boolean),
+        hashtags: (payload.hashtags ?? []).map((hashtag) => hashtag.trim()).filter(Boolean),
         nextRunAt,
         autoPostStatus,
         jobStatus: payload.enabled ? current?.jobStatus ?? "pending" : "pending",
@@ -141,6 +143,7 @@ export async function POST(request: Request) {
         targetPageCount: (payload.targetPageIds ?? []).length,
         intervalMinutes: payload.intervalMinutes,
         captionStrategy: payload.captionStrategy,
+        hashtagCount: (payload.hashtags ?? []).length,
         autoPostStatus,
         maxTargetPages: 100,
         imageAssignmentMode: "unique-per-page"

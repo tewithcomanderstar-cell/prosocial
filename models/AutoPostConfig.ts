@@ -22,6 +22,7 @@ const autoPostConfigSchema = new Schema(
       default: "hybrid"
     },
     captions: { type: [String], default: [] },
+    hashtags: { type: [String], default: [] },
     aiPrompt: { type: String, default: "" },
     language: {
       type: String,

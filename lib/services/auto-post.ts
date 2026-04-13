@@ -26,6 +26,7 @@ type LeanAutoPostConfig = {
   maxPostsPerPagePerDay?: number;
   captionStrategy: "manual" | "ai" | "hybrid";
   captions: string[];
+  hashtags?: string[];
   aiPrompt?: string;
   language?: "th" | "en";
   nextRunAt: Date;
@@ -110,13 +111,31 @@ function stripFileExtension(value: string) {
   return value.replace(/\.[a-z0-9]+$/i, "").trim();
 }
 
+function normalizeHashtags(hashtags?: string[]) {
+  return (hashtags ?? [])
+    .map((hashtag) => hashtag.trim())
+    .filter(Boolean)
+    .map((hashtag) => (hashtag.startsWith("#") ? hashtag : `#${hashtag}`));
+}
+
+function appendHashtags(caption: string, hashtags?: string[]) {
+  const normalizedHashtags = normalizeHashtags(hashtags);
+  if (!normalizedHashtags.length) {
+    return caption;
+  }
+
+  const trimmedCaption = caption.trim();
+  const hashtagBlock = normalizedHashtags.join(" ");
+  return trimmedCaption ? `${trimmedCaption}\n\n${hashtagBlock}` : hashtagBlock;
+}
+
 async function buildCaption(config: LeanAutoPostConfig, image: DriveImage, driveAccessToken: string) {
   const manualCaption = config.captions.length > 0 ? randomItem(config.captions) : "";
   const strategy = config.captionStrategy ?? "hybrid";
   const keyword = config.aiPrompt?.trim() || image.name || config.folderName || "Google Drive";
 
   if (strategy === "manual") {
-    return manualCaption || `Fresh content from ${config.folderName || "Google Drive"}`;
+    return appendHashtags(manualCaption || `Fresh content from ${config.folderName || "Google Drive"}`, config.hashtags);
   }
 
   if (strategy === "ai") {
@@ -124,12 +143,12 @@ async function buildCaption(config: LeanAutoPostConfig, image: DriveImage, drive
       const imageFile = await fetchDriveImageBinary(driveAccessToken, image.id);
       const primaryText = await extractPrimaryCreativeTextFromImage(imageFile.bytes, imageFile.mimeType);
       if (primaryText) {
-        return primaryText;
+        return appendHashtags(primaryText, config.hashtags);
       }
 
       const extractedText = await extractExactTextFromImage(imageFile.bytes, imageFile.mimeType);
       if (extractedText) {
-        return extractedText;
+        return appendHashtags(extractedText, config.hashtags);
       }
     } catch {
       // Fall through to the explicit failure below.
@@ -171,21 +190,21 @@ async function buildCaption(config: LeanAutoPostConfig, image: DriveImage, drive
 
     const chosen = variants?.length ? randomItem(variants) : null;
     if (chosen) {
-      return [chosen.caption, chosen.hashtags.join(" ")].filter(Boolean).join("\n\n");
+      return appendHashtags([chosen.caption, chosen.hashtags.join(" ")].filter(Boolean).join("\n\n"), config.hashtags);
     }
   } catch {
     // Fall back to manual or default text.
   }
 
   if (manualCaption) {
-    return manualCaption;
+    return appendHashtags(manualCaption, config.hashtags);
   }
 
   if (extractedText) {
-    return extractedText;
+    return appendHashtags(extractedText, config.hashtags);
   }
 
-  return `Fresh update from ${config.folderName || "your Google Drive"}`;
+  return appendHashtags(`Fresh update from ${config.folderName || "your Google Drive"}`, config.hashtags);
 }
 
 async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: QueueAutoPostsOptions): Promise<QueueAutoPostsResult> {
@@ -254,6 +273,7 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
     const pageId = eligiblePageIds[index];
     const chosenImage = images[index % images.length];
     const caption = await buildCaption(config, chosenImage, driveConnection.accessToken);
+    const normalizedHashtags = normalizeHashtags(config.hashtags);
     const delayMinutes = options.immediate ? 0 : getRandomDelayMinutes(config.minRandomDelayMinutes ?? 0, config.maxRandomDelayMinutes ?? 0);
     const startAt = new Date(Date.now() + delayMinutes * 60 * 1000);
 
@@ -261,7 +281,7 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
       userId: config.userId,
       title: `Auto Post ${pageId} ${triggeredAt.toISOString()}`,
       content: caption,
-      hashtags: [],
+      hashtags: normalizedHashtags,
       imageUrls: [`drive:${chosenImage.id}`],
       targetPageIds: [pageId],
       randomizeImages: false,

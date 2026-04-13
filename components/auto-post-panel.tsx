@@ -13,6 +13,7 @@ type AutoPostConfig = {
   intervalMinutes: number;
   captionStrategy: CaptionStrategy;
   captions: string[];
+  hashtags: string[];
   aiPrompt: string;
   language: "th" | "en";
   autoPostStatus?: AutoPostStatus;
@@ -55,6 +56,7 @@ const defaults: AutoPostConfig = {
   intervalMinutes: 60,
   captionStrategy: "hybrid",
   captions: [],
+  hashtags: [],
   aiPrompt: "",
   language: "th",
   autoPostStatus: "paused",
@@ -239,6 +241,16 @@ export function AutoPostPanel() {
     setConfig((current) => ({
       ...current,
       captions: value.split("\n").map((item) => item.trim()).filter(Boolean)
+    }));
+  }
+
+  function updateHashtags(value: string) {
+    setConfig((current) => ({
+      ...current,
+      hashtags: value
+        .split(/\s+/)
+        .map((item) => item.trim())
+        .filter(Boolean)
     }));
   }
 
@@ -431,6 +443,16 @@ export function AutoPostPanel() {
         </label>
 
         <label className="label">
+          Hashtags
+          <textarea
+            className="textarea auto-post-captions"
+            value={config.hashtags.join(" ")}
+            onChange={(event) => updateHashtags(event.target.value)}
+            placeholder="#บ้านช้างบ้าน #แคปชั่นบ้าน #fypp"
+          />
+        </label>
+
+        <label className="label">
           AI Prompt
           <input
             className="input"
@@ -447,6 +469,7 @@ export function AutoPostPanel() {
         {config.captionStrategy === "hybrid" ? (
           <div className="muted">Manual + AI uses your AI Prompt like a real ChatGPT instruction and rewrites from the manual caption plus text detected in the image.</div>
         ) : null}
+        <div className="muted">If you add hashtags here, the system appends them to every auto-post caption. Leave it blank to keep captions unchanged.</div>
 
         <button className="button" type="submit" disabled={saving}>
           {saving ? "Saving..." : "Save Settings"}
