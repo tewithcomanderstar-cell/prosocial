@@ -14,8 +14,8 @@ const autoPostConfigSchema = new Schema(
     },
     minRandomDelayMinutes: { type: Number, default: 5 },
     maxRandomDelayMinutes: { type: Number, default: 30 },
-    maxPostsPerDay: { type: Number, default: 12 },
-    maxPostsPerPagePerDay: { type: Number, default: 4 },
+    maxPostsPerDay: { type: Number, default: 0 },
+    maxPostsPerPagePerDay: { type: Number, default: 0 },
     captionStrategy: {
       type: String,
       enum: ["manual", "ai", "hybrid"],

@@ -40,6 +40,13 @@ function extractJson(text: string) {
   return trimmed;
 }
 
+function normalizeExtractedText(text: string) {
+  return text
+    .replace(/\r\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export async function generateFacebookContent(keyword: string, persona?: PersonaContext, userId?: string) {
   const personaPrompt = persona
     ? `Target page persona: ${persona.pageName ?? "Unnamed page"}. Tone: ${persona.tone ?? "professional"}. Content style: ${persona.contentStyle ?? "sales"}. Audience: ${persona.audience ?? "general audience"}. Extra notes: ${persona.promptNotes ?? "none"}.`
@@ -116,4 +123,33 @@ export async function classifyCaptionIntent(caption: string) {
     intent: "sales" | "education" | "entertainment" | "community" | "announcement";
     riskLevel: "low" | "medium" | "high";
   };
+}
+
+export async function extractExactTextFromImage(imageBytes: ArrayBuffer, mimeType: string) {
+  if (!process.env.OPENAI_API_KEY) {
+    return "";
+  }
+
+  const base64 = Buffer.from(imageBytes).toString("base64");
+  const dataUrl = `data:${mimeType};base64,${base64}`;
+
+  const result = await client.responses.create({
+    model: getContentModel(),
+    input: [
+      {
+        role: "system",
+        content:
+          "Extract all visible text from the image exactly as written. Do not translate, summarize, rewrite, improve, or add any extra words. Preserve separate lines where possible. If there is no readable text, return an empty string."
+      },
+      {
+        role: "user",
+        content: [
+          { type: "input_text", text: "Return only the exact text found in this image." },
+          { type: "input_image", image_url: dataUrl, detail: "high" }
+        ]
+      }
+    ]
+  });
+
+  return normalizeExtractedText(result.output_text);
 }

@@ -5,7 +5,9 @@ export async function checkRateLimits(userId: string, type: "post" | "comment-re
   const { settings } = await getUserSettings(userId);
   const safeSettings = {
     hourlyPostLimit: settings?.hourlyPostLimit ?? 10,
-    dailyPostLimit: settings?.dailyPostLimit ?? 40,
+    // Daily caps are intentionally disabled. We keep the field for UI/backward
+    // compatibility, but runtime should treat it as unlimited.
+    dailyPostLimit: 0,
     commentHourlyLimit: settings?.commentHourlyLimit ?? 20,
     apiBurstWindowMs: settings?.apiBurstWindowMs ?? 60000,
     apiBurstMax: settings?.apiBurstMax ?? 20
@@ -39,7 +41,7 @@ export async function checkRateLimits(userId: string, type: "post" | "comment-re
     if (hourCount >= safeSettings.hourlyPostLimit) {
       return { allowed: false, reason: "Hourly post limit reached" };
     }
-    if (dayCount >= safeSettings.dailyPostLimit) {
+    if (safeSettings.dailyPostLimit > 0 && dayCount >= safeSettings.dailyPostLimit) {
       return { allowed: false, reason: "Daily post limit reached" };
     }
   }

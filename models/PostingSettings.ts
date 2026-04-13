@@ -4,7 +4,7 @@ const postingSettingsSchema = new Schema(
   {
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true, unique: true, index: true },
     hourlyPostLimit: { type: Number, default: 10 },
-    dailyPostLimit: { type: Number, default: 40 },
+    dailyPostLimit: { type: Number, default: 0 },
     commentHourlyLimit: { type: Number, default: 20 },
     minDelaySeconds: { type: Number, default: 15 },
     maxDelaySeconds: { type: Number, default: 90 },

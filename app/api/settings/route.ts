@@ -5,7 +5,7 @@ import { PostingSettings } from "@/models/PostingSettings";
 
 const schema = z.object({
   hourlyPostLimit: z.number().min(1).max(500),
-  dailyPostLimit: z.number().min(1).max(5000),
+  dailyPostLimit: z.number().min(0).max(5000),
   commentHourlyLimit: z.number().min(0).max(1000),
   minDelaySeconds: z.number().min(0).max(3600),
   maxDelaySeconds: z.number().min(0).max(7200),

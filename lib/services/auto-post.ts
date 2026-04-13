@@ -1,6 +1,6 @@
 import { createAutoPostRecords } from "@/lib/services/automation-records";
-import { generateFacebookContent } from "@/lib/services/ai";
-import { fetchImagesFromFolder } from "@/lib/services/google-drive";
+import { extractExactTextFromImage, generateFacebookContent } from "@/lib/services/ai";
+import { fetchDriveImageBinary, fetchImagesFromFolder } from "@/lib/services/google-drive";
 import { ensureValidFacebookConnection, ensureValidGoogleDriveConnection } from "@/lib/services/integration-auth";
 import { logAction, logAndNotifyError } from "@/lib/services/logging";
 import { enqueuePostJobsForPost, processQueuedJobs } from "@/lib/services/queue";
@@ -106,12 +106,34 @@ async function countSuccessfulAutoPostsToday(userId: string, configId: string, p
   return Job.countDocuments(query);
 }
 
-async function buildCaption(config: LeanAutoPostConfig, image: DriveImage) {
+function stripFileExtension(value: string) {
+  return value.replace(/\.[a-z0-9]+$/i, "").trim();
+}
+
+async function buildCaption(config: LeanAutoPostConfig, image: DriveImage, driveAccessToken: string) {
   const manualCaption = config.captions.length > 0 ? randomItem(config.captions) : "";
   const strategy = config.captionStrategy ?? "hybrid";
 
   if (strategy === "manual") {
     return manualCaption || `Fresh content from ${config.folderName || "Google Drive"}`;
+  }
+
+  if (strategy === "ai") {
+    try {
+      const imageFile = await fetchDriveImageBinary(driveAccessToken, image.id);
+      const extractedText = await extractExactTextFromImage(imageFile.bytes, imageFile.mimeType);
+      if (extractedText) {
+        return extractedText;
+      }
+    } catch {
+      // Fall through to the most literal fallback available.
+    }
+
+    if (manualCaption) {
+      return manualCaption;
+    }
+
+    return stripFileExtension(image.name) || "Auto Post";
   }
 
   const keyword = config.aiPrompt?.trim() || image.name || config.folderName || "Google Drive";
@@ -161,39 +183,9 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
     throw new Error("No Facebook pages selected for Auto Post");
   }
 
-  const totalToday = await countSuccessfulAutoPostsToday(config.userId, config._id);
-  if (totalToday >= (config.maxPostsPerDay ?? 12)) {
-    await updateAutoPostState(config._id, {
-      autoPostStatus: "waiting",
-      jobStatus: "pending",
-      lastStatus: "pending",
-      lastError: "Daily Auto Post limit reached",
-      lastRunAt: triggeredAt,
-      nextRunAt
-    });
-
-    throw new Error("Daily Auto Post limit reached");
-  }
-
   const eligiblePageIds: string[] = [];
   for (const pageId of config.targetPageIds) {
-    const pageCount = await countSuccessfulAutoPostsToday(config.userId, config._id, pageId);
-    if (pageCount < (config.maxPostsPerPagePerDay ?? 4)) {
-      eligiblePageIds.push(pageId);
-    }
-  }
-
-  if (!eligiblePageIds.length) {
-    await updateAutoPostState(config._id, {
-      autoPostStatus: "waiting",
-      jobStatus: "pending",
-      lastStatus: "pending",
-      lastError: "Per-page daily Auto Post limit reached",
-      lastRunAt: triggeredAt,
-      nextRunAt
-    });
-
-    throw new Error("Per-page daily Auto Post limit reached");
+    eligiblePageIds.push(pageId);
   }
 
   const driveConnection = (await ensureValidGoogleDriveConnection(config.userId)) as LeanDriveConnection;
@@ -238,7 +230,7 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
   for (let index = 0; index < eligiblePageIds.length; index += 1) {
     const pageId = eligiblePageIds[index];
     const chosenImage = images[index % images.length];
-    const caption = await buildCaption(config, chosenImage);
+    const caption = await buildCaption(config, chosenImage, driveConnection.accessToken);
     const delayMinutes = options.immediate ? 0 : getRandomDelayMinutes(config.minRandomDelayMinutes ?? 0, config.maxRandomDelayMinutes ?? 0);
     const startAt = new Date(Date.now() + delayMinutes * 60 * 1000);
 

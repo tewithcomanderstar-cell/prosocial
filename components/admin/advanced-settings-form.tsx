@@ -19,7 +19,7 @@ type SettingsState = {
 
 const defaults: SettingsState = {
   hourlyPostLimit: 10,
-  dailyPostLimit: 40,
+  dailyPostLimit: 0,
   commentHourlyLimit: 20,
   minDelaySeconds: 15,
   maxDelaySeconds: 90,
@@ -61,7 +61,7 @@ export function AdvancedSettingsForm() {
     <form className="form" onSubmit={handleSubmit}>
       <div className="grid cols-2">
         <label className="label">Hourly post limit<input className="input" type="number" value={state.hourlyPostLimit} onChange={(e) => setState({ ...state, hourlyPostLimit: Number(e.target.value) })} /></label>
-        <label className="label">Daily post limit<input className="input" type="number" value={state.dailyPostLimit} onChange={(e) => setState({ ...state, dailyPostLimit: Number(e.target.value) })} /></label>
+        <label className="label">Daily post limit (0 = unlimited)<input className="input" type="number" value={state.dailyPostLimit} onChange={(e) => setState({ ...state, dailyPostLimit: Number(e.target.value) })} /></label>
         <label className="label">Comment hourly limit<input className="input" type="number" value={state.commentHourlyLimit} onChange={(e) => setState({ ...state, commentHourlyLimit: Number(e.target.value) })} /></label>
         <label className="label">Min random delay (sec)<input className="input" type="number" value={state.minDelaySeconds} onChange={(e) => setState({ ...state, minDelaySeconds: Number(e.target.value) })} /></label>
         <label className="label">Max random delay (sec)<input className="input" type="number" value={state.maxDelaySeconds} onChange={(e) => setState({ ...state, maxDelaySeconds: Number(e.target.value) })} /></label>

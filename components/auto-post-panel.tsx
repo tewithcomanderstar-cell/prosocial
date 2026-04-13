@@ -416,7 +416,7 @@ export function AutoPostPanel() {
           >
             <option value="manual">Manual</option>
             <option value="hybrid">Manual + AI</option>
-            <option value="ai">AI only</option>
+            <option value="ai">AI only (copy text from image)</option>
           </select>
         </label>
 
@@ -441,6 +441,9 @@ export function AutoPostPanel() {
         </label>
 
         <div className="muted">Unique image assignment per page is handled by the in-app automation engine for each run.</div>
+        {config.captionStrategy === "ai" ? (
+          <div className="muted">AI only extracts visible text from each image as-is and does not rewrite the caption.</div>
+        ) : null}
 
         <button className="button" type="submit" disabled={saving}>
           {saving ? "Saving..." : "Save Settings"}
