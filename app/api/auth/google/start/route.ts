@@ -1,5 +1,6 @@
+import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
-import { createOAuthState, getRequestBaseUrl, getSocialRedirectUriForRequest, setPostLoginRedirect } from "@/lib/social-auth";
+import { applyOAuthStartCookies, getRequestBaseUrl, getSocialRedirectUriForRequest } from "@/lib/social-auth";
 
 export async function GET(request: Request) {
   const clientId = process.env.GOOGLE_CLIENT_ID;
@@ -10,9 +11,7 @@ export async function GET(request: Request) {
     return NextResponse.redirect(new URL("/login?error=missing_google_oauth", requestBaseUrl));
   }
 
-  await setPostLoginRedirect(requestUrl.searchParams.get("next"));
-
-  const state = await createOAuthState("google");
+  const state = randomUUID();
   const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   url.searchParams.set("client_id", clientId);
   url.searchParams.set("redirect_uri", getSocialRedirectUriForRequest("google", request));
@@ -22,5 +21,7 @@ export async function GET(request: Request) {
   url.searchParams.set("access_type", "online");
   url.searchParams.set("prompt", "select_account");
 
-  return NextResponse.redirect(url);
+  const response = NextResponse.redirect(url);
+  applyOAuthStartCookies(response, "google", state, requestUrl.searchParams.get("next"));
+  return response;
 }

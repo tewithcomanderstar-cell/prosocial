@@ -1,5 +1,6 @@
+import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
-import { createOAuthState, getRequestBaseUrl, getSocialRedirectUriForRequest, setPostLoginRedirect } from "@/lib/social-auth";
+import { applyOAuthStartCookies, getRequestBaseUrl, getSocialRedirectUriForRequest } from "@/lib/social-auth";
 
 export async function GET(request: Request) {
   const clientId = process.env.FACEBOOK_APP_ID;
@@ -11,9 +12,7 @@ export async function GET(request: Request) {
     return NextResponse.redirect(new URL("/login?error=missing_facebook_oauth", requestBaseUrl));
   }
 
-  await setPostLoginRedirect(requestUrl.searchParams.get("next"));
-
-  const state = await createOAuthState("facebook");
+  const state = randomUUID();
   const url = new URL("https://www.facebook.com/v20.0/dialog/oauth");
   url.searchParams.set("client_id", clientId);
   url.searchParams.set("redirect_uri", getSocialRedirectUriForRequest("facebook", request));
@@ -26,5 +25,7 @@ export async function GET(request: Request) {
     url.searchParams.set("scope", "email,public_profile");
   }
 
-  return NextResponse.redirect(url);
+  const response = NextResponse.redirect(url);
+  applyOAuthStartCookies(response, "facebook", state, requestUrl.searchParams.get("next"));
+  return response;
 }

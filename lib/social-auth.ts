@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { User } from "@/models/User";
 import { connectDb } from "@/lib/db";
@@ -22,6 +23,16 @@ function sanitizeRedirectPath(path: string | null | undefined) {
   }
 
   return path;
+}
+
+function getOAuthCookieOptions() {
+  return {
+    httpOnly: true,
+    sameSite: "lax" as const,
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 60 * 10
+  };
 }
 
 export function getBaseUrl() {
@@ -65,14 +76,19 @@ export function getSocialRedirectUriForRequest(provider: SocialProvider, request
 export async function createOAuthState(provider: SocialProvider) {
   const state = randomUUID();
   const store = await cookies();
-  store.set(`${STATE_COOKIE_PREFIX}${provider}`, state, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: 60 * 10
-  });
+  store.set(`${STATE_COOKIE_PREFIX}${provider}`, state, getOAuthCookieOptions());
   return state;
+}
+
+export function applyOAuthStartCookies(
+  response: NextResponse,
+  provider: SocialProvider,
+  state: string,
+  redirectPath: string | null | undefined
+) {
+  response.cookies.set(`${STATE_COOKIE_PREFIX}${provider}`, state, getOAuthCookieOptions());
+  response.cookies.set(POST_LOGIN_REDIRECT_COOKIE, sanitizeRedirectPath(redirectPath), getOAuthCookieOptions());
+  return response;
 }
 
 export async function setPostLoginRedirect(path: string | null | undefined) {
