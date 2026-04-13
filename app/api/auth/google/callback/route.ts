@@ -129,13 +129,17 @@ export async function GET(request: Request) {
     await connectDb();
     const response = NextResponse.redirect(await buildLoginSuccessUrlForRequest(request));
     await attachSessionCookie(response, String(user._id));
-    await logAction({
-      userId: String(user._id),
-      type: "auth",
-      level: "success",
-      message: "Google login successful",
-      metadata: { provider: "google", email: String(profile.email) }
-    });
+    try {
+      await logAction({
+        userId: String(user._id),
+        type: "auth",
+        level: "success",
+        message: "Google login successful",
+        metadata: { provider: "google", email: String(profile.email) }
+      });
+    } catch (loggingError) {
+      console.error("[google-login] unable to persist success log", loggingError);
+    }
     return response;
   } catch (error) {
     console.error("[google-login] unexpected failure", error);

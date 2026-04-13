@@ -11,12 +11,16 @@ export async function POST() {
   clearSessionOnResponse(response);
 
   if (userId) {
-    await logAction({
-      userId,
-      type: "auth",
-      level: "info",
-      message: "User logged out"
-    });
+    try {
+      await logAction({
+        userId,
+        type: "auth",
+        level: "info",
+        message: "User logged out"
+      });
+    } catch (loggingError) {
+      console.error("[auth-logout] unable to persist logout log", loggingError);
+    }
   }
 
   return response;

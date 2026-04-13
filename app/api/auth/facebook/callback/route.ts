@@ -127,13 +127,17 @@ export async function GET(request: Request) {
     await connectDb();
     const response = NextResponse.redirect(await buildLoginSuccessUrlForRequest(request));
     await attachSessionCookie(response, String(user._id));
-    await logAction({
-      userId: String(user._id),
-      type: "auth",
-      level: "success",
-      message: "Facebook login successful",
-      metadata: { provider: "facebook", email }
-    });
+    try {
+      await logAction({
+        userId: String(user._id),
+        type: "auth",
+        level: "success",
+        message: "Facebook login successful",
+        metadata: { provider: "facebook", email }
+      });
+    } catch (loggingError) {
+      console.error("[facebook-login] unable to persist success log", loggingError);
+    }
     return response;
   } catch (error) {
     console.error("[facebook-login] unexpected failure", error);

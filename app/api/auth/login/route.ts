@@ -40,13 +40,17 @@ export async function POST(request: Request) {
     });
 
     await attachSessionCookie(response, String(user._id));
-    await logAction({
-      userId: String(user._id),
-      type: "auth",
-      level: "success",
-      message: "User login successful",
-      metadata: { provider: "credentials" }
-    });
+    try {
+      await logAction({
+        userId: String(user._id),
+        type: "auth",
+        level: "success",
+        message: "User login successful",
+        metadata: { provider: "credentials" }
+      });
+    } catch (loggingError) {
+      console.error("[auth-login] unable to persist success log", loggingError);
+    }
     return response;
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : "Unable to login");

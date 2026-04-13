@@ -43,13 +43,17 @@ export async function POST(request: Request) {
     });
 
     await attachSessionCookie(response, String(user._id));
-    await logAction({
-      userId: String(user._id),
-      type: "auth",
-      level: "success",
-      message: "Account created successfully",
-      metadata: { provider: "credentials", email: payload.email }
-    });
+    try {
+      await logAction({
+        userId: String(user._id),
+        type: "auth",
+        level: "success",
+        message: "Account created successfully",
+        metadata: { provider: "credentials", email: payload.email }
+      });
+    } catch (loggingError) {
+      console.error("[auth-register] unable to persist success log", loggingError);
+    }
     return response;
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : "Unable to register");
