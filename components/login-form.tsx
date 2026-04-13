@@ -67,6 +67,7 @@ export function LoginForm({ initialMode = "login" }: LoginFormProps) {
 
     const response = await fetch(`/api/auth/${mode}`, {
       method: "POST",
+      credentials: "include",
       headers: {
         "Content-Type": "application/json"
       },
@@ -78,8 +79,24 @@ export function LoginForm({ initialMode = "login" }: LoginFormProps) {
     setMessage(result.message || (result.ok ? t("commonSuccess") : t("commonRequestFailed")));
 
     if (result.ok) {
-      router.push(nextPath);
-      router.refresh();
+      const sessionResponse = await fetch("/api/auth/me", {
+        cache: "no-store",
+        credentials: "include"
+      });
+      const sessionResult = await sessionResponse.json().catch(() => null);
+
+      if (sessionResult?.ok) {
+        router.push(nextPath);
+        router.refresh();
+        return;
+      }
+
+      setMessage(
+        sessionResult?.message ||
+          (isThai
+            ? "ระบบสร้าง session ให้ไม่สำเร็จ กรุณาลองเข้าสู่ระบบใหม่อีกครั้ง"
+            : "The app could not establish your session. Please try signing in again.")
+      );
     }
   }
 

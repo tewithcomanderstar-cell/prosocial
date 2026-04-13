@@ -52,8 +52,12 @@ export async function GET() {
     }
 
     return jsonOk({ user: serializeUser(user) });
-  } catch {
-    return jsonError("Unauthorized", 401);
+  } catch (error) {
+    if (error instanceof Error && error.message === "UNAUTHORIZED") {
+      return jsonError("Unauthorized", 401);
+    }
+
+    return jsonError(error instanceof Error ? error.message : "Unable to load current user", 500);
   }
 }
 

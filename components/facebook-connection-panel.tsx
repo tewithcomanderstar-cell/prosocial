@@ -97,7 +97,7 @@ export function FacebookConnectionPanel() {
     let active = true;
 
     async function load() {
-      const meResponse = await fetch("/api/auth/me", { cache: "no-store" });
+      const meResponse = await fetch("/api/auth/me", { cache: "no-store", credentials: "include" });
       const meResult = await meResponse.json().catch(() => null);
 
       if (!active) {
@@ -108,7 +108,7 @@ export function FacebookConnectionPanel() {
         setAuthUser(meResult.data.user);
         setMessage(queryMessage);
 
-        const pagesResponse = await fetch("/api/facebook/pages", { cache: "no-store" });
+        const pagesResponse = await fetch("/api/facebook/pages", { cache: "no-store", credentials: "include" });
         const pagesResult = await pagesResponse.json().catch(() => null);
 
         if (!active) {
@@ -120,10 +120,14 @@ export function FacebookConnectionPanel() {
         } else if (pagesResult?.message) {
           setMessage(mapFacebookMessage(pagesResult.message, isThai));
         }
-      } else {
+      } else if (meResult?.message === "Unauthorized") {
         setAuthUser(null);
         setPages([]);
         setMessage(mapFacebookMessage("login_required", isThai));
+      } else {
+        setAuthUser(null);
+        setPages([]);
+        setMessage(meResult?.message || (isThai ? "Unable to verify current user session." : "Unable to verify the current user session."));
       }
 
       setAuthResolved(true);
@@ -140,7 +144,7 @@ export function FacebookConnectionPanel() {
     setLoading(true);
     setMessage("");
 
-    const response = await fetch("/api/facebook/oauth/url", { cache: "no-store" });
+    const response = await fetch("/api/facebook/oauth/url", { cache: "no-store", credentials: "include" });
     const result = await response.json().catch(() => null);
 
     if (result?.ok && result.data?.url) {
