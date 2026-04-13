@@ -436,13 +436,16 @@ export function AutoPostPanel() {
             className="input"
             value={config.aiPrompt}
             onChange={(event) => setConfig((current) => ({ ...current, aiPrompt: event.target.value }))}
-            placeholder="Optional"
+            placeholder={config.captionStrategy === "hybrid" ? "Tell AI exactly how to rewrite the image text/caption" : "Optional"}
           />
         </label>
 
         <div className="muted">Unique image assignment per page is handled by the in-app automation engine for each run.</div>
         {config.captionStrategy === "ai" ? (
           <div className="muted">AI only extracts visible text from each image as-is and does not rewrite the caption.</div>
+        ) : null}
+        {config.captionStrategy === "hybrid" ? (
+          <div className="muted">Manual + AI uses your AI Prompt like a real ChatGPT instruction and rewrites from the manual caption plus text detected in the image.</div>
         ) : null}
 
         <button className="button" type="submit" disabled={saving}>

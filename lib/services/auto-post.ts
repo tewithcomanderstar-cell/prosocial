@@ -1,5 +1,5 @@
 import { createAutoPostRecords } from "@/lib/services/automation-records";
-import { extractExactTextFromImage, generateFacebookContent } from "@/lib/services/ai";
+import { extractExactTextFromImage, extractPrimaryCreativeTextFromImage, generateFacebookContent } from "@/lib/services/ai";
 import { fetchDriveImageBinary, fetchImagesFromFolder } from "@/lib/services/google-drive";
 import { ensureValidFacebookConnection, ensureValidGoogleDriveConnection } from "@/lib/services/integration-auth";
 import { logAction, logAndNotifyError } from "@/lib/services/logging";
@@ -113,6 +113,7 @@ function stripFileExtension(value: string) {
 async function buildCaption(config: LeanAutoPostConfig, image: DriveImage, driveAccessToken: string) {
   const manualCaption = config.captions.length > 0 ? randomItem(config.captions) : "";
   const strategy = config.captionStrategy ?? "hybrid";
+  const keyword = config.aiPrompt?.trim() || image.name || config.folderName || "Google Drive";
 
   if (strategy === "manual") {
     return manualCaption || `Fresh content from ${config.folderName || "Google Drive"}`;
@@ -121,33 +122,51 @@ async function buildCaption(config: LeanAutoPostConfig, image: DriveImage, drive
   if (strategy === "ai") {
     try {
       const imageFile = await fetchDriveImageBinary(driveAccessToken, image.id);
+      const primaryText = await extractPrimaryCreativeTextFromImage(imageFile.bytes, imageFile.mimeType);
+      if (primaryText) {
+        return primaryText;
+      }
+
       const extractedText = await extractExactTextFromImage(imageFile.bytes, imageFile.mimeType);
       if (extractedText) {
         return extractedText;
       }
     } catch {
-      // Fall through to the most literal fallback available.
+      // Fall through to the explicit failure below.
     }
 
-    if (manualCaption) {
-      return manualCaption;
-    }
-
-    return stripFileExtension(image.name) || "Auto Post";
+    throw new Error("AI-only caption mode could not extract readable text from the selected image");
+  }
+  let extractedText = "";
+  try {
+    const imageFile = await fetchDriveImageBinary(driveAccessToken, image.id);
+    extractedText = await extractExactTextFromImage(imageFile.bytes, imageFile.mimeType);
+  } catch {
+    // Best-effort only for prompt grounding.
   }
 
-  const keyword = config.aiPrompt?.trim() || image.name || config.folderName || "Google Drive";
+  const sourceParts = [
+    manualCaption ? `Manual caption draft:\n${manualCaption}` : "",
+    extractedText ? `Text found in image:\n${extractedText}` : "",
+    image.name ? `Image file name:\n${stripFileExtension(image.name)}` : "",
+    config.folderName ? `Google Drive folder:\n${config.folderName}` : ""
+  ].filter(Boolean);
 
   try {
     const variants = await generateFacebookContent(
       keyword,
       {
+        persona: {
         audience: "general audience",
         contentStyle: "social post",
         tone: "friendly",
         pageName: "Auto Post"
-      },
-      config.userId
+        },
+        userId: config.userId,
+        customPrompt: config.aiPrompt,
+        sourceText: sourceParts.join("\n\n"),
+        sourceLabel: "manual draft, OCR text, and image context"
+      }
     );
 
     const chosen = variants?.length ? randomItem(variants) : null;
@@ -160,6 +179,10 @@ async function buildCaption(config: LeanAutoPostConfig, image: DriveImage, drive
 
   if (manualCaption) {
     return manualCaption;
+  }
+
+  if (extractedText) {
+    return extractedText;
   }
 
   return `Fresh update from ${config.folderName || "your Google Drive"}`;

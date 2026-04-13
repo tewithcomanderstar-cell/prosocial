@@ -13,7 +13,9 @@ type PersonaContext = {
 
 const schema = z.object({
   keyword: z.string().min(2),
-  pageId: z.string().optional()
+  pageId: z.string().optional(),
+  aiPrompt: z.string().optional(),
+  sourceText: z.string().optional()
 });
 
 export async function POST(request: Request) {
@@ -23,7 +25,13 @@ export async function POST(request: Request) {
     const persona = payload.pageId
       ? ((await PagePersona.findOne({ userId, pageId: payload.pageId, active: true }).lean()) as PersonaContext | null)
       : null;
-    const variants = await generateFacebookContent(payload.keyword, persona ?? undefined, userId);
+    const variants = await generateFacebookContent(payload.keyword, {
+      persona: persona ?? undefined,
+      userId,
+      customPrompt: payload.aiPrompt,
+      sourceText: payload.sourceText,
+      sourceLabel: payload.sourceText ? "user source text" : undefined
+    });
     return jsonOk({ variants, persona });
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : "Unable to generate content");
