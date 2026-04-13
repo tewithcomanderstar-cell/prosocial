@@ -1,4 +1,4 @@
-﻿import { fetchWithRetry } from "@/lib/services/http";
+import { fetchWithRetry } from "@/lib/services/http";
 
 type FacebookPage = {
   id: string;
@@ -7,12 +7,70 @@ type FacebookPage = {
   category?: string;
 };
 
+type FacebookGraphErrorPayload = {
+  error?: {
+    message?: string;
+    type?: string;
+    code?: number;
+    error_subcode?: number;
+  };
+};
+
+export class FacebookOAuthError extends Error {
+  constructor(
+    message: string,
+    public readonly code:
+      | "missing_config"
+      | "oauth_exchange_failed"
+      | "unsupported_permission"
+      | "permission_denied"
+      | "invalid_redirect"
+      | "graph_request_failed" = "oauth_exchange_failed",
+    public readonly details?: FacebookGraphErrorPayload["error"]
+  ) {
+    super(message);
+    this.name = "FacebookOAuthError";
+  }
+}
+
 export function getFacebookOAuthUrl() {
+  if (!process.env.FACEBOOK_APP_ID || !process.env.FACEBOOK_REDIRECT_URI) {
+    throw new FacebookOAuthError("Facebook OAuth is not configured.", "missing_config");
+  }
+
   const url = new URL("https://www.facebook.com/v21.0/dialog/oauth");
   url.searchParams.set("client_id", process.env.FACEBOOK_APP_ID ?? "");
   url.searchParams.set("redirect_uri", process.env.FACEBOOK_REDIRECT_URI ?? "");
   url.searchParams.set("scope", process.env.FACEBOOK_PAGE_CONNECT_SCOPE ?? "pages_show_list");
   return url.toString();
+}
+
+function classifyFacebookError(payload: FacebookGraphErrorPayload, fallback: string) {
+  const message = payload.error?.message ?? fallback;
+  const lowerMessage = message.toLowerCase();
+
+  if (lowerMessage.includes("redirect_uri") || lowerMessage.includes("url blocked")) {
+    return new FacebookOAuthError(message, "invalid_redirect", payload.error);
+  }
+
+  if (
+    lowerMessage.includes("supported permission") ||
+    (lowerMessage.includes("permission") && lowerMessage.includes("supported"))
+  ) {
+    return new FacebookOAuthError(message, "unsupported_permission", payload.error);
+  }
+
+  if (
+    lowerMessage.includes("not authorized") ||
+    lowerMessage.includes("permission denied") ||
+    lowerMessage.includes("developer") ||
+    lowerMessage.includes("tester") ||
+    lowerMessage.includes("admin")
+  ) {
+    return new FacebookOAuthError(message, "permission_denied", payload.error);
+  }
+
+  return new FacebookOAuthError(message, "oauth_exchange_failed", payload.error);
 }
 
 export async function exchangeFacebookCode(code: string) {
@@ -24,7 +82,8 @@ export async function exchangeFacebookCode(code: string) {
 
   const response = await fetchWithRetry(url.toString(), { cache: "no-store" });
   if (!response.ok) {
-    throw new Error("Failed to exchange Facebook code");
+    const payload = (await response.json().catch(() => ({}))) as FacebookGraphErrorPayload;
+    throw classifyFacebookError(payload, "Failed to exchange Facebook code");
   }
 
   return response.json() as Promise<{ access_token: string; expires_in?: number }>;
@@ -36,7 +95,8 @@ export async function fetchFacebookPages(userAccessToken: string) {
 
   const response = await fetchWithRetry(url.toString(), { cache: "no-store" });
   if (!response.ok) {
-    throw new Error("Failed to fetch Facebook pages");
+    const payload = (await response.json().catch(() => ({}))) as FacebookGraphErrorPayload;
+    throw classifyFacebookError(payload, "Failed to fetch Facebook pages");
   }
 
   const payload = (await response.json()) as { data: FacebookPage[] };

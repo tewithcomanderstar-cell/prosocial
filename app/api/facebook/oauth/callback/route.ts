@@ -1,9 +1,39 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/api";
 import { FacebookConnection } from "@/models/FacebookConnection";
 import { connectDb } from "@/lib/db";
-import { exchangeFacebookCode, fetchFacebookPages } from "@/lib/services/facebook";
-import { logAction, logRouteError } from "@/lib/services/logging";
+import {
+  FacebookOAuthError,
+  exchangeFacebookCode,
+  fetchFacebookPages
+} from "@/lib/services/facebook";
+import { logAction } from "@/lib/services/logging";
+
+function mapCallbackErrorCode(error: unknown) {
+  if (error instanceof FacebookOAuthError) {
+    return error.code;
+  }
+
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  if (message.includes("supported permission")) {
+    return "unsupported_permission";
+  }
+
+  if (
+    message.includes("permission") ||
+    message.includes("developer") ||
+    message.includes("tester") ||
+    message.includes("admin")
+  ) {
+    return "permission_denied";
+  }
+
+  if (message.includes("redirect_uri") || message.includes("url blocked")) {
+    return "invalid_redirect";
+  }
+
+  return "oauth_failed";
+}
 
 export async function GET(request: Request) {
   try {
@@ -43,6 +73,8 @@ export async function GET(request: Request) {
 
     return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/connections/facebook?success=1`);
   } catch (error) {
+    const errorCode = mapCallbackErrorCode(error);
+
     try {
       const userId = await requireAuth();
       await logAction({
@@ -50,10 +82,15 @@ export async function GET(request: Request) {
         type: "error",
         level: "error",
         message: "Facebook connection failed",
-        metadata: { reason: error instanceof Error ? error.message : "unknown" }
+        metadata: {
+          errorCode,
+          reason: error instanceof Error ? error.message : "unknown"
+        }
       });
     } catch {}
-    return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/connections/facebook?error=oauth_failed`);
+
+    return NextResponse.redirect(
+      `${process.env.NEXT_PUBLIC_APP_URL}/connections/facebook?error=${errorCode}`
+    );
   }
 }
-
