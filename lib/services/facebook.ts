@@ -42,6 +42,7 @@ export function getFacebookOAuthUrl() {
   url.searchParams.set("client_id", process.env.FACEBOOK_APP_ID ?? "");
   url.searchParams.set("redirect_uri", process.env.FACEBOOK_REDIRECT_URI ?? "");
   url.searchParams.set("scope", process.env.FACEBOOK_PAGE_CONNECT_SCOPE ?? "pages_show_list");
+  url.searchParams.set("auth_type", "rerequest");
   return url.toString();
 }
 
