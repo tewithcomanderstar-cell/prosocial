@@ -1,8 +1,9 @@
-﻿import { z } from "zod";
+import { z } from "zod";
+import { NextResponse } from "next/server";
 import { User } from "@/models/User";
-import { comparePassword, createSession } from "@/lib/auth";
+import { comparePassword, attachSessionCookie } from "@/lib/auth";
 import { connectDb } from "@/lib/db";
-import { jsonError, jsonOk, parseBody } from "@/lib/api";
+import { jsonError, parseBody } from "@/lib/api";
 import { logAction } from "@/lib/services/logging";
 
 const schema = z.object({
@@ -32,7 +33,13 @@ export async function POST(request: Request) {
       return jsonError("Invalid credentials", 401);
     }
 
-    await createSession(String(user._id));
+    const response = NextResponse.json({
+      ok: true,
+      message: "Login successful",
+      data: { userId: String(user._id) }
+    });
+
+    await attachSessionCookie(response, String(user._id));
     await logAction({
       userId: String(user._id),
       type: "auth",
@@ -40,7 +47,7 @@ export async function POST(request: Request) {
       message: "User login successful",
       metadata: { provider: "credentials" }
     });
-    return jsonOk({ userId: String(user._id) }, "Login successful");
+    return response;
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : "Unable to login");
   }

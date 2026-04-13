@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createSession } from "@/lib/auth";
+import { attachSessionCookie } from "@/lib/auth";
 import { connectDb } from "@/lib/db";
 import { logAction, logRouteError } from "@/lib/services/logging";
 import {
@@ -125,7 +125,8 @@ export async function GET(request: Request) {
     });
 
     await connectDb();
-    await createSession(String(user._id));
+    const response = NextResponse.redirect(await buildLoginSuccessUrlForRequest(request));
+    await attachSessionCookie(response, String(user._id));
     await logAction({
       userId: String(user._id),
       type: "auth",
@@ -133,7 +134,7 @@ export async function GET(request: Request) {
       message: "Facebook login successful",
       metadata: { provider: "facebook", email }
     });
-    return NextResponse.redirect(await buildLoginSuccessUrlForRequest(request));
+    return response;
   } catch (error) {
     console.error("[facebook-login] unexpected failure", error);
     await logRouteError({
@@ -146,5 +147,3 @@ export async function GET(request: Request) {
     return NextResponse.redirect(buildLoginErrorUrl("facebook_login_failed", null, url.origin));
   }
 }
-
-

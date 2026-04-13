@@ -1,8 +1,9 @@
-﻿import { z } from "zod";
+import { z } from "zod";
+import { NextResponse } from "next/server";
 import { User } from "@/models/User";
-import { createSession, hashPassword } from "@/lib/auth";
+import { attachSessionCookie, hashPassword } from "@/lib/auth";
 import { connectDb } from "@/lib/db";
-import { jsonError, jsonOk, parseBody } from "@/lib/api";
+import { jsonError, parseBody } from "@/lib/api";
 import { logAction } from "@/lib/services/logging";
 
 const schema = z.object({
@@ -35,7 +36,13 @@ export async function POST(request: Request) {
       locale: payload.locale ?? "th-TH"
     });
 
-    await createSession(String(user._id));
+    const response = NextResponse.json({
+      ok: true,
+      message: "Account created successfully",
+      data: { userId: String(user._id) }
+    });
+
+    await attachSessionCookie(response, String(user._id));
     await logAction({
       userId: String(user._id),
       type: "auth",
@@ -43,7 +50,7 @@ export async function POST(request: Request) {
       message: "Account created successfully",
       metadata: { provider: "credentials", email: payload.email }
     });
-    return jsonOk({ userId: String(user._id) }, "Account created successfully");
+    return response;
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : "Unable to register");
   }

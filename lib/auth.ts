@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
 
 const COOKIE_NAME = "fb_auto_post_session";
 
@@ -14,6 +15,16 @@ function getSecret() {
   return new TextEncoder().encode(jwtSecret);
 }
 
+function getCookieOptions() {
+  return {
+    httpOnly: true,
+    sameSite: "lax" as const,
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 60 * 60 * 24 * 7
+  };
+}
+
 export async function hashPassword(password: string) {
   return bcrypt.hash(password, 10);
 }
@@ -22,21 +33,25 @@ export async function comparePassword(password: string, hashedPassword: string) 
   return bcrypt.compare(password, hashedPassword);
 }
 
-export async function createSession(userId: string) {
-  const token = await new SignJWT({ sub: userId })
+export async function createSessionToken(userId: string) {
+  return new SignJWT({ sub: userId })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime("7d")
     .sign(getSecret());
+}
 
+export async function createSession(userId: string) {
+  const token = await createSessionToken(userId);
   const cookieStore = await cookies();
-  cookieStore.set(COOKIE_NAME, token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: 60 * 60 * 24 * 7
-  });
+  cookieStore.set(COOKIE_NAME, token, getCookieOptions());
+  return token;
+}
+
+export async function attachSessionCookie(response: NextResponse, userId: string) {
+  const token = await createSessionToken(userId);
+  response.cookies.set(COOKIE_NAME, token, getCookieOptions());
+  return response;
 }
 
 export async function clearSession() {
@@ -46,6 +61,16 @@ export async function clearSession() {
     expires: new Date(0),
     path: "/"
   });
+}
+
+export function clearSessionOnResponse(response: NextResponse) {
+  response.cookies.set(COOKIE_NAME, "", {
+    httpOnly: true,
+    expires: new Date(0),
+    path: "/"
+  });
+
+  return response;
 }
 
 export async function getSessionUserId() {
