@@ -3,6 +3,7 @@ import { jsonError, jsonOk } from "@/lib/api";
 import { processDueAutoPosts } from "@/lib/services/auto-post";
 import { processQueuedJobs } from "@/lib/services/queue";
 import { queueDueSchedules } from "@/lib/services/scheduler";
+import { runPlatformScheduler } from "@/src/jobs/schedulers/run-platform-scheduler";
 import { randomUUID } from "crypto";
 
 export async function GET(request: Request) {
@@ -16,10 +17,23 @@ export async function GET(request: Request) {
   try {
     const correlationId = randomUUID();
     const startedAt = Date.now();
+    const schedulerEngine = process.env.SCHEDULER_ENGINE === "prisma" ? "prisma" : "legacy";
     const inlinePublisherEnabled = process.env.ENABLE_INLINE_PUBLISHER !== "false";
     const inlineBatchSize = Number(process.env.INLINE_PUBLISHER_BATCH_SIZE ?? "25");
+    console.info("[SCHEDULER] started", { correlationId, schedulerEngine, inlinePublisherEnabled, inlineBatchSize });
+
+    if (schedulerEngine === "prisma") {
+      const summary = await runPlatformScheduler({ correlationId });
+      return jsonOk(
+        {
+          ...summary,
+          durationMs: Date.now() - startedAt
+        },
+        "Prisma scheduler tick processed"
+      );
+    }
+
     await connectDb();
-    console.info("[SCHEDULER] started", { correlationId, inlinePublisherEnabled, inlineBatchSize });
     const [scheduledQueued, autoPostsQueued] = await Promise.all([
       queueDueSchedules(),
       processDueAutoPosts()
@@ -38,6 +52,7 @@ export async function GET(request: Request) {
         scheduledQueued,
         autoPostsQueued,
         processedJobs,
+        schedulerEngine,
         inlinePublisherEnabled,
         correlationId
       },
