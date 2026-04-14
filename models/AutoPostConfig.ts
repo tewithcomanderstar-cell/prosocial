@@ -24,6 +24,8 @@ const autoPostConfigSchema = new Schema(
     captions: { type: [String], default: [] },
     hashtags: { type: [String], default: [] },
     aiPrompt: { type: String, default: "" },
+    postingWindowStart: { type: String, default: "09:00" },
+    postingWindowEnd: { type: String, default: "22:00" },
     language: {
       type: String,
       enum: ["th", "en"],

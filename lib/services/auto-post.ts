@@ -28,6 +28,8 @@ type LeanAutoPostConfig = {
   captions: string[];
   hashtags?: string[];
   aiPrompt?: string;
+  postingWindowStart?: string;
+  postingWindowEnd?: string;
   language?: "th" | "en";
   nextRunAt: Date;
   lastRunAt?: Date;
@@ -60,9 +62,135 @@ type QueueAutoPostsResult = {
   contentItemId: string;
 };
 
-function getNextAutoRun(intervalMinutes: number) {
+const AUTO_POST_BATCH_PAGE_SPACING_MINUTES = Number(process.env.AUTO_POST_PAGE_SPACING_MINUTES ?? "10");
+const BANGKOK_UTC_OFFSET_HOURS = 7;
+
+function parseClockToMinutes(value?: string | null) {
+  if (!value) return null;
+  const match = /^(\d{2}):(\d{2})$/.exec(value.trim());
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+  return hours * 60 + minutes;
+}
+
+function getBangkokDateParts(date = new Date()) {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  });
+
+  const parts = formatter.formatToParts(date);
+  const getPart = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? "0");
+
+  return {
+    year: getPart("year"),
+    month: getPart("month"),
+    day: getPart("day"),
+    hour: getPart("hour"),
+    minute: getPart("minute")
+  };
+}
+
+function toBangkokDate(parts: { year: number; month: number; day: number }, minutesTotal: number, dayOffset = 0) {
+  const hours = Math.floor(minutesTotal / 60);
+  const minutes = minutesTotal % 60;
+  return new Date(Date.UTC(parts.year, parts.month - 1, parts.day + dayOffset, hours - BANGKOK_UTC_OFFSET_HOURS, minutes));
+}
+
+function isWithinPostingWindow(date: Date, start?: string | null, end?: string | null) {
+  const startMinutes = parseClockToMinutes(start);
+  const endMinutes = parseClockToMinutes(end);
+  if (startMinutes === null || endMinutes === null || startMinutes === endMinutes) {
+    return true;
+  }
+
+  const parts = getBangkokDateParts(date);
+  const currentMinutes = parts.hour * 60 + parts.minute;
+
+  if (startMinutes < endMinutes) {
+    return currentMinutes >= startMinutes && currentMinutes <= endMinutes;
+  }
+
+  return currentMinutes >= startMinutes || currentMinutes <= endMinutes;
+}
+
+function getNextWindowStart(date: Date, start?: string | null, end?: string | null) {
+  const startMinutes = parseClockToMinutes(start);
+  const endMinutes = parseClockToMinutes(end);
+  if (startMinutes === null || endMinutes === null || startMinutes === endMinutes) {
+    return date;
+  }
+
+  const parts = getBangkokDateParts(date);
+  const currentMinutes = parts.hour * 60 + parts.minute;
+
+  if (startMinutes < endMinutes) {
+    if (currentMinutes < startMinutes) {
+      return toBangkokDate(parts, startMinutes);
+    }
+    return toBangkokDate(parts, startMinutes, 1);
+  }
+
+  if (currentMinutes > endMinutes && currentMinutes < startMinutes) {
+    return toBangkokDate(parts, startMinutes);
+  }
+
+  return date;
+}
+
+function getWindowEndForStart(startDate: Date, end?: string | null) {
+  const endMinutes = parseClockToMinutes(end);
+  if (endMinutes === null) {
+    return null;
+  }
+
+  const startParts = getBangkokDateParts(startDate);
+  const startMinutes = startParts.hour * 60 + startParts.minute;
+  const dayOffset = startMinutes <= endMinutes ? 0 : 1;
+  return toBangkokDate(startParts, endMinutes, dayOffset);
+}
+
+function fitBatchStartToPostingWindow(
+  requestedStart: Date,
+  pageCount: number,
+  windowStart?: string | null,
+  windowEnd?: string | null
+) {
+  let candidate = isWithinPostingWindow(requestedStart, windowStart, windowEnd)
+    ? requestedStart
+    : getNextWindowStart(requestedStart, windowStart, windowEnd);
+
+  const spacingMs = Math.max(0, AUTO_POST_BATCH_PAGE_SPACING_MINUTES) * 60 * 1000;
+  const batchDurationMs = Math.max(0, pageCount - 1) * spacingMs;
+
+  while (true) {
+    const windowEndDate = getWindowEndForStart(candidate, windowEnd);
+    if (!windowEndDate) {
+      return candidate;
+    }
+
+    const batchEnd = new Date(candidate.getTime() + batchDurationMs);
+    if (batchEnd <= windowEndDate) {
+      return candidate;
+    }
+
+    candidate = getNextWindowStart(new Date(candidate.getTime() + 24 * 60 * 60 * 1000), windowStart, windowEnd);
+  }
+}
+
+function getNextAutoRun(intervalMinutes: number, windowStart?: string | null, windowEnd?: string | null, baseDate = new Date()) {
   const minutes = [15, 30, 60, 120].includes(intervalMinutes) ? intervalMinutes : 60;
-  return new Date(Date.now() + minutes * 60 * 1000);
+  const candidate = new Date(baseDate.getTime() + minutes * 60 * 1000);
+  return isWithinPostingWindow(candidate, windowStart, windowEnd)
+    ? candidate
+    : getNextWindowStart(candidate, windowStart, windowEnd);
 }
 
 function getRandomDelayMinutes(minMinutes = 0, maxMinutes = 0) {
@@ -266,7 +394,7 @@ async function buildCaption(config: LeanAutoPostConfig, image: DriveImage, drive
 
 async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: QueueAutoPostsOptions): Promise<QueueAutoPostsResult> {
   const triggeredAt = new Date();
-  const nextRunAt = getNextAutoRun(config.intervalMinutes);
+  const nextRunAt = getNextAutoRun(config.intervalMinutes, config.postingWindowStart, config.postingWindowEnd, triggeredAt);
 
   await updateAutoPostState(config._id, {
     autoPostStatus: "running",
@@ -333,14 +461,21 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
     config.dailyImageUsageDate ?? null,
     config.dailyUsedImageIds ?? []
   );
+  const batchDelayMinutes = options.immediate ? 0 : getRandomDelayMinutes(config.minRandomDelayMinutes ?? 0, config.maxRandomDelayMinutes ?? 0);
+  const batchRequestedStartAt = new Date(Date.now() + batchDelayMinutes * 60 * 1000);
+  const batchStartAt = fitBatchStartToPostingWindow(
+    batchRequestedStartAt,
+    eligiblePageIds.length,
+    config.postingWindowStart,
+    config.postingWindowEnd
+  );
 
   for (let index = 0; index < eligiblePageIds.length; index += 1) {
     const pageId = eligiblePageIds[index];
     const chosenImage = chosenImages[index] ?? images[index % images.length];
     const caption = await buildCaption(config, chosenImage, driveConnection.accessToken);
     const normalizedHashtags = normalizeHashtags(config.hashtags);
-    const delayMinutes = options.immediate ? 0 : getRandomDelayMinutes(config.minRandomDelayMinutes ?? 0, config.maxRandomDelayMinutes ?? 0);
-    const startAt = new Date(Date.now() + delayMinutes * 60 * 1000);
+    const startAt = new Date(batchStartAt.getTime() + index * AUTO_POST_BATCH_PAGE_SPACING_MINUTES * 60 * 1000);
 
     const post = await Post.create({
       userId: config.userId,
@@ -367,7 +502,7 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
         autoSource: "google-drive",
         selectedFolderId: config.folderId,
         selectedImageId: chosenImage.id,
-        scheduledDelayMinutes: delayMinutes,
+        scheduledDelayMinutes: batchDelayMinutes + index * AUTO_POST_BATCH_PAGE_SPACING_MINUTES,
         workflowId: records.workflowId,
         workflowRunId: records.workflowRunId,
         contentItemId: records.contentItemId
@@ -408,6 +543,8 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
       source: options.source,
       queued,
       eligiblePageIds,
+      postingWindowStart: config.postingWindowStart ?? null,
+      postingWindowEnd: config.postingWindowEnd ?? null,
       lastSelectedImageId,
       workflowId: records.workflowId,
       workflowRunId: records.workflowRunId,
@@ -454,6 +591,17 @@ export async function processDueAutoPosts() {
 
   for (const config of configs) {
     try {
+      if (!isWithinPostingWindow(new Date(), config.postingWindowStart, config.postingWindowEnd)) {
+        await updateAutoPostState(config._id, {
+          autoPostStatus: "waiting",
+          jobStatus: "pending",
+          lastStatus: "pending",
+          lastError: null,
+          nextRunAt: getNextWindowStart(new Date(), config.postingWindowStart, config.postingWindowEnd)
+        });
+        continue;
+      }
+
       const result = await queueAutoPostsForConfig(config, {
         source: "schedule",
         immediate: false
@@ -462,7 +610,7 @@ export async function processDueAutoPosts() {
     } catch (error) {
       await updateAutoPostState(config._id, {
         lastRunAt: new Date(),
-        nextRunAt: getNextAutoRun(config.intervalMinutes),
+        nextRunAt: getNextAutoRun(config.intervalMinutes, config.postingWindowStart, config.postingWindowEnd),
         autoPostStatus: "failed",
         jobStatus: "failed",
         lastStatus: "failed",

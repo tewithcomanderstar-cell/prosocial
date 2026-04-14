@@ -15,6 +15,8 @@ type AutoPostConfig = {
   captions: string[];
   hashtags: string[];
   aiPrompt: string;
+  postingWindowStart: string;
+  postingWindowEnd: string;
   language: "th" | "en";
   autoPostStatus?: AutoPostStatus;
   jobStatus?: "pending" | "processing" | "posted" | "failed";
@@ -58,6 +60,8 @@ const defaults: AutoPostConfig = {
   captions: [],
   hashtags: [],
   aiPrompt: "",
+  postingWindowStart: "09:00",
+  postingWindowEnd: "22:00",
   language: "th",
   autoPostStatus: "paused",
   jobStatus: "pending",
@@ -392,6 +396,28 @@ export function AutoPostPanel() {
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
             </select>
+          </label>
+        </div>
+
+        <div className="grid cols-2 auto-post-grid auto-post-grid-minimal">
+          <label className="label">
+            Post from
+            <input
+              className="input"
+              type="time"
+              value={config.postingWindowStart}
+              onChange={(event) => setConfig((current) => ({ ...current, postingWindowStart: event.target.value }))}
+            />
+          </label>
+
+          <label className="label">
+            Until
+            <input
+              className="input"
+              type="time"
+              value={config.postingWindowEnd}
+              onChange={(event) => setConfig((current) => ({ ...current, postingWindowEnd: event.target.value }))}
+            />
           </label>
         </div>
 

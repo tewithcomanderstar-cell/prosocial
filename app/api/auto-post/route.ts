@@ -55,6 +55,8 @@ const schema = z.object({
   captions: z.array(z.string()).default([]),
   hashtags: z.array(z.string()).default([]),
   aiPrompt: z.string().default(""),
+  postingWindowStart: z.string().regex(/^\d{2}:\d{2}$/).default("09:00"),
+  postingWindowEnd: z.string().regex(/^\d{2}:\d{2}$/).default("22:00"),
   language: z.enum(["th", "en"]).default("th")
 });
 
@@ -127,7 +129,9 @@ export async function POST(request: Request) {
         jobStatus: payload.enabled ? current?.jobStatus ?? "pending" : "pending",
         lastStatus: payload.enabled ? (current?.jobStatus === "posted" ? "posted" : current?.lastError ? "failed" : "pending") : "paused",
         lastError: payload.enabled ? sanitizeLegacyMessage(current?.lastError ?? null) : null,
-        retryCount: payload.enabled ? current?.retryCount ?? 0 : 0
+        retryCount: payload.enabled ? current?.retryCount ?? 0 : 0,
+        postingWindowStart: payload.postingWindowStart,
+        postingWindowEnd: payload.postingWindowEnd
       },
       { upsert: true, new: true }
     ).lean();
@@ -144,6 +148,8 @@ export async function POST(request: Request) {
         intervalMinutes: payload.intervalMinutes,
         captionStrategy: payload.captionStrategy,
         hashtagCount: (payload.hashtags ?? []).length,
+        postingWindowStart: payload.postingWindowStart,
+        postingWindowEnd: payload.postingWindowEnd,
         autoPostStatus,
         maxTargetPages: 100,
         imageAssignmentMode: "unique-per-page"
