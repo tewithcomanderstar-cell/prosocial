@@ -32,6 +32,8 @@ type LeanAutoPostConfig = {
   nextRunAt: Date;
   lastRunAt?: Date;
   usedImageIds?: string[];
+  dailyImageUsageDate?: string | null;
+  dailyUsedImageIds?: string[];
 };
 
 type LeanDriveConnection = {
@@ -78,51 +80,45 @@ function randomizeOrder<T>(items: T[]) {
   return copy;
 }
 
-function buildImageSelectionPlan(images: DriveImage[], pageCount: number, usedImageIds: string[] = []) {
+function getBangkokDayKey(date = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(date);
+}
+
+function buildDailyImageSelectionPlan(
+  images: DriveImage[],
+  pageCount: number,
+  currentDayKey: string,
+  persistedDayKey?: string | null,
+  dailyUsedImageIds: string[] = []
+) {
   if (!images.length || pageCount <= 0) {
     return {
       chosenImages: [] as DriveImage[],
-      nextUsedImageIds: usedImageIds
+      nextDailyUsedImageIds: persistedDayKey === currentDayKey ? dailyUsedImageIds : [],
+      activeDayKey: currentDayKey
     };
   }
 
-  const imageMap = new Map(images.map((image) => [image.id, image]));
-  let remainingPool = randomizeOrder(images.filter((image) => !usedImageIds.includes(image.id)));
-  let recycledPool = randomizeOrder(images);
-  const chosenImages: DriveImage[] = [];
-  const consumedIds: string[] = [];
+  const activeDayKey = persistedDayKey === currentDayKey ? currentDayKey : currentDayKey;
+  const activeDailyUsedImageIds = persistedDayKey === currentDayKey ? dailyUsedImageIds : [];
+  const availableImages = randomizeOrder(images.filter((image) => !activeDailyUsedImageIds.includes(image.id)));
 
-  while (chosenImages.length < pageCount) {
-    if (!remainingPool.length) {
-      recycledPool = randomizeOrder(images.filter((image) => !consumedIds.includes(image.id)));
-      if (!recycledPool.length) {
-        recycledPool = randomizeOrder(images);
-      }
-      remainingPool = recycledPool;
-      consumedIds.length = 0;
-    }
-
-    const nextImage = remainingPool.shift();
-    if (!nextImage) {
-      break;
-    }
-
-    chosenImages.push(nextImage);
-    consumedIds.push(nextImage.id);
+  if (availableImages.length < pageCount) {
+    throw new Error(
+      `Not enough unused images left for today. Available: ${availableImages.length}, required: ${pageCount}. Add more images or wait until tomorrow.`
+    );
   }
 
-  const sequence = [...usedImageIds];
-  for (const image of chosenImages) {
-    sequence.push(image.id);
-  }
-
-  const uniqueRecentIds = sequence.filter((imageId, index) => sequence.indexOf(imageId) === index);
-  const nextUsedImageIds =
-    uniqueRecentIds.length >= images.length ? chosenImages.map((image) => image.id) : uniqueRecentIds.filter((imageId) => imageMap.has(imageId));
-
+  const chosenImages = availableImages.slice(0, pageCount);
   return {
     chosenImages,
-    nextUsedImageIds
+    nextDailyUsedImageIds: [...activeDailyUsedImageIds, ...chosenImages.map((image) => image.id)],
+    activeDayKey
   };
 }
 
@@ -138,6 +134,8 @@ async function updateAutoPostState(
     lastPostId: unknown;
     lastSelectedImageId: string | null;
     usedImageIds: string[];
+    dailyImageUsageDate: string | null;
+    dailyUsedImageIds: string[];
     enabled: boolean;
     lastStatus: "pending" | "posted" | "failed" | "paused";
     lastWorkflowId: unknown;
@@ -327,10 +325,13 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
   let queued = 0;
   let lastPostId: unknown = null;
   let lastSelectedImageId: string | null = null;
-  const { chosenImages, nextUsedImageIds } = buildImageSelectionPlan(
+  const dayKey = getBangkokDayKey(triggeredAt);
+  const { chosenImages, nextDailyUsedImageIds, activeDayKey } = buildDailyImageSelectionPlan(
     images,
     eligiblePageIds.length,
-    config.usedImageIds ?? []
+    dayKey,
+    config.dailyImageUsageDate ?? null,
+    config.dailyUsedImageIds ?? []
   );
 
   for (let index = 0; index < eligiblePageIds.length; index += 1) {
@@ -386,7 +387,9 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
     retryCount: 0,
     lastPostId,
     lastSelectedImageId,
-    usedImageIds: nextUsedImageIds,
+    usedImageIds: [],
+    dailyImageUsageDate: activeDayKey,
+    dailyUsedImageIds: nextDailyUsedImageIds,
     lastWorkflowId: records.workflowId,
     lastWorkflowRunId: records.workflowRunId,
     lastContentItemId: records.contentItemId
