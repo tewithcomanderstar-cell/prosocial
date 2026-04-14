@@ -45,9 +45,14 @@ export async function GET() {
       status: normalizeJobStatus(job.status as RawJobStatus),
       rawStatus: job.status,
       createdAt: job.createdAt,
+      lastAttemptAt: job.lastAttemptAt ?? null,
+      nextRetryAt: job.nextRetryAt ?? null,
       processingStartedAt: job.processingStartedAt,
       completedAt: job.completedAt,
       lastError: sanitizeLegacyMessage(job.lastError ?? null),
+      failureReason: sanitizeLegacyMessage(job.failureReason ?? null),
+      errorCode: job.errorCode ?? null,
+      correlationId: job.correlationId ?? null,
       retryCount: job.attempts ?? 0,
       maxAttempts: job.maxAttempts ?? 3
     }));

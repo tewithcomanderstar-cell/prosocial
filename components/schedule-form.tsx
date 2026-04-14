@@ -37,7 +37,7 @@ export function ScheduleForm() {
     const payload = {
       postId: String(formData.get("postId") || ""),
       frequency,
-      runAt: localRunAt ? new Date(localRunAt).toISOString() : undefined,
+      runAtLocal: localRunAt || undefined,
       timezone: String(formData.get("timezone") || "Asia/Bangkok"),
       intervalHours,
       delayMinutes,

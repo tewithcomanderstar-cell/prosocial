@@ -1,6 +1,6 @@
 ﻿import { z } from "zod";
 import { jsonError, jsonOk, parseBody, requireAuth } from "@/lib/api";
-import { computeNextRunAt } from "@/lib/utils";
+import { computeNextRunAt, toUtcDateFromLocal } from "@/lib/utils";
 import { logAction } from "@/lib/services/logging";
 import { handleRoleError, requireRole } from "@/lib/services/permissions";
 import { Post } from "@/models/Post";
@@ -10,6 +10,7 @@ const schema = z.object({
   postId: z.string().min(1),
   frequency: z.enum(["once", "hourly", "daily", "weekly"]),
   runAt: z.string().optional(),
+  runAtLocal: z.string().optional(),
   timezone: z.string().min(1),
   intervalHours: z.number().min(1).max(24).optional(),
   delayMinutes: z.number().min(0).max(1440).optional(),
@@ -36,8 +37,10 @@ export async function POST(request: Request) {
     const firstRunAt =
       payload.startMode === "delay"
         ? new Date(Date.now() + safeDelayMinutes * 60 * 1000)
-        : payload.runAt
-          ? new Date(payload.runAt)
+        : payload.runAtLocal
+          ? toUtcDateFromLocal(payload.runAtLocal, payload.timezone)
+          : payload.runAt
+            ? new Date(payload.runAt)
           : new Date();
 
     const schedule = await Schedule.create({
@@ -71,8 +74,16 @@ export async function POST(request: Request) {
 
     return jsonOk(
       {
-        nextRunAt: computeNextRunAt(payload.frequency, firstRunAt.toISOString(), firstRunAt, safeIntervalHours),
-        firstRunAt
+        nextRunAt: computeNextRunAt(
+          payload.frequency,
+          firstRunAt.toISOString(),
+          firstRunAt,
+          safeIntervalHours,
+          payload.timezone
+        ),
+        firstRunAt,
+        scheduledAtUtc: firstRunAt.toISOString(),
+        timezone: payload.timezone
       },
       "Schedule created"
     );

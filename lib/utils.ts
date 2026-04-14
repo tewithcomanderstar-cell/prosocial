@@ -1,4 +1,5 @@
-﻿import { ScheduleFrequency } from "@/lib/types";
+import { DateTime } from "luxon";
+import { ScheduleFrequency } from "@/lib/types";
 
 export function randomItem<T>(items: T[]) {
   return items[Math.floor(Math.random() * items.length)];
@@ -8,31 +9,57 @@ export function computeNextRunAt(
   frequency: ScheduleFrequency,
   runAt: string,
   current = new Date(),
-  intervalHours = 1
+  intervalHours = 1,
+  timezone = "UTC"
 ) {
-  const base = new Date(runAt);
+  const baseUtc = DateTime.fromJSDate(new Date(runAt), { zone: "utc" });
+  const currentInZone = DateTime.fromJSDate(current, { zone: "utc" }).setZone(timezone);
+  const baseInZone = baseUtc.setZone(timezone);
 
   if (frequency === "once") {
-    return base;
+    return baseUtc.toJSDate();
   }
 
-  const next = new Date(current);
-  next.setSeconds(0, 0);
-
   if (frequency === "hourly") {
-    next.setTime(next.getTime() + Math.max(1, intervalHours) * 60 * 60 * 1000);
-    return next;
+    return currentInZone
+      .plus({ hours: Math.max(1, intervalHours) })
+      .set({ second: 0, millisecond: 0 })
+      .toUTC()
+      .toJSDate();
   }
 
   if (frequency === "daily") {
-    next.setDate(next.getDate() + 1);
-    next.setHours(base.getHours(), base.getMinutes(), 0, 0);
-    return next;
+    return currentInZone
+      .plus({ days: 1 })
+      .set({
+        hour: baseInZone.hour,
+        minute: baseInZone.minute,
+        second: 0,
+        millisecond: 0
+      })
+      .toUTC()
+      .toJSDate();
   }
 
-  next.setDate(next.getDate() + 7);
-  next.setHours(base.getHours(), base.getMinutes(), 0, 0);
-  return next;
+  return currentInZone
+    .plus({ weeks: 1 })
+    .set({
+      hour: baseInZone.hour,
+      minute: baseInZone.minute,
+      second: 0,
+      millisecond: 0
+    })
+    .toUTC()
+    .toJSDate();
+}
+
+export function toUtcDateFromLocal(localDateTime: string, timezone: string) {
+  const parsed = DateTime.fromISO(localDateTime, { zone: timezone });
+  if (!parsed.isValid) {
+    throw new Error("Invalid scheduled time");
+  }
+
+  return parsed.toUTC().toJSDate();
 }
 
 export function isDue(runAt: Date) {

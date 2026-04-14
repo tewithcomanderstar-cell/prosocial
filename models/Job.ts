@@ -23,9 +23,17 @@ const jobSchema = new Schema(
     attempts: { type: Number, default: 0 },
     maxAttempts: { type: Number, default: 3 },
     nextRunAt: { type: Date, default: Date.now, index: true },
+    nextRetryAt: { type: Date, index: true },
+    lastAttemptAt: { type: Date, index: true },
     processingStartedAt: { type: Date },
+    lockedAt: { type: Date, index: true },
+    lockExpiresAt: { type: Date, index: true },
+    correlationId: { type: String, index: true },
     completedAt: { type: Date },
     lastError: { type: String },
+    failureReason: { type: String },
+    errorCode: { type: String, index: true },
+    errorDetails: { type: Schema.Types.Mixed, default: null },
     result: { type: Schema.Types.Mixed, default: {} }
   },
   { timestamps: true }

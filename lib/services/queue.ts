@@ -1,16 +1,17 @@
+import { randomUUID } from "crypto";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
 import { Job } from "@/models/Job";
 import { MediaCache } from "@/models/MediaCache";
 import { Post } from "@/models/Post";
 import { Schedule } from "@/models/Schedule";
 import { updateAutoPostRecords } from "@/lib/services/automation-records";
-import { publishPostToFacebook } from "@/lib/services/facebook";
+import { FacebookPublishError, publishPostToFacebook } from "@/lib/services/facebook";
 import { ensureValidFacebookConnection, ensureValidGoogleDriveConnection } from "@/lib/services/integration-auth";
 import { fetchDriveImageBinary } from "@/lib/services/google-drive";
 import { recordMetricSnapshot } from "@/lib/services/analytics";
 import { isDuplicatePostBlocked } from "@/lib/services/duplicate";
 import { contentFingerprint } from "@/lib/services/fingerprint";
-import { logAction, logAndNotifyError } from "@/lib/services/logging";
+import { logAction, logAndNotifyError, serializeError } from "@/lib/services/logging";
 import { checkRateLimits } from "@/lib/services/rate-limit";
 import { getUserSettings, randomDelayMs } from "@/lib/services/settings";
 import { computeNextRunAt, randomItem } from "@/lib/utils";
@@ -62,6 +63,7 @@ type LeanSchedule = {
   runAt: Date;
   nextRunAt: Date;
   enabled: boolean;
+  timezone?: string;
 };
 
 type JobExecution = {
@@ -74,6 +76,7 @@ type JobExecution = {
   maxAttempts: number;
   fingerprint?: string;
   payload?: Record<string, unknown>;
+  correlationId?: string;
 };
 
 type EnqueueOptions = {
@@ -157,8 +160,92 @@ async function resolveImages(userId: string, imageRefs: string[]): Promise<Resol
 }
 
 function getRetryDelayMs(attempts: number) {
-  const steps = [60_000, 5 * 60_000, 15 * 60_000];
+  const steps = [2 * 60_000, 10 * 60_000, 30 * 60_000, 2 * 60 * 60_000];
   return steps[Math.min(attempts, steps.length - 1)];
+}
+
+function classifyPublishFailure(error: unknown) {
+  if (error instanceof FacebookPublishError) {
+    return {
+      errorCode: error.code,
+      failureReason: error.message,
+      errorDetails: error.details ?? null,
+      retryable: error.retryable
+    };
+  }
+
+  const message = error instanceof Error ? error.message : "Unknown publishing error";
+  const normalized = message.toLowerCase();
+
+  if (normalized.includes("token expired") || normalized.includes("reconnect")) {
+    return {
+      errorCode: "token_expired",
+      failureReason: message,
+      errorDetails: null,
+      retryable: false
+    };
+  }
+
+  if (normalized.includes("permission") || normalized.includes("not authorized")) {
+    return {
+      errorCode: "permission_denied",
+      failureReason: message,
+      errorDetails: null,
+      retryable: false
+    };
+  }
+
+  if (normalized.includes("media") || normalized.includes("image") || normalized.includes("photo")) {
+    return {
+      errorCode: "media_invalid",
+      failureReason: message,
+      errorDetails: null,
+      retryable: false
+    };
+  }
+
+  if (normalized.includes("rate limited")) {
+    return {
+      errorCode: "rate_limited",
+      failureReason: message,
+      errorDetails: null,
+      retryable: true
+    };
+  }
+
+  return {
+    errorCode: "unknown_publish_error",
+    failureReason: message,
+    errorDetails: error instanceof Error ? serializeError(error) : { reason: message },
+    retryable: true
+  };
+}
+
+async function acquireNextRunnableJob(): Promise<Record<string, unknown> | null> {
+  const now = new Date();
+  const lockExpiresAt = new Date(now.getTime() + 5 * 60 * 1000);
+  const correlationId = randomUUID();
+
+  const job = await Job.findOneAndUpdate(
+    {
+      status: { $in: ["queued", "retrying", "rate_limited"] },
+      nextRunAt: { $lte: now },
+      $or: [{ lockExpiresAt: { $exists: false } }, { lockExpiresAt: null }, { lockExpiresAt: { $lte: now } }]
+    },
+    {
+      $set: {
+        status: "processing",
+        processingStartedAt: now,
+        lockedAt: now,
+        lockExpiresAt,
+        correlationId,
+        lastAttemptAt: now
+      }
+    },
+    { sort: { nextRunAt: 1 }, new: true }
+  ).lean();
+
+  return (job as Record<string, unknown> | null) ?? null;
 }
 
 export async function enqueuePostJobsForPost(userId: string, postId: string, options: EnqueueOptions = {}) {
@@ -253,7 +340,8 @@ export async function enqueueJobsForDueSchedules() {
             schedule.frequency,
             schedule.runAt.toISOString(),
             new Date(),
-            schedule.intervalHours ?? 1
+            schedule.intervalHours ?? 1,
+            schedule.timezone ?? "Asia/Bangkok"
           )
         });
       }
@@ -279,21 +367,33 @@ async function executePostJob(job: JobExecution) {
 
   const rateLimit = await checkRateLimits(job.userId, "post");
   if (!rateLimit.allowed) {
+    const nextRetryAt = new Date(Date.now() + 30 * 60 * 1000);
     await Job.findByIdAndUpdate(job._id, {
       status: "rate_limited",
-      nextRunAt: new Date(Date.now() + 30 * 60 * 1000),
-      lastError: rateLimit.reason
+      nextRunAt: nextRetryAt,
+      nextRetryAt,
+      lastError: rateLimit.reason,
+      failureReason: rateLimit.reason,
+      errorCode: "rate_limited",
+      errorDetails: { reason: rateLimit.reason },
+      lockExpiresAt: null
     });
 
     await logAction({
       userId: job.userId,
       type: "queue",
       level: "warn",
-      message: rateLimit.reason ?? "Rate limited",
+      message: `[PUBLISHER] post ${job.postId} rate limited`,
       relatedJobId: job._id,
       relatedPostId: job.postId,
       relatedScheduleId: job.scheduleId,
-      metadata: { targetPageId: job.targetPageId, autoPostConfigId: job.payload?.autoPostConfigId }
+      metadata: {
+        targetPageId: job.targetPageId,
+        autoPostConfigId: job.payload?.autoPostConfigId,
+        correlationId: job.correlationId,
+        nextRetryAt: nextRetryAt.toISOString(),
+        reason: rateLimit.reason
+      }
     });
 
     if (job.payload?.autoPostConfigId) {
@@ -329,7 +429,11 @@ async function executePostJob(job: JobExecution) {
       await Job.findByIdAndUpdate(job._id, {
         status: "duplicate_blocked",
         completedAt: new Date(),
-        lastError: "Duplicate content blocked by protection window"
+        lastError: "Duplicate content blocked by protection window",
+        failureReason: "Duplicate content blocked by protection window",
+        errorCode: "duplicate_blocked",
+        errorDetails: { fingerprint: job.fingerprint },
+        lockExpiresAt: null
       });
       await logAction({
         userId: job.userId,
@@ -410,7 +514,12 @@ async function executePostJob(job: JobExecution) {
     completedAt: new Date(),
     attempts: job.attempts + 1,
     result: publishResult,
-    lastError: null
+    lastError: null,
+    failureReason: null,
+    errorCode: null,
+    errorDetails: null,
+    nextRetryAt: null,
+    lockExpiresAt: null
   });
 
   await Post.findByIdAndUpdate(post._id, {
@@ -432,11 +541,16 @@ async function executePostJob(job: JobExecution) {
     userId: job.userId,
     type: "post",
     level: "success",
-    message: "Post published successfully",
+    message: `[PUBLISHER] post ${post._id} success`,
     relatedJobId: job._id,
     relatedPostId: String(post._id),
     relatedScheduleId: job.scheduleId,
-    metadata: { targetPageId: page.pageId, publishResult, autoPostConfigId: job.payload?.autoPostConfigId }
+    metadata: {
+      targetPageId: page.pageId,
+      publishResult,
+      autoPostConfigId: job.payload?.autoPostConfigId,
+      correlationId: job.correlationId
+    }
   });
 
   if (job.payload?.autoPostConfigId) {
@@ -465,48 +579,62 @@ async function executePostJob(job: JobExecution) {
 }
 
 export async function processQueuedJobs(limit = 10) {
-  const jobs = await Job.find({
-    status: { $in: ["queued", "retrying", "rate_limited"] },
-    nextRunAt: { $lte: new Date() }
-  })
-    .sort({ nextRunAt: 1 })
-    .limit(limit)
-    .lean();
-
   const processed: Array<{ jobId: string; status: string }> = [];
+  let processedCount = 0;
 
-  for (const item of jobs) {
+  while (processedCount < limit) {
+    const item = await acquireNextRunnableJob();
+    if (!item) {
+      break;
+    }
+
     const job: JobExecution = {
       _id: String(item._id),
       userId: String(item.userId),
       postId: String(item.postId),
       scheduleId: item.scheduleId ? String(item.scheduleId) : undefined,
       targetPageId: String(item.targetPageId),
-      attempts: item.attempts ?? 0,
-      maxAttempts: item.maxAttempts ?? 3,
-      fingerprint: item.fingerprint,
-      payload: (item.payload ?? {}) as Record<string, unknown>
+      attempts: typeof item.attempts === "number" ? item.attempts : 0,
+      maxAttempts: typeof item.maxAttempts === "number" ? item.maxAttempts : 3,
+      fingerprint: typeof item.fingerprint === "string" ? item.fingerprint : undefined,
+      payload: (item.payload ?? {}) as Record<string, unknown>,
+      correlationId: typeof item.correlationId === "string" ? item.correlationId : undefined
     };
 
-    await Job.findByIdAndUpdate(job._id, {
-      status: "processing",
-      processingStartedAt: new Date()
-    });
-
     try {
+      await logAction({
+        userId: job.userId,
+        type: "queue",
+        level: "info",
+        message: `[PUBLISHER] post ${job.postId} started`,
+        relatedJobId: job._id,
+        relatedPostId: job.postId,
+        relatedScheduleId: job.scheduleId,
+        metadata: {
+          targetPageId: job.targetPageId,
+          correlationId: job.correlationId,
+          attempt: job.attempts + 1
+        }
+      });
       const result = await executePostJob(job);
       processed.push({ jobId: job._id, status: result.status });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown publishing error";
+      const failure = classifyPublishFailure(error);
       const attempts = job.attempts + 1;
-      const shouldRetry = attempts < job.maxAttempts;
+      const shouldRetry = failure.retryable && attempts < job.maxAttempts;
+      const nextRetryAt = shouldRetry ? new Date(Date.now() + getRetryDelayMs(attempts - 1)) : null;
 
       await Job.findByIdAndUpdate(job._id, {
         status: shouldRetry ? "retrying" : "failed",
         attempts,
-        nextRunAt: shouldRetry ? new Date(Date.now() + getRetryDelayMs(attempts - 1)) : new Date(),
-        lastError: message,
-        completedAt: shouldRetry ? null : new Date()
+        nextRunAt: nextRetryAt ?? new Date(),
+        nextRetryAt,
+        lastError: failure.failureReason,
+        failureReason: failure.failureReason,
+        errorCode: failure.errorCode,
+        errorDetails: failure.errorDetails,
+        completedAt: shouldRetry ? null : new Date(),
+        lockExpiresAt: null
       });
 
       await Post.findByIdAndUpdate(job.postId, {
@@ -517,13 +645,16 @@ export async function processQueuedJobs(limit = 10) {
       await logAndNotifyError({
         userId: job.userId,
         message: shouldRetry
-          ? `Publish failed and will retry (${attempts}/${job.maxAttempts}): ${message}`
-          : `Publish failed after ${attempts} attempts: ${message}`,
+          ? `[PUBLISHER] post ${job.postId} failed and will retry (${attempts}/${job.maxAttempts}): ${failure.failureReason}`
+          : `[PUBLISHER] post ${job.postId} failed after ${attempts} attempts: ${failure.failureReason}`,
         metadata: {
           targetPageId: job.targetPageId,
           attempts,
           maxAttempts: job.maxAttempts,
-          autoPostConfigId: job.payload?.autoPostConfigId
+          autoPostConfigId: job.payload?.autoPostConfigId,
+          correlationId: job.correlationId,
+          errorCode: failure.errorCode,
+          nextRetryAt: nextRetryAt?.toISOString()
         },
         relatedJobId: job._id,
         relatedPostId: job.postId,
@@ -537,13 +668,13 @@ export async function processQueuedJobs(limit = 10) {
           jobStatus: "failed",
           lastStatus: shouldRetry ? "pending" : "failed",
           retryCount: attempts,
-          lastError: message
+          lastError: failure.failureReason
         });
         await updateAutoPostRecords({
           configId: String(job.payload.autoPostConfigId),
           autoPostStatus: shouldRetry ? "retrying" : "failed",
           currentJobStatus: shouldRetry ? "pending" : "failed",
-          lastError: message,
+          lastError: failure.failureReason,
           message: shouldRetry
             ? `Publish failed and will retry (${attempts}/${job.maxAttempts})`
             : `Publish failed after ${attempts} attempts`,
@@ -554,6 +685,8 @@ export async function processQueuedJobs(limit = 10) {
 
       processed.push({ jobId: job._id, status: shouldRetry ? "retrying" : "failed" });
     }
+
+    processedCount += 1;
   }
 
   return processed;

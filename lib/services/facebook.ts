@@ -16,6 +16,24 @@ type FacebookGraphErrorPayload = {
   };
 };
 
+export class FacebookPublishError extends Error {
+  constructor(
+    message: string,
+    public readonly code:
+      | "token_expired"
+      | "permission_denied"
+      | "media_invalid"
+      | "rate_limited"
+      | "provider_transient"
+      | "provider_unknown",
+    public readonly retryable: boolean,
+    public readonly details?: FacebookGraphErrorPayload["error"]
+  ) {
+    super(message);
+    this.name = "FacebookPublishError";
+  }
+}
+
 export class FacebookOAuthError extends Error {
   constructor(
     message: string,
@@ -74,6 +92,45 @@ function classifyFacebookError(payload: FacebookGraphErrorPayload, fallback: str
   return new FacebookOAuthError(message, "oauth_exchange_failed", payload.error);
 }
 
+function classifyFacebookPublishError(payload: FacebookGraphErrorPayload, fallback: string) {
+  const message = payload.error?.message ?? fallback;
+  const code = payload.error?.code;
+  const subcode = payload.error?.error_subcode;
+  const normalized = message.toLowerCase();
+
+  if (code === 190 || normalized.includes("session has expired") || normalized.includes("token")) {
+    return new FacebookPublishError(message, "token_expired", false, payload.error);
+  }
+
+  if (
+    code === 10 ||
+    code === 200 ||
+    normalized.includes("permission") ||
+    normalized.includes("not authorized")
+  ) {
+    return new FacebookPublishError(message, "permission_denied", false, payload.error);
+  }
+
+  if (
+    code === 324 ||
+    normalized.includes("media") ||
+    normalized.includes("image") ||
+    normalized.includes("photo")
+  ) {
+    return new FacebookPublishError(message, "media_invalid", false, payload.error);
+  }
+
+  if (code === 4 || code === 17 || code === 32 || code === 613 || normalized.includes("rate limit")) {
+    return new FacebookPublishError(message, "rate_limited", true, payload.error);
+  }
+
+  if (subcode === 1363030 || normalized.includes("temporarily unavailable") || normalized.includes("try again")) {
+    return new FacebookPublishError(message, "provider_transient", true, payload.error);
+  }
+
+  return new FacebookPublishError(message, "provider_unknown", true, payload.error);
+}
+
 export async function exchangeFacebookCode(code: string) {
   const url = new URL("https://graph.facebook.com/v21.0/oauth/access_token");
   url.searchParams.set("client_id", process.env.FACEBOOK_APP_ID ?? "");
@@ -125,7 +182,8 @@ async function uploadPhotoByUrl(pageId: string, pageAccessToken: string, url: st
   });
 
   if (!response.ok) {
-    throw new Error("Failed to upload Facebook photo");
+    const payload = (await response.json().catch(() => ({}))) as FacebookGraphErrorPayload;
+    throw classifyFacebookPublishError(payload, "Failed to upload Facebook photo");
   }
 
   return response.json() as Promise<{ id: string }>;
@@ -149,7 +207,8 @@ async function uploadPhotoByBuffer(
   });
 
   if (!response.ok) {
-    throw new Error("Failed to upload Facebook photo binary");
+    const payload = (await response.json().catch(() => ({}))) as FacebookGraphErrorPayload;
+    throw classifyFacebookPublishError(payload, "Failed to upload Facebook photo binary");
   }
 
   return response.json() as Promise<{ id: string }>;
@@ -198,7 +257,8 @@ export async function publishPostToFacebook(params: {
   });
 
   if (!response.ok) {
-    throw new Error("Failed to publish Facebook post");
+    const payload = (await response.json().catch(() => ({}))) as FacebookGraphErrorPayload;
+    throw classifyFacebookPublishError(payload, "Failed to publish Facebook post");
   }
 
   return response.json();
