@@ -1,11 +1,13 @@
 import { randomUUID } from "crypto";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
+import { CommentInbox } from "@/models/CommentInbox";
 import { Job } from "@/models/Job";
 import { MediaCache } from "@/models/MediaCache";
 import { Post } from "@/models/Post";
 import { Schedule } from "@/models/Schedule";
+import { notifyCommentFailure } from "@/lib/services/comment-automation";
 import { updateAutoPostRecords } from "@/lib/services/automation-records";
-import { FacebookPublishError, publishPostToFacebook } from "@/lib/services/facebook";
+import { FacebookPublishError, publishPostToFacebook, replyToFacebookComment } from "@/lib/services/facebook";
 import { ensureValidFacebookConnection, ensureValidGoogleDriveConnection } from "@/lib/services/integration-auth";
 import { fetchDriveImageBinary } from "@/lib/services/google-drive";
 import { recordMetricSnapshot } from "@/lib/services/analytics";
@@ -73,7 +75,8 @@ type LeanSchedule = {
 type JobExecution = {
   _id: string;
   userId: string;
-  postId: string;
+  type?: "post" | "comment-reply";
+  postId?: string;
   scheduleId?: string;
   targetPageId: string;
   attempts: number;
@@ -81,6 +84,13 @@ type JobExecution = {
   fingerprint?: string;
   payload?: Record<string, unknown>;
   correlationId?: string;
+};
+
+type LeanCommentInbox = {
+  _id: string;
+  pageId: string;
+  externalCommentId?: string;
+  replyText?: string;
 };
 
 type EnqueueOptions = {
@@ -428,6 +438,10 @@ export async function enqueueJobsForDueSchedules() {
 }
 
 async function executePostJob(job: JobExecution) {
+  if (!job.postId) {
+    throw new Error("Missing post ID for post job");
+  }
+
   const { settings } = await getUserSettings(job.userId);
   const safeSettings = {
     duplicateWindowHours: settings?.duplicateWindowHours ?? 24,
@@ -653,6 +667,91 @@ async function executePostJob(job: JobExecution) {
   return { status: "success" };
 }
 
+async function executeCommentReplyJob(job: JobExecution) {
+  const rateLimit = await checkRateLimits(job.userId, "comment-reply");
+  if (!rateLimit.allowed) {
+    const nextRetryAt = new Date(Date.now() + FACEBOOK_RATE_LIMIT_COOLDOWN_MINUTES * 60 * 1000);
+    await Job.findByIdAndUpdate(job._id, {
+      status: "rate_limited",
+      nextRunAt: nextRetryAt,
+      nextRetryAt,
+      lastError: rateLimit.reason,
+      failureReason: rateLimit.reason,
+      errorCode: "rate_limited",
+      errorDetails: { reason: rateLimit.reason },
+      lockExpiresAt: null
+    });
+
+    return { status: "rate_limited" };
+  }
+
+  const commentInboxId = typeof job.payload?.commentInboxId === "string" ? job.payload.commentInboxId : "";
+  const comment = (await CommentInbox.findById(commentInboxId).lean()) as LeanCommentInbox | null;
+  const connection = (await ensureValidFacebookConnection(job.userId)) as LeanFacebookConnection;
+
+  if (!comment || !connection) {
+    throw new Error("Missing comment inbox entry or Facebook connection");
+  }
+
+  if (!comment.externalCommentId || !comment.replyText?.trim()) {
+    throw new Error("Comment reply is missing the Facebook comment ID or reply text");
+  }
+
+  const page = connection.pages.find((item) => item.pageId === comment.pageId);
+  if (!page) {
+    throw new Error("Target page token was not found");
+  }
+
+  await CommentInbox.findByIdAndUpdate(comment._id, {
+    status: "replying",
+    lastAttemptAt: new Date(),
+    $inc: { replyAttempts: 1 },
+    replyError: null
+  });
+
+  const replyResult = await replyToFacebookComment({
+    externalCommentId: comment.externalCommentId,
+    pageAccessToken: page.pageAccessToken,
+    message: comment.replyText
+  });
+
+  await Job.findByIdAndUpdate(job._id, {
+    status: "success",
+    completedAt: new Date(),
+    attempts: job.attempts + 1,
+    result: replyResult,
+    lastError: null,
+    failureReason: null,
+    errorCode: null,
+    errorDetails: null,
+    nextRetryAt: null,
+    lockExpiresAt: null
+  });
+
+  await CommentInbox.findByIdAndUpdate(comment._id, {
+    status: "replied",
+    repliedAt: new Date(),
+    replyExternalId: typeof replyResult?.id === "string" ? replyResult.id : null,
+    replyError: null
+  });
+
+  await logAction({
+    userId: job.userId,
+    type: "comment",
+    level: "success",
+    message: `[COMMENT] reply ${comment._id} success`,
+    relatedJobId: job._id,
+    metadata: {
+      pageId: comment.pageId,
+      commentInboxId: String(comment._id),
+      externalCommentId: comment.externalCommentId,
+      correlationId: job.correlationId
+    }
+  });
+
+  return { status: "success" };
+}
+
 export async function processQueuedJobs(limit = 10) {
   const processed: Array<{ jobId: string; status: string }> = [];
   let processedCount = 0;
@@ -666,7 +765,8 @@ export async function processQueuedJobs(limit = 10) {
     const job: JobExecution = {
       _id: String(item._id),
       userId: String(item.userId),
-      postId: String(item.postId),
+      type: item.type === "comment-reply" ? "comment-reply" : "post",
+      postId: item.postId ? String(item.postId) : undefined,
       scheduleId: item.scheduleId ? String(item.scheduleId) : undefined,
       targetPageId: String(item.targetPageId),
       attempts: typeof item.attempts === "number" ? item.attempts : 0,
@@ -679,11 +779,11 @@ export async function processQueuedJobs(limit = 10) {
     try {
       await logAction({
         userId: job.userId,
-        type: "queue",
+        type: job.type === "comment-reply" ? "comment" : "queue",
         level: "info",
-        message: `[PUBLISHER] post ${job.postId} started`,
+        message: job.type === "comment-reply" ? `[COMMENT] reply job ${job._id} started` : `[PUBLISHER] post ${job.postId} started`,
         relatedJobId: job._id,
-        relatedPostId: job.postId,
+        relatedPostId: job.type === "comment-reply" ? undefined : job.postId,
         relatedScheduleId: job.scheduleId,
         metadata: {
           targetPageId: job.targetPageId,
@@ -691,7 +791,7 @@ export async function processQueuedJobs(limit = 10) {
           attempt: job.attempts + 1
         }
       });
-      const result = await executePostJob(job);
+      const result = job.type === "comment-reply" ? await executeCommentReplyJob(job) : await executePostJob(job);
       processed.push({ jobId: job._id, status: result.status });
     } catch (error) {
       const failure = classifyPublishFailure(error);
@@ -721,32 +821,53 @@ export async function processQueuedJobs(limit = 10) {
         lockExpiresAt: null
       });
 
-      await Post.findByIdAndUpdate(job.postId, {
-        status: shouldRetry ? "retrying" : "failed",
-        $inc: { failedCount: 1 }
-      });
+      if (job.type !== "comment-reply") {
+        await Post.findByIdAndUpdate(job.postId, {
+          status: shouldRetry ? "retrying" : "failed",
+          $inc: { failedCount: 1 }
+        });
+      }
 
-      await logAndNotifyError({
-        userId: job.userId,
-        message: shouldRetry
-          ? `[PUBLISHER] post ${job.postId} failed and will retry (${attempts}/${job.maxAttempts}): ${failure.failureReason}`
-          : `[PUBLISHER] post ${job.postId} failed after ${attempts} attempts: ${failure.failureReason}`,
-        metadata: {
-          targetPageId: job.targetPageId,
-          attempts,
-          maxAttempts: job.maxAttempts,
-          autoPostConfigId: job.payload?.autoPostConfigId,
-          correlationId: job.correlationId,
-          errorCode: failure.errorCode,
-          nextRetryAt: nextRetryAt?.toISOString()
-        },
-        relatedJobId: job._id,
-        relatedPostId: job.postId,
-        relatedScheduleId: job.scheduleId,
-        error
-      });
+      if (job.type === "comment-reply") {
+        const commentInboxId = typeof job.payload?.commentInboxId === "string" ? job.payload.commentInboxId : "";
+        await CommentInbox.findByIdAndUpdate(commentInboxId, {
+          status: shouldRetry ? "queued" : "failed",
+          replyError: failure.failureReason,
+          lastAttemptAt: new Date()
+        });
 
-      if (job.payload?.autoPostConfigId) {
+        await notifyCommentFailure({
+          userId: job.userId,
+          commentInboxId,
+          pageId: job.targetPageId,
+          message: shouldRetry
+            ? `Comment reply failed and will retry (${attempts}/${job.maxAttempts}): ${failure.failureReason}`
+            : `Comment reply failed after ${attempts} attempts: ${failure.failureReason}`,
+          error
+        });
+      } else {
+        await logAndNotifyError({
+          userId: job.userId,
+          message: shouldRetry
+            ? `[PUBLISHER] post ${job.postId} failed and will retry (${attempts}/${job.maxAttempts}): ${failure.failureReason}`
+            : `[PUBLISHER] post ${job.postId} failed after ${attempts} attempts: ${failure.failureReason}`,
+          metadata: {
+            targetPageId: job.targetPageId,
+            attempts,
+            maxAttempts: job.maxAttempts,
+            autoPostConfigId: job.payload?.autoPostConfigId,
+            correlationId: job.correlationId,
+            errorCode: failure.errorCode,
+            nextRetryAt: nextRetryAt?.toISOString()
+          },
+          relatedJobId: job._id,
+          relatedPostId: job.postId,
+          relatedScheduleId: job.scheduleId,
+          error
+        });
+      }
+
+      if (job.type !== "comment-reply" && job.payload?.autoPostConfigId) {
         await AutoPostConfig.findByIdAndUpdate(String(job.payload.autoPostConfigId), {
           autoPostStatus: shouldRetry ? "retrying" : "failed",
           jobStatus: "failed",

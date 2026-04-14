@@ -9,13 +9,21 @@ const commentInboxSchema = new Schema(
     message: { type: String, required: true },
     status: {
       type: String,
-      enum: ["pending", "replied"],
+      enum: ["pending", "matched", "queued", "replying", "replied", "failed", "ignored"],
       default: "pending",
       index: true
     },
     replyText: { type: String },
     repliedAt: { type: Date },
-    matchedTrigger: { type: String }
+    matchedTrigger: { type: String },
+    matchedRuleId: { type: String, index: true },
+    matchedRuleType: { type: String },
+    autoReplyEnabled: { type: Boolean, default: false },
+    replyAttempts: { type: Number, default: 0 },
+    replyError: { type: String, default: null },
+    replyExternalId: { type: String, default: null },
+    queuedAt: { type: Date },
+    lastAttemptAt: { type: Date }
   },
   { timestamps: true }
 );

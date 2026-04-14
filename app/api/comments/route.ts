@@ -1,5 +1,6 @@
-﻿import { z } from "zod";
-import { jsonError, jsonOk, parseBody, requireAuth } from "@/lib/api";
+import { z } from "zod";
+import { isUnauthorizedError, jsonError, jsonOk, parseBody, requireAuth } from "@/lib/api";
+import { ingestCommentAndMaybeQueue } from "@/lib/services/comment-automation";
 import { handleRoleError, requireRole } from "@/lib/services/permissions";
 import { CommentInbox } from "@/models/CommentInbox";
 
@@ -9,8 +10,7 @@ const schema = z.object({
   message: z.string().min(1),
   externalCommentId: z.string().optional(),
   replyText: z.string().optional(),
-  status: z.enum(["pending", "replied"]).default("pending"),
-  matchedTrigger: z.string().optional()
+  autoQueue: z.boolean().optional()
 });
 
 export async function GET() {
@@ -18,8 +18,8 @@ export async function GET() {
     const userId = await requireAuth();
     const comments = await CommentInbox.find({ userId }).sort({ createdAt: -1 }).limit(100).lean();
     return jsonOk({ comments });
-  } catch {
-    return jsonError("Unauthorized", 401);
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : "Unable to load comments", isUnauthorizedError(error) ? 401 : 500);
   }
 }
 
@@ -27,12 +27,16 @@ export async function POST(request: Request) {
   try {
     const { userId } = await requireRole(["admin", "editor"]);
     const payload = parseBody(schema, await request.json());
-    const comment = await CommentInbox.create({
+    const result = await ingestCommentAndMaybeQueue({
       userId,
-      ...payload,
-      repliedAt: payload.status === "replied" ? new Date() : undefined
+      pageId: payload.pageId,
+      authorName: payload.authorName,
+      message: payload.message,
+      externalCommentId: payload.externalCommentId,
+      replyText: payload.replyText,
+      autoQueue: payload.autoQueue
     });
-    return jsonOk({ comment }, "Comment inbox updated");
+    return jsonOk(result, result.queuedJobId ? "Comment reply queued" : "Comment inbox updated");
   } catch (error) {
     return handleRoleError(error);
   }
