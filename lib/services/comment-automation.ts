@@ -7,6 +7,9 @@ import { GrowthAutomationRule } from "@/models/GrowthAutomationRule";
 import { KeywordTrigger } from "@/models/KeywordTrigger";
 import { PostingSettings } from "@/models/PostingSettings";
 
+const COMMENT_REPLY_BASE_DELAY_SECONDS = Number(process.env.COMMENT_REPLY_BASE_DELAY_SECONDS ?? "15");
+const COMMENT_REPLY_SPACING_SECONDS = Number(process.env.COMMENT_REPLY_SPACING_SECONDS ?? "45");
+
 type MatchedCommentRule = {
   trigger: string;
   ruleId: string;
@@ -110,6 +113,30 @@ async function findUserIdByPageId(pageId: string) {
   return connection?.userId ? String(connection.userId) : null;
 }
 
+async function computeCommentReplyRunAt(userId: string, pageId: string) {
+  const now = new Date();
+  const baseRunAt = new Date(now.getTime() + COMMENT_REPLY_BASE_DELAY_SECONDS * 1000);
+  const latestPendingReply = await Job.findOne({
+    userId,
+    type: "comment-reply",
+    targetPageId: pageId,
+    status: { $in: ["queued", "processing", "retrying", "rate_limited"] }
+  })
+    .sort({ nextRunAt: -1 })
+    .lean<{ nextRunAt?: Date } | null>();
+
+  if (!latestPendingReply?.nextRunAt) {
+    return baseRunAt;
+  }
+
+  const latestRunAt = new Date(latestPendingReply.nextRunAt);
+  if (latestRunAt.getTime() < baseRunAt.getTime()) {
+    return baseRunAt;
+  }
+
+  return new Date(latestRunAt.getTime() + COMMENT_REPLY_SPACING_SECONDS * 1000);
+}
+
 export async function ingestCommentAndMaybeQueue(params: {
   userId: string;
   pageId: string;
@@ -203,7 +230,7 @@ export async function ingestCommentAndMaybeQueue(params: {
     userId: params.userId,
     type: "comment-reply",
     targetPageId: params.pageId,
-    nextRunAt: new Date(),
+    nextRunAt: await computeCommentReplyRunAt(params.userId, params.pageId),
     maxAttempts: 3,
     status: "queued",
     payload: {
@@ -260,7 +287,7 @@ export async function retryCommentReply(userId: string, commentInboxId: string) 
     userId,
     type: "comment-reply",
     targetPageId: comment.pageId,
-    nextRunAt: new Date(),
+    nextRunAt: await computeCommentReplyRunAt(userId, comment.pageId),
     maxAttempts: 3,
     status: "queued",
     payload: {

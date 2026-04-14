@@ -20,6 +20,8 @@ import { computeNextRunAt, randomItem } from "@/lib/utils";
 
 const AUTO_POST_PAGE_SPACING_MINUTES = Number(process.env.AUTO_POST_PAGE_SPACING_MINUTES ?? "10");
 const FACEBOOK_RATE_LIMIT_COOLDOWN_MINUTES = Number(process.env.FACEBOOK_RATE_LIMIT_COOLDOWN_MINUTES ?? "60");
+const COMMENT_REPLY_RATE_LIMIT_COOLDOWN_MINUTES = Number(process.env.COMMENT_REPLY_RATE_LIMIT_COOLDOWN_MINUTES ?? "30");
+const COMMENT_REPLY_IMMEDIATE_BATCH_SIZE = Number(process.env.COMMENT_REPLY_IMMEDIATE_BATCH_SIZE ?? "1");
 const USER_JOB_LOCK_WINDOW_MS = Number(process.env.USER_JOB_LOCK_WINDOW_MS ?? String(5 * 60 * 1000));
 
 type ResolvedImage =
@@ -313,6 +315,28 @@ async function applyUserPublishCooldown(userId: string, nextRetryAt: Date, reaso
       userId,
       type: "post",
       _id: { $ne: sourceJobId },
+      status: { $in: ["queued", "retrying", "rate_limited"] }
+    },
+    {
+      $set: {
+        status: "rate_limited",
+        nextRunAt: nextRetryAt,
+        nextRetryAt,
+        lastError: reason,
+        failureReason: reason,
+        errorCode: "rate_limited_cooldown"
+      }
+    }
+  );
+}
+
+async function applyUserJobCooldown(userId: string, jobType: JobType, nextRetryAt: Date, reason: string, sourceJobId: string, targetPageId?: string) {
+  await Job.updateMany(
+    {
+      userId,
+      type: jobType,
+      _id: { $ne: sourceJobId },
+      ...(targetPageId ? { targetPageId } : {}),
       status: { $in: ["queued", "retrying", "rate_limited"] }
     },
     {
@@ -673,7 +697,7 @@ async function executePostJob(job: JobExecution) {
 async function executeCommentReplyJob(job: JobExecution) {
   const rateLimit = await checkRateLimits(job.userId, "comment-reply");
   if (!rateLimit.allowed) {
-    const nextRetryAt = new Date(Date.now() + FACEBOOK_RATE_LIMIT_COOLDOWN_MINUTES * 60 * 1000);
+    const nextRetryAt = new Date(Date.now() + COMMENT_REPLY_RATE_LIMIT_COOLDOWN_MINUTES * 60 * 1000);
     await Job.findByIdAndUpdate(job._id, {
       status: "rate_limited",
       nextRunAt: nextRetryAt,
@@ -683,6 +707,29 @@ async function executeCommentReplyJob(job: JobExecution) {
       errorCode: "rate_limited",
       errorDetails: { reason: rateLimit.reason },
       lockExpiresAt: null
+    });
+
+    await applyUserJobCooldown(
+      job.userId,
+      "comment-reply",
+      nextRetryAt,
+      rateLimit.reason ?? "Comment reply rate limited",
+      job._id,
+      job.targetPageId
+    );
+
+    await logAction({
+      userId: job.userId,
+      type: "comment",
+      level: "warn",
+      message: `[COMMENT] reply ${job._id} rate limited`,
+      relatedJobId: job._id,
+      metadata: {
+        targetPageId: job.targetPageId,
+        correlationId: job.correlationId,
+        nextRetryAt: nextRetryAt.toISOString(),
+        reason: rateLimit.reason
+      }
     });
 
     return { status: "rate_limited" };
@@ -902,7 +949,7 @@ export async function processQueuedJobs(limit = 10, jobType?: JobType) {
 }
 
 export async function processCommentReplyJobs(limit = 5) {
-  return processQueuedJobs(limit, "comment-reply");
+  return processQueuedJobs(Math.min(limit, COMMENT_REPLY_IMMEDIATE_BATCH_SIZE), "comment-reply");
 }
 
 
