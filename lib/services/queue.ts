@@ -86,6 +86,38 @@ type EnqueueOptions = {
   payloadExtras?: Record<string, unknown>;
 };
 
+function normalizeHashtags(hashtags?: string[]) {
+  return (hashtags ?? [])
+    .map((hashtag) => hashtag.trim())
+    .filter(Boolean)
+    .map((hashtag) => (hashtag.startsWith("#") ? hashtag : `#${hashtag}`));
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildPublishMessage(caption: string, hashtags?: string[]) {
+  const normalizedHashtags = normalizeHashtags(hashtags);
+  const hashtagBlock = normalizedHashtags.join(" ").trim();
+  let cleanedCaption = caption.trim();
+
+  if (hashtagBlock) {
+    const hashtagPattern = escapeRegExp(hashtagBlock).replace(/\s+/g, "\\s+");
+    const trailingHashtagBlock = new RegExp(`(?:\\n\\s*)*${hashtagPattern}\\s*$`, "i");
+
+    while (trailingHashtagBlock.test(cleanedCaption)) {
+      cleanedCaption = cleanedCaption.replace(trailingHashtagBlock, "").trimEnd();
+    }
+  }
+
+  if (!hashtagBlock) {
+    return cleanedCaption;
+  }
+
+  return cleanedCaption ? `${cleanedCaption}\n\n${hashtagBlock}` : hashtagBlock;
+}
+
 async function resolveImages(userId: string, imageRefs: string[]): Promise<ResolvedImage[]> {
   if (imageRefs.length === 0) {
     return [];
@@ -484,7 +516,7 @@ async function executePostJob(job: JobExecution) {
 
   const variants = post.variants?.length ? post.variants : [{ caption: post.content, hashtags: post.hashtags }];
   const chosenVariant = post.randomizeCaption ? randomItem(variants) : variants[0];
-  const message = [chosenVariant.caption, chosenVariant.hashtags.join(" ")].filter(Boolean).join("\n\n");
+  const message = buildPublishMessage(chosenVariant.caption, chosenVariant.hashtags);
   const imageRefs = post.randomizeImages && post.imageUrls.length > 0 ? [randomItem(post.imageUrls)] : post.imageUrls;
   const images = await resolveImages(job.userId, imageRefs);
 
