@@ -55,8 +55,8 @@ const schema = z.object({
   captions: z.array(z.string()).default([]),
   hashtags: z.array(z.string()).default([]),
   aiPrompt: z.string().default(""),
-  postingWindowStart: z.string().regex(/^\d{2}:\d{2}$/).default("09:00"),
-  postingWindowEnd: z.string().regex(/^\d{2}:\d{2}$/).default("22:00"),
+  postingWindowStart: z.string().regex(/^\d{2}:\d{2}$/).default("06:00"),
+  postingWindowEnd: z.string().regex(/^\d{2}:\d{2}$/).default("00:00"),
   language: z.enum(["th", "en"]).default("th")
 });
 
