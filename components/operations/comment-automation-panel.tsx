@@ -62,6 +62,8 @@ const emptyKeywordTrigger = {
   enabled: true
 };
 
+const AUTO_COMMENT_REPLY_SLOTS = 5;
+
 function statusTone(status: CommentRecord["status"]) {
   switch (status) {
     case "replied":
@@ -174,14 +176,16 @@ export function CommentAutomationPanel() {
     }));
   }
 
-  function updateAutoReplies(value: string) {
-    setAutoConfig((current) => ({
-      ...current,
-      autoCommentReplies: value
-        .split("\n")
-        .map((item) => item.trim())
-        .filter(Boolean)
-    }));
+  function updateAutoReplySlot(index: number, value: string) {
+    setAutoConfig((current) => {
+      const nextReplies = Array.from({ length: AUTO_COMMENT_REPLY_SLOTS }, (_, slotIndex) => current.autoCommentReplies[slotIndex] ?? "");
+      nextReplies[index] = value;
+
+      return {
+        ...current,
+        autoCommentReplies: nextReplies.map((item) => item.trim()).filter(Boolean)
+      };
+    });
   }
 
   async function handleSaveAutoConfig(event: FormEvent<HTMLFormElement>) {
@@ -321,13 +325,16 @@ export function CommentAutomationPanel() {
 
           <label className="label">
             Reply library
-            <textarea
-              className="textarea"
-              rows={6}
-              value={autoConfig.autoCommentReplies.join("\n")}
-              onChange={(event) => updateAutoReplies(event.target.value)}
-              placeholder={"ใส่คำตอบ 1 บรรทัดต่อ 1 ข้อความ\nขอบคุณที่สนใจครับ\nทักแชทได้เลยครับ\nเดี๋ยวแอดมินตอบกลับให้นะครับ"}
-            />
+            <div className="stack">
+              {Array.from({ length: AUTO_COMMENT_REPLY_SLOTS }, (_, index) => (
+                <input
+                  key={`auto-reply-slot-${index}`}
+                  value={autoConfig.autoCommentReplies[index] ?? ""}
+                  onChange={(event) => updateAutoReplySlot(index, event.target.value)}
+                  placeholder={`Reply ${index + 1}`}
+                />
+              ))}
+            </div>
           </label>
 
           <p style={{ color: "#64748b", margin: 0 }}>
