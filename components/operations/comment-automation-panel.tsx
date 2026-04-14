@@ -14,6 +14,11 @@ type CommentRecord = {
   replyError?: string | null;
   replyAttempts?: number;
   createdAt?: string;
+  queuedAt?: string;
+  lastAttemptAt?: string;
+  repliedAt?: string;
+  autoReplyEnabled?: boolean;
+  matchedRuleType?: "growth-rule" | "keyword-trigger" | "auto-comment-pool";
 };
 
 type AutoCommentConfig = {
@@ -64,6 +69,15 @@ const emptyKeywordTrigger = {
 
 const AUTO_COMMENT_REPLY_SLOTS = 5;
 
+const META_WEBHOOK_CHECKLIST = [
+  "Meta App > Webhooks ต้องตั้ง Callback URL เป็น /api/facebook/webhook",
+  "Verify Token ใน Meta ต้องตรงกับ FACEBOOK_WEBHOOK_VERIFY_TOKEN บน Vercel",
+  "เลือก subscribe ที่ Facebook Page object และ feed/comment events",
+  "เพจที่ต้องการตอบคอมเมนต์ต้องถูกเชื่อมในระบบ และถูกเลือกใน Auto Reply Mode",
+  "Reply library ต้องมีอย่างน้อย 1 ช่อง หรือมี rule/keyword trigger ที่ match ได้",
+  "ถ้าทดสอบแล้วไม่เข้า inbox ให้เช็กใน Meta ว่า webhook event ถูกส่งจริง"
+] as const;
+
 function statusTone(status: CommentRecord["status"]) {
   switch (status) {
     case "replied":
@@ -77,6 +91,35 @@ function statusTone(status: CommentRecord["status"]) {
       return "muted";
     default:
       return "default";
+  }
+}
+
+function formatBangkokTime(value?: string) {
+  if (!value) return "-";
+
+  return new Intl.DateTimeFormat("th-TH", {
+    dateStyle: "short",
+    timeStyle: "short",
+    timeZone: "Asia/Bangkok"
+  }).format(new Date(value));
+}
+
+function getCommentProgressNote(comment: CommentRecord) {
+  switch (comment.status) {
+    case "ignored":
+      return "รับคอมเมนต์แล้ว แต่ยังไม่มี rule หรือ random reply ที่ใช้ตอบได้";
+    case "matched":
+      return "แมตช์ rule แล้ว แต่ยังไม่ได้ queue ตอบกลับ";
+    case "queued":
+      return "รับ webhook แล้ว และเข้า queue รอตอบกลับ";
+    case "replying":
+      return "ระบบกำลังยิง reply ไปที่ Facebook";
+    case "replied":
+      return "ตอบกลับสำเร็จแล้ว";
+    case "failed":
+      return "ระบบพยายามตอบแล้ว แต่ล้มเหลว";
+    default:
+      return "รับคอมเมนต์เข้าระบบแล้ว";
   }
 }
 
@@ -99,6 +142,16 @@ export function CommentAutomationPanel() {
   const [savingTrigger, setSavingTrigger] = useState(false);
   const [savingAutoConfig, setSavingAutoConfig] = useState(false);
   const [retryingId, setRetryingId] = useState<string | null>(null);
+
+  const commentSummary = useMemo(
+    () => ({
+      received: comments.length,
+      queued: comments.filter((comment) => comment.status === "queued" || comment.status === "replying").length,
+      replied: comments.filter((comment) => comment.status === "replied").length,
+      failed: comments.filter((comment) => comment.status === "failed").length
+    }),
+    [comments]
+  );
 
   const webhookUrl = useMemo(() => {
     if (typeof window === "undefined") return "/api/facebook/webhook";
@@ -363,6 +416,22 @@ export function CommentAutomationPanel() {
         </div>
       </section>
 
+      <section className="card section-card">
+        <div className="section-head">
+          <div className="section-title-wrap">
+            <h2>Meta Webhook Checklist</h2>
+          </div>
+        </div>
+        <div className="stack">
+          {META_WEBHOOK_CHECKLIST.map((item, index) => (
+            <div key={item} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+              <span className="badge badge-info">{index + 1}</span>
+              <span>{item}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
       {error ? <div className="card" style={{ borderColor: "rgba(220,38,38,.25)", color: "#b91c1c" }}>{error}</div> : null}
 
       <div className="grid quick-grid" style={{ alignItems: "start" }}>
@@ -371,6 +440,12 @@ export function CommentAutomationPanel() {
             <div className="section-title-wrap">
               <h2>Comment Inbox</h2>
             </div>
+          </div>
+          <div className="chip-grid">
+            <span className="choice-chip active">Received {commentSummary.received}</span>
+            <span className="choice-chip active">Queued {commentSummary.queued}</span>
+            <span className="choice-chip active">Replied {commentSummary.replied}</span>
+            <span className="choice-chip active">Failed {commentSummary.failed}</span>
           </div>
           <div className="stack">
             {loading ? <p>Loading comments...</p> : null}
@@ -385,8 +460,21 @@ export function CommentAutomationPanel() {
                     <div style={{ color: "#475569" }}>
                       <div>Page: {comment.pageId}</div>
                       {comment.matchedTrigger ? <div>Matched trigger: {comment.matchedTrigger}</div> : null}
+                      {comment.matchedRuleType ? <div>Reply source: {comment.matchedRuleType}</div> : null}
+                      <div>External comment ID: {comment.externalCommentId || "-"}</div>
                     </div>
                     <p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{comment.message}</p>
+                    <div className="card" style={{ padding: 12, background: "rgba(59,130,246,.05)" }}>
+                      <strong style={{ display: "block", marginBottom: 6 }}>Delivery status</strong>
+                      <div style={{ color: "#475569", marginBottom: 8 }}>{getCommentProgressNote(comment)}</div>
+                      <div style={{ display: "grid", gap: 4, color: "#64748b", fontSize: 13 }}>
+                        <div>Received: {formatBangkokTime(comment.createdAt)}</div>
+                        <div>Queued: {formatBangkokTime(comment.queuedAt)}</div>
+                        <div>Last attempt: {formatBangkokTime(comment.lastAttemptAt)}</div>
+                        <div>Replied: {formatBangkokTime(comment.repliedAt)}</div>
+                        <div>Auto reply enabled: {comment.autoReplyEnabled ? "Yes" : "No"}</div>
+                      </div>
+                    </div>
                     {comment.replyText ? (
                       <div>
                         <div style={{ fontSize: 13, color: "#64748b", marginBottom: 6 }}>Reply</div>
