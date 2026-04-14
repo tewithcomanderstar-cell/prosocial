@@ -4,6 +4,8 @@ import { connectDb } from "@/lib/db";
 import { FacebookConnection } from "@/models/FacebookConnection";
 import { GoogleDriveConnection } from "@/models/GoogleDriveConnection";
 
+const FACEBOOK_TOKEN_VALIDATION_CACHE_MS = 15 * 60 * 1000;
+
 async function markProviderStatus(userId: string, provider: "facebook" | "google-drive", status: "healthy" | "warning" | "expired", metadata: Record<string, unknown> = {}) {
   const Model = provider === "facebook" ? FacebookConnection : GoogleDriveConnection;
   await Model.findOneAndUpdate(
@@ -40,6 +42,16 @@ export async function ensureValidFacebookConnection(userId: string) {
 
   if (!connection) {
     throw new Error("Facebook is not connected");
+  }
+
+  const lastValidatedAtMs = connection.lastValidatedAt ? new Date(connection.lastValidatedAt).getTime() : null;
+  const hasFreshValidation =
+    connection.tokenStatus === "healthy" &&
+    lastValidatedAtMs !== null &&
+    Date.now() - lastValidatedAtMs < FACEBOOK_TOKEN_VALIDATION_CACHE_MS;
+
+  if (hasFreshValidation) {
+    return connection;
   }
 
   const response = await fetchWithRetry(`https://graph.facebook.com/me?fields=id&access_token=${encodeURIComponent(connection.accessToken)}`, {

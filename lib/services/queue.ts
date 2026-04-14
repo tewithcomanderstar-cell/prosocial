@@ -16,6 +16,10 @@ import { checkRateLimits } from "@/lib/services/rate-limit";
 import { getUserSettings, randomDelayMs } from "@/lib/services/settings";
 import { computeNextRunAt, randomItem } from "@/lib/utils";
 
+const AUTO_POST_PAGE_SPACING_MINUTES = Number(process.env.AUTO_POST_PAGE_SPACING_MINUTES ?? "10");
+const FACEBOOK_RATE_LIMIT_COOLDOWN_MINUTES = Number(process.env.FACEBOOK_RATE_LIMIT_COOLDOWN_MINUTES ?? "60");
+const USER_JOB_LOCK_WINDOW_MS = Number(process.env.USER_JOB_LOCK_WINDOW_MS ?? String(5 * 60 * 1000));
+
 type ResolvedImage =
   | { kind: "url"; value: string }
   | { kind: "binary"; fileName: string; bytes: ArrayBuffer; mimeType: string };
@@ -255,13 +259,23 @@ function classifyPublishFailure(error: unknown) {
 
 async function acquireNextRunnableJob(): Promise<Record<string, unknown> | null> {
   const now = new Date();
-  const lockExpiresAt = new Date(now.getTime() + 5 * 60 * 1000);
+  const lockExpiresAt = new Date(now.getTime() + USER_JOB_LOCK_WINDOW_MS);
   const correlationId = randomUUID();
+  const busyUserIds = (await Job.distinct("userId", {
+    status: "processing",
+    lockExpiresAt: { $gt: now }
+  })) as unknown[];
+
+  const userScope =
+    busyUserIds.length > 0
+      ? { userId: { $nin: busyUserIds } }
+      : {};
 
   const job = await Job.findOneAndUpdate(
     {
       status: { $in: ["queued", "retrying", "rate_limited"] },
       nextRunAt: { $lte: now },
+      ...userScope,
       $or: [{ lockExpiresAt: { $exists: false } }, { lockExpiresAt: null }, { lockExpiresAt: { $lte: now } }]
     },
     {
@@ -278,6 +292,27 @@ async function acquireNextRunnableJob(): Promise<Record<string, unknown> | null>
   ).lean();
 
   return (job as Record<string, unknown> | null) ?? null;
+}
+
+async function applyUserPublishCooldown(userId: string, nextRetryAt: Date, reason: string, sourceJobId: string) {
+  await Job.updateMany(
+    {
+      userId,
+      type: "post",
+      _id: { $ne: sourceJobId },
+      status: { $in: ["queued", "retrying", "rate_limited"] }
+    },
+    {
+      $set: {
+        status: "rate_limited",
+        nextRunAt: nextRetryAt,
+        nextRetryAt,
+        lastError: reason,
+        failureReason: reason,
+        errorCode: "rate_limited_cooldown"
+      }
+    }
+  );
 }
 
 export async function enqueuePostJobsForPost(userId: string, postId: string, options: EnqueueOptions = {}) {
@@ -304,7 +339,7 @@ export async function enqueuePostJobsForPost(userId: string, postId: string, opt
   };
 
   let queued = 0;
-  for (const page of selectedPages) {
+  for (const [pageIndex, page] of selectedPages.entries()) {
     const fingerprint = post.fingerprint ?? contentFingerprint({
       content: post.content,
       hashtags: post.hashtags,
@@ -312,8 +347,9 @@ export async function enqueuePostJobsForPost(userId: string, postId: string, opt
       targetPageIds: [page.pageId]
     });
 
+    const spacingMinutes = options.payloadExtras?.autoPostConfigId ? AUTO_POST_PAGE_SPACING_MINUTES : 0;
     const nextRunAt = options.startAt
-      ? new Date(options.startAt)
+      ? new Date(options.startAt.getTime() + pageIndex * spacingMinutes * 60 * 1000)
       : options.applyRandomDelay === false
         ? new Date()
         : new Date(Date.now() + randomDelayMs(safeSettings.minDelaySeconds, safeSettings.maxDelaySeconds));
@@ -400,7 +436,7 @@ async function executePostJob(job: JobExecution) {
 
   const rateLimit = await checkRateLimits(job.userId, "post");
   if (!rateLimit.allowed) {
-    const nextRetryAt = new Date(Date.now() + 30 * 60 * 1000);
+    const nextRetryAt = new Date(Date.now() + FACEBOOK_RATE_LIMIT_COOLDOWN_MINUTES * 60 * 1000);
     await Job.findByIdAndUpdate(job._id, {
       status: "rate_limited",
       nextRunAt: nextRetryAt,
@@ -429,13 +465,16 @@ async function executePostJob(job: JobExecution) {
       }
     });
 
+    await applyUserPublishCooldown(job.userId, nextRetryAt, rateLimit.reason ?? "Rate limited", job._id);
+
     if (job.payload?.autoPostConfigId) {
       await AutoPostConfig.findByIdAndUpdate(String(job.payload.autoPostConfigId), {
         autoPostStatus: "retrying",
         jobStatus: "pending",
         lastStatus: "failed",
         retryCount: (job.attempts ?? 0) + 1,
-        lastError: rateLimit.reason ?? "Rate limited"
+        lastError: rateLimit.reason ?? "Rate limited",
+        nextRunAt: nextRetryAt
       });
       await updateAutoPostRecords({
         configId: String(job.payload.autoPostConfigId),
@@ -658,7 +697,16 @@ export async function processQueuedJobs(limit = 10) {
       const failure = classifyPublishFailure(error);
       const attempts = job.attempts + 1;
       const shouldRetry = failure.retryable && attempts < job.maxAttempts;
-      const nextRetryAt = shouldRetry ? new Date(Date.now() + getRetryDelayMs(attempts - 1)) : null;
+      const nextRetryAt =
+        failure.errorCode === "rate_limited"
+          ? new Date(Date.now() + FACEBOOK_RATE_LIMIT_COOLDOWN_MINUTES * 60 * 1000)
+          : shouldRetry
+            ? new Date(Date.now() + getRetryDelayMs(attempts - 1))
+            : null;
+
+      if (failure.errorCode === "rate_limited" && nextRetryAt) {
+        await applyUserPublishCooldown(job.userId, nextRetryAt, failure.failureReason, job._id);
+      }
 
       await Job.findByIdAndUpdate(job._id, {
         status: shouldRetry ? "retrying" : "failed",
@@ -704,7 +752,8 @@ export async function processQueuedJobs(limit = 10) {
           jobStatus: "failed",
           lastStatus: shouldRetry ? "pending" : "failed",
           retryCount: attempts,
-          lastError: failure.failureReason
+          lastError: failure.failureReason,
+          nextRunAt: nextRetryAt ?? undefined
         });
         await updateAutoPostRecords({
           configId: String(job.payload.autoPostConfigId),
