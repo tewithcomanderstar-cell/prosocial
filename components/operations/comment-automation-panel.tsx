@@ -16,6 +16,17 @@ type CommentRecord = {
   createdAt?: string;
 };
 
+type AutoCommentConfig = {
+  autoCommentEnabled: boolean;
+  autoCommentPageIds: string[];
+  autoCommentReplies: string[];
+};
+
+type FacebookPage = {
+  pageId: string;
+  name: string;
+};
+
 type GrowthRule = {
   _id: string;
   name: string;
@@ -71,6 +82,12 @@ export function CommentAutomationPanel() {
   const [comments, setComments] = useState<CommentRecord[]>([]);
   const [growthRules, setGrowthRules] = useState<GrowthRule[]>([]);
   const [keywordTriggers, setKeywordTriggers] = useState<KeywordTrigger[]>([]);
+  const [pages, setPages] = useState<FacebookPage[]>([]);
+  const [autoConfig, setAutoConfig] = useState<AutoCommentConfig>({
+    autoCommentEnabled: false,
+    autoCommentPageIds: [],
+    autoCommentReplies: []
+  });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,6 +95,7 @@ export function CommentAutomationPanel() {
   const [triggerForm, setTriggerForm] = useState(emptyKeywordTrigger);
   const [savingRule, setSavingRule] = useState(false);
   const [savingTrigger, setSavingTrigger] = useState(false);
+  const [savingAutoConfig, setSavingAutoConfig] = useState(false);
   const [retryingId, setRetryingId] = useState<string | null>(null);
 
   const webhookUrl = useMemo(() => {
@@ -94,16 +112,20 @@ export function CommentAutomationPanel() {
         setLoading(true);
       }
 
-      const [commentsResponse, growthRulesResponse, triggersResponse] = await Promise.all([
+      const [commentsResponse, growthRulesResponse, triggersResponse, pagesResponse, autoConfigResponse] = await Promise.all([
         fetch("/api/comments", { credentials: "include" }),
         fetch("/api/growth-rules", { credentials: "include" }),
-        fetch("/api/triggers", { credentials: "include" })
+        fetch("/api/triggers", { credentials: "include" }),
+        fetch("/api/facebook/pages", { credentials: "include" }),
+        fetch("/api/comments/config", { credentials: "include" })
       ]);
 
-      const [commentsPayload, growthRulesPayload, triggersPayload] = await Promise.all([
+      const [commentsPayload, growthRulesPayload, triggersPayload, pagesPayload, autoConfigPayload] = await Promise.all([
         commentsResponse.json(),
         growthRulesResponse.json(),
-        triggersResponse.json()
+        triggersResponse.json(),
+        pagesResponse.json(),
+        autoConfigResponse.json()
       ]);
 
       if (!commentsResponse.ok) {
@@ -115,10 +137,22 @@ export function CommentAutomationPanel() {
       if (!triggersResponse.ok) {
         throw new Error(triggersPayload.message || "Unable to load keyword triggers");
       }
+      if (!pagesResponse.ok) {
+        throw new Error(pagesPayload.message || "Unable to load Facebook pages");
+      }
+      if (!autoConfigResponse.ok) {
+        throw new Error(autoConfigPayload.message || "Unable to load auto comment config");
+      }
 
       setComments(commentsPayload.data?.comments ?? []);
       setGrowthRules(growthRulesPayload.data?.rules ?? []);
       setKeywordTriggers((triggersPayload.data?.triggers ?? []).filter((item: KeywordTrigger) => item.triggerType === "comment"));
+      setPages(pagesPayload.data?.pages ?? []);
+      setAutoConfig({
+        autoCommentEnabled: Boolean(autoConfigPayload.data?.autoCommentEnabled),
+        autoCommentPageIds: autoConfigPayload.data?.autoCommentPageIds ?? [],
+        autoCommentReplies: autoConfigPayload.data?.autoCommentReplies ?? []
+      });
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Unable to load Auto Comment data");
     } finally {
@@ -130,6 +164,49 @@ export function CommentAutomationPanel() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  function toggleAutoCommentPage(pageId: string) {
+    setAutoConfig((current) => ({
+      ...current,
+      autoCommentPageIds: current.autoCommentPageIds.includes(pageId)
+        ? current.autoCommentPageIds.filter((id) => id !== pageId)
+        : [...current.autoCommentPageIds, pageId]
+    }));
+  }
+
+  function updateAutoReplies(value: string) {
+    setAutoConfig((current) => ({
+      ...current,
+      autoCommentReplies: value
+        .split("\n")
+        .map((item) => item.trim())
+        .filter(Boolean)
+    }));
+  }
+
+  async function handleSaveAutoConfig(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSavingAutoConfig(true);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/comments/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(autoConfig)
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.message || "Unable to save auto comment config");
+      }
+      await loadData(true);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Unable to save auto comment config");
+    } finally {
+      setSavingAutoConfig(false);
+    }
+  }
 
   async function handleCreateGrowthRule(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -207,6 +284,62 @@ export function CommentAutomationPanel() {
 
   return (
     <div className="stack">
+      <section className="card section-card">
+        <div className="section-head">
+          <div className="section-title-wrap">
+            <h2>Auto Reply Mode</h2>
+          </div>
+        </div>
+        <form className="stack" onSubmit={handleSaveAutoConfig}>
+          <label style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <input
+              type="checkbox"
+              checked={autoConfig.autoCommentEnabled}
+              onChange={(event) => setAutoConfig((current) => ({ ...current, autoCommentEnabled: event.target.checked }))}
+            />
+            <span>Reply automatically to comments on selected pages</span>
+          </label>
+
+          <div className="stack">
+            <strong>Facebook Pages</strong>
+            <div className="chip-grid">
+              {pages.map((page) => {
+                const active = autoConfig.autoCommentPageIds.includes(page.pageId);
+                return (
+                  <button
+                    key={page.pageId}
+                    type="button"
+                    className={`choice-chip ${active ? "active" : ""}`}
+                    onClick={() => toggleAutoCommentPage(page.pageId)}
+                  >
+                    {page.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <label className="label">
+            Reply library
+            <textarea
+              className="textarea"
+              rows={6}
+              value={autoConfig.autoCommentReplies.join("\n")}
+              onChange={(event) => updateAutoReplies(event.target.value)}
+              placeholder={"ใส่คำตอบ 1 บรรทัดต่อ 1 ข้อความ\nขอบคุณที่สนใจครับ\nทักแชทได้เลยครับ\nเดี๋ยวแอดมินตอบกลับให้นะครับ"}
+            />
+          </label>
+
+          <p style={{ color: "#64748b", margin: 0 }}>
+            When a comment arrives on one of these pages, the system will randomly choose one reply from this list.
+          </p>
+
+          <button type="submit" className="button-primary" disabled={savingAutoConfig}>
+            {savingAutoConfig ? "Saving..." : "Save auto reply mode"}
+          </button>
+        </form>
+      </section>
+
       <section className="card section-card">
         <div className="section-head">
           <div className="section-title-wrap">

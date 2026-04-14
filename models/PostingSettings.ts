@@ -16,6 +16,8 @@ const postingSettingsSchema = new Schema(
       default: "medium"
     },
     autoCommentEnabled: { type: Boolean, default: false },
+    autoCommentPageIds: { type: [String], default: [] },
+    autoCommentReplies: { type: [String], default: [] },
     pageLimitOverride: { type: Number },
     apiBurstWindowMs: { type: Number, default: 60000 },
     apiBurstMax: { type: Number, default: 20 },

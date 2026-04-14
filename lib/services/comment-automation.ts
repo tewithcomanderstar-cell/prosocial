@@ -10,7 +10,7 @@ import { PostingSettings } from "@/models/PostingSettings";
 type MatchedCommentRule = {
   trigger: string;
   ruleId: string;
-  ruleType: "growth-rule" | "keyword-trigger";
+  ruleType: "growth-rule" | "keyword-trigger" | "auto-comment-pool";
   replyText: string;
 };
 
@@ -38,6 +38,10 @@ type FacebookWebhookPayload = {
 
 function normalizeText(input: string) {
   return input.trim().toLowerCase();
+}
+
+function randomItem<T>(items: T[]) {
+  return items[Math.floor(Math.random() * items.length)];
 }
 
 async function findMatchedRule(userId: string, message: string): Promise<MatchedCommentRule | null> {
@@ -83,14 +87,22 @@ async function findMatchedRule(userId: string, message: string): Promise<Matched
   return null;
 }
 
-async function isAutoCommentEnabled(userId: string) {
+async function getAutoCommentSettings(userId: string) {
   const settings = await PostingSettings.findOneAndUpdate(
     { userId },
     { $setOnInsert: { userId } },
     { upsert: true, new: true }
-  ).lean<{ autoCommentEnabled?: boolean } | null>();
+  ).lean<{
+    autoCommentEnabled?: boolean;
+    autoCommentPageIds?: string[];
+    autoCommentReplies?: string[];
+  } | null>();
 
-  return Boolean(settings?.autoCommentEnabled);
+  return {
+    enabled: Boolean(settings?.autoCommentEnabled),
+    pageIds: (settings?.autoCommentPageIds ?? []).filter(Boolean),
+    replies: (settings?.autoCommentReplies ?? []).map((item) => item.trim()).filter(Boolean)
+  };
 }
 
 async function findUserIdByPageId(pageId: string) {
@@ -109,12 +121,30 @@ export async function ingestCommentAndMaybeQueue(params: {
 }) {
   await connectDb();
 
+  const autoCommentSettings = await getAutoCommentSettings(params.userId);
   const matchedRule = params.replyText?.trim()
     ? null
     : await findMatchedRule(params.userId, params.message);
+  const poolReply =
+    !params.replyText?.trim() &&
+    !matchedRule &&
+    autoCommentSettings.enabled &&
+    autoCommentSettings.pageIds.includes(params.pageId) &&
+    autoCommentSettings.replies.length > 0
+      ? randomItem(autoCommentSettings.replies)
+      : "";
+  const syntheticPoolRule = poolReply
+    ? {
+        trigger: "auto-comment-pool",
+        ruleId: "auto-comment-pool",
+        ruleType: "auto-comment-pool" as const,
+        replyText: poolReply
+      }
+    : null;
 
-  const effectiveReplyText = params.replyText?.trim() || matchedRule?.replyText || "";
-  const autoReplyEnabled = params.autoQueue !== false && (await isAutoCommentEnabled(params.userId));
+  const effectiveRule = matchedRule ?? syntheticPoolRule;
+  const effectiveReplyText = params.replyText?.trim() || effectiveRule?.replyText || "";
+  const autoReplyEnabled = params.autoQueue !== false && autoCommentSettings.enabled;
   const shouldQueue = Boolean(autoReplyEnabled && effectiveReplyText && params.externalCommentId);
   const status = shouldQueue
     ? "queued"
@@ -136,9 +166,9 @@ export async function ingestCommentAndMaybeQueue(params: {
       message: params.message,
       replyText: effectiveReplyText || undefined,
       status,
-      matchedTrigger: matchedRule?.trigger,
-      matchedRuleId: matchedRule?.ruleId,
-      matchedRuleType: matchedRule?.ruleType,
+      matchedTrigger: effectiveRule?.trigger,
+      matchedRuleId: effectiveRule?.ruleId,
+      matchedRuleType: effectiveRule?.ruleType,
       autoReplyEnabled,
       queuedAt: shouldQueue ? new Date() : undefined,
       replyError: null
@@ -158,9 +188,11 @@ export async function ingestCommentAndMaybeQueue(params: {
         pageId: params.pageId,
         commentInboxId: String(comment._id),
         externalCommentId: params.externalCommentId,
-        matchedTrigger: matchedRule?.trigger,
+        matchedTrigger: effectiveRule?.trigger,
         autoReplyEnabled,
-        hasExternalCommentId: Boolean(params.externalCommentId)
+        hasExternalCommentId: Boolean(params.externalCommentId),
+        autoCommentPageSelected: autoCommentSettings.pageIds.includes(params.pageId),
+        autoCommentReplyPoolSize: autoCommentSettings.replies.length
       }
     });
 
@@ -178,9 +210,9 @@ export async function ingestCommentAndMaybeQueue(params: {
       commentInboxId: String(comment._id),
       externalCommentId: params.externalCommentId,
       replyText: effectiveReplyText,
-      matchedTrigger: matchedRule?.trigger,
-      matchedRuleId: matchedRule?.ruleId,
-      matchedRuleType: matchedRule?.ruleType
+      matchedTrigger: effectiveRule?.trigger,
+      matchedRuleId: effectiveRule?.ruleId,
+      matchedRuleType: effectiveRule?.ruleType
     }
   });
 
@@ -194,7 +226,7 @@ export async function ingestCommentAndMaybeQueue(params: {
       pageId: params.pageId,
       commentInboxId: String(comment._id),
       externalCommentId: params.externalCommentId,
-      matchedTrigger: matchedRule?.trigger
+      matchedTrigger: effectiveRule?.trigger
     }
   });
 
