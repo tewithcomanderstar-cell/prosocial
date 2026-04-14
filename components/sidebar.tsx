@@ -29,7 +29,8 @@ export function Sidebar() {
       items: [
         { href: "/dashboard", label: t("navDashboard"), icon: "dashboard" },
         { href: "/runs", label: "Runs", icon: "logs" },
-        { href: "/notifications", label: "Alerts", icon: "integrations" }
+        { href: "/notifications", label: "Alerts", icon: "integrations" },
+        { href: "/incidents", label: "Error Center", icon: "logs" }
       ]
     },
     {
