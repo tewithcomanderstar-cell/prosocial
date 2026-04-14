@@ -51,6 +51,7 @@ const autoPostConfigSchema = new Schema(
     lastError: { type: String, default: null },
     lastPostId: { type: Schema.Types.ObjectId, ref: "Post" },
     lastSelectedImageId: { type: String, default: null },
+    usedImageIds: { type: [String], default: [] },
     lastWorkflowId: { type: Schema.Types.ObjectId, ref: "Workflow" },
     lastWorkflowRunId: { type: Schema.Types.ObjectId, ref: "WorkflowRun" },
     lastContentItemId: { type: Schema.Types.ObjectId, ref: "ContentItem" }

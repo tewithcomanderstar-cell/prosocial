@@ -9,6 +9,7 @@ type SettingsState = {
   minDelaySeconds: number;
   maxDelaySeconds: number;
   duplicateWindowHours: number;
+  autoPostDuplicateWindowHours: number;
   randomizationLevel: "low" | "medium" | "high";
   autoCommentEnabled: boolean;
   apiBurstWindowMs: number;
@@ -24,6 +25,7 @@ const defaults: SettingsState = {
   minDelaySeconds: 15,
   maxDelaySeconds: 90,
   duplicateWindowHours: 24,
+  autoPostDuplicateWindowHours: 0,
   randomizationLevel: "medium",
   autoCommentEnabled: false,
   apiBurstWindowMs: 60000,
@@ -66,6 +68,7 @@ export function AdvancedSettingsForm() {
         <label className="label">Min random delay (sec)<input className="input" type="number" value={state.minDelaySeconds} onChange={(e) => setState({ ...state, minDelaySeconds: Number(e.target.value) })} /></label>
         <label className="label">Max random delay (sec)<input className="input" type="number" value={state.maxDelaySeconds} onChange={(e) => setState({ ...state, maxDelaySeconds: Number(e.target.value) })} /></label>
         <label className="label">Duplicate window (hours)<input className="input" type="number" value={state.duplicateWindowHours} onChange={(e) => setState({ ...state, duplicateWindowHours: Number(e.target.value) })} /></label>
+        <label className="label">Auto Post duplicate window (hours, 0 = unlimited)<input className="input" type="number" value={state.autoPostDuplicateWindowHours} onChange={(e) => setState({ ...state, autoPostDuplicateWindowHours: Number(e.target.value) })} /></label>
         <label className="label">API burst window (ms)<input className="input" type="number" value={state.apiBurstWindowMs} onChange={(e) => setState({ ...state, apiBurstWindowMs: Number(e.target.value) })} /></label>
         <label className="label">API burst max<input className="input" type="number" value={state.apiBurstMax} onChange={(e) => setState({ ...state, apiBurstMax: Number(e.target.value) })} /></label>
         <label className="label">Token warning (hours)<input className="input" type="number" value={state.tokenExpiryWarningHours} onChange={(e) => setState({ ...state, tokenExpiryWarningHours: Number(e.target.value) })} /></label>

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { jsonError, jsonOk, requireAuth } from "@/lib/api";
+import { isUnauthorizedError, jsonError, jsonOk, requireAuth } from "@/lib/api";
 import { mapLegacyPostToContentItem } from "@/lib/domain/mappers";
 import { Job } from "@/models/Job";
 import { Post } from "@/models/Post";
@@ -58,8 +58,12 @@ export async function GET(request: Request) {
     };
 
     return jsonOk({ items, summary });
-  } catch {
-    return jsonError("Unauthorized", 401);
+  } catch (error) {
+    if (isUnauthorizedError(error)) {
+      return jsonError("Unauthorized", 401);
+    }
+
+    return jsonError(error instanceof Error ? error.message : "Unable to load queue", 500);
   }
 }
 

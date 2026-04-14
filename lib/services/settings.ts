@@ -9,6 +9,7 @@ export type SettingsDocShape = {
   minDelaySeconds?: number | null;
   maxDelaySeconds?: number | null;
   duplicateWindowHours?: number | null;
+  autoPostDuplicateWindowHours?: number | null;
   apiBurstWindowMs?: number | null;
   apiBurstMax?: number | null;
   tokenExpiryWarningHours?: number | null;

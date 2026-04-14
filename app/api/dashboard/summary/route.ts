@@ -1,4 +1,4 @@
-import { jsonError, jsonOk, requireAuth } from "@/lib/api";
+import { isUnauthorizedError, jsonError, jsonOk, requireAuth } from "@/lib/api";
 import { FacebookConnection } from "@/models/FacebookConnection";
 import { Job } from "@/models/Job";
 import { Notification } from "@/models/Notification";
@@ -58,7 +58,11 @@ export async function GET() {
       tokenWarnings,
       activeConnections: connections.length
     });
-  } catch {
-    return jsonError("Unauthorized", 401);
+  } catch (error) {
+    if (isUnauthorizedError(error)) {
+      return jsonError("Unauthorized", 401);
+    }
+
+    return jsonError(error instanceof Error ? error.message : "Unable to load dashboard summary", 500);
   }
 }

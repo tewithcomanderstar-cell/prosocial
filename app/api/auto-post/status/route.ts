@@ -1,4 +1,4 @@
-import { jsonError, jsonOk } from "@/lib/api";
+import { isUnauthorizedError, jsonError, jsonOk } from "@/lib/api";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
 import { ActionLog } from "@/models/ActionLog";
 
@@ -94,15 +94,19 @@ export async function GET() {
         return !message.includes("n8n") && source !== "n8n" && destination !== "n8n";
       })
       .map((log) => ({
-      _id: String(log._id),
-      level: log.level,
-      message: log.message,
-      createdAt: log.createdAt,
-      metadata: log.metadata ?? {}
+        _id: String(log._id),
+        level: log.level,
+        message: log.message,
+        createdAt: log.createdAt,
+        metadata: log.metadata ?? {}
       }));
 
     return jsonOk({ config: sanitizedConfig, logs: normalizedLogs });
-  } catch {
-    return jsonError("Unauthorized", 401);
+  } catch (error) {
+    if (isUnauthorizedError(error)) {
+      return jsonError("Unauthorized", 401);
+    }
+
+    return jsonError(error instanceof Error ? error.message : "Unable to load auto-post status", 500);
   }
 }

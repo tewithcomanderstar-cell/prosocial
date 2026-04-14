@@ -23,8 +23,7 @@ export async function runHealthChecks(userId?: string) {
     process.env.FACEBOOK_APP_ID &&
     process.env.FACEBOOK_APP_SECRET &&
     process.env.FACEBOOK_AUTH_REDIRECT_URI &&
-    process.env.FACEBOOK_REDIRECT_URI &&
-    process.env.FACEBOOK_LOGIN_CONFIG_ID
+    process.env.FACEBOOK_REDIRECT_URI
   );
   results.push({
     target: "facebook-api",

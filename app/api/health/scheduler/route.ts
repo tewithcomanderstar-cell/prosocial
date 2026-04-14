@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAuth } from "@/lib/api";
+import { isUnauthorizedError, requireAuth } from "@/lib/api";
 import { connectDb } from "@/lib/db";
 import { Job } from "@/models/Job";
 import { Schedule } from "@/models/Schedule";
@@ -64,7 +64,14 @@ export async function GET() {
         stuckJobs
       }
     });
-  } catch {
-    return NextResponse.json({ ok: false, message: "Unauthorized" }, { status: 401 });
+  } catch (error) {
+    if (isUnauthorizedError(error)) {
+      return NextResponse.json({ ok: false, message: "Unauthorized" }, { status: 401 });
+    }
+
+    return NextResponse.json(
+      { ok: false, message: error instanceof Error ? error.message : "Unable to load scheduler health" },
+      { status: 500 }
+    );
   }
 }

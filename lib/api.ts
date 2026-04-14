@@ -20,6 +20,10 @@ export function jsonError(message: string, status = 400) {
   return NextResponse.json({ ok: false, message }, { status });
 }
 
+export function isUnauthorizedError(error: unknown) {
+  return error instanceof Error && error.message === "UNAUTHORIZED";
+}
+
 export function parseBody<T>(schema: z.ZodType<T>, body: unknown) {
   return schema.parse(body);
 }

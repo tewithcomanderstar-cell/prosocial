@@ -9,6 +9,7 @@ const postingSettingsSchema = new Schema(
     minDelaySeconds: { type: Number, default: 15 },
     maxDelaySeconds: { type: Number, default: 90 },
     duplicateWindowHours: { type: Number, default: 24 },
+    autoPostDuplicateWindowHours: { type: Number, default: 0 },
     randomizationLevel: {
       type: String,
       enum: ["low", "medium", "high"],

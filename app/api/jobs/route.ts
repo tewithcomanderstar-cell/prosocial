@@ -1,4 +1,4 @@
-﻿import { jsonError, jsonOk, requireAuth } from "@/lib/api";
+import { isUnauthorizedError, jsonError, jsonOk, requireAuth } from "@/lib/api";
 import { Job } from "@/models/Job";
 
 export async function GET() {
@@ -18,7 +18,11 @@ export async function GET() {
         correlationId: job.correlationId ?? null
       }))
     });
-  } catch {
-    return jsonError("Unauthorized", 401);
+  } catch (error) {
+    if (isUnauthorizedError(error)) {
+      return jsonError("Unauthorized", 401);
+    }
+
+    return jsonError(error instanceof Error ? error.message : "Unable to load jobs", 500);
   }
 }

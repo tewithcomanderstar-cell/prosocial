@@ -10,6 +10,7 @@ const schema = z.object({
   minDelaySeconds: z.number().min(0).max(3600),
   maxDelaySeconds: z.number().min(0).max(7200),
   duplicateWindowHours: z.number().min(1).max(720),
+  autoPostDuplicateWindowHours: z.number().min(0).max(720),
   randomizationLevel: z.enum(["low", "medium", "high"]),
   autoCommentEnabled: z.boolean(),
   apiBurstWindowMs: z.number().min(1000).max(3600000),

@@ -31,6 +31,7 @@ type LeanAutoPostConfig = {
   language?: "th" | "en";
   nextRunAt: Date;
   lastRunAt?: Date;
+  usedImageIds?: string[];
 };
 
 type LeanDriveConnection = {
@@ -68,6 +69,63 @@ function getRandomDelayMinutes(minMinutes = 0, maxMinutes = 0) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+function randomizeOrder<T>(items: T[]) {
+  const copy = [...items];
+  for (let index = copy.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [copy[index], copy[swapIndex]] = [copy[swapIndex], copy[index]];
+  }
+  return copy;
+}
+
+function buildImageSelectionPlan(images: DriveImage[], pageCount: number, usedImageIds: string[] = []) {
+  if (!images.length || pageCount <= 0) {
+    return {
+      chosenImages: [] as DriveImage[],
+      nextUsedImageIds: usedImageIds
+    };
+  }
+
+  const imageMap = new Map(images.map((image) => [image.id, image]));
+  let remainingPool = randomizeOrder(images.filter((image) => !usedImageIds.includes(image.id)));
+  let recycledPool = randomizeOrder(images);
+  const chosenImages: DriveImage[] = [];
+  const consumedIds: string[] = [];
+
+  while (chosenImages.length < pageCount) {
+    if (!remainingPool.length) {
+      recycledPool = randomizeOrder(images.filter((image) => !consumedIds.includes(image.id)));
+      if (!recycledPool.length) {
+        recycledPool = randomizeOrder(images);
+      }
+      remainingPool = recycledPool;
+      consumedIds.length = 0;
+    }
+
+    const nextImage = remainingPool.shift();
+    if (!nextImage) {
+      break;
+    }
+
+    chosenImages.push(nextImage);
+    consumedIds.push(nextImage.id);
+  }
+
+  const sequence = [...usedImageIds];
+  for (const image of chosenImages) {
+    sequence.push(image.id);
+  }
+
+  const uniqueRecentIds = sequence.filter((imageId, index) => sequence.indexOf(imageId) === index);
+  const nextUsedImageIds =
+    uniqueRecentIds.length >= images.length ? chosenImages.map((image) => image.id) : uniqueRecentIds.filter((imageId) => imageMap.has(imageId));
+
+  return {
+    chosenImages,
+    nextUsedImageIds
+  };
+}
+
 async function updateAutoPostState(
   configId: string,
   updates: Partial<{
@@ -79,6 +137,7 @@ async function updateAutoPostState(
     retryCount: number;
     lastPostId: unknown;
     lastSelectedImageId: string | null;
+    usedImageIds: string[];
     enabled: boolean;
     lastStatus: "pending" | "posted" | "failed" | "paused";
     lastWorkflowId: unknown;
@@ -268,10 +327,15 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
   let queued = 0;
   let lastPostId: unknown = null;
   let lastSelectedImageId: string | null = null;
+  const { chosenImages, nextUsedImageIds } = buildImageSelectionPlan(
+    images,
+    eligiblePageIds.length,
+    config.usedImageIds ?? []
+  );
 
   for (let index = 0; index < eligiblePageIds.length; index += 1) {
     const pageId = eligiblePageIds[index];
-    const chosenImage = images[index % images.length];
+    const chosenImage = chosenImages[index] ?? images[index % images.length];
     const caption = await buildCaption(config, chosenImage, driveConnection.accessToken);
     const normalizedHashtags = normalizeHashtags(config.hashtags);
     const delayMinutes = options.immediate ? 0 : getRandomDelayMinutes(config.minRandomDelayMinutes ?? 0, config.maxRandomDelayMinutes ?? 0);
@@ -322,6 +386,7 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
     retryCount: 0,
     lastPostId,
     lastSelectedImageId,
+    usedImageIds: nextUsedImageIds,
     lastWorkflowId: records.workflowId,
     lastWorkflowRunId: records.workflowRunId,
     lastContentItemId: records.contentItemId

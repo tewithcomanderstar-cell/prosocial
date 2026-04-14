@@ -6,6 +6,10 @@ export async function isDuplicatePostBlocked(params: {
   fingerprint: string;
   duplicateWindowHours: number;
 }) {
+  if (params.duplicateWindowHours <= 0) {
+    return false;
+  }
+
   const since = new Date(Date.now() - params.duplicateWindowHours * 60 * 60 * 1000);
 
   const [recentJob, recentPost] = await Promise.all([

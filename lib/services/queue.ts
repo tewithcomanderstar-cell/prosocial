@@ -362,7 +362,8 @@ export async function enqueueJobsForDueSchedules() {
 async function executePostJob(job: JobExecution) {
   const { settings } = await getUserSettings(job.userId);
   const safeSettings = {
-    duplicateWindowHours: settings?.duplicateWindowHours ?? 24
+    duplicateWindowHours: settings?.duplicateWindowHours ?? 24,
+    autoPostDuplicateWindowHours: settings?.autoPostDuplicateWindowHours ?? 0
   };
 
   const rateLimit = await checkRateLimits(job.userId, "post");
@@ -419,10 +420,13 @@ async function executePostJob(job: JobExecution) {
   }
 
   if (job.fingerprint) {
+    const duplicateWindowHours = job.payload?.autoPostConfigId
+      ? safeSettings.autoPostDuplicateWindowHours
+      : safeSettings.duplicateWindowHours;
     const blocked = await isDuplicatePostBlocked({
       userId: job.userId,
       fingerprint: job.fingerprint,
-      duplicateWindowHours: safeSettings.duplicateWindowHours
+      duplicateWindowHours
     });
 
     if (blocked) {
