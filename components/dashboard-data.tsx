@@ -54,10 +54,10 @@ export function DashboardData() {
   }
 
   const primaryStats = [
-    { label: "Connected pages", value: summary.connectedPages, href: "/connections/facebook" },
-    { label: "Pending approvals", value: summary.pendingApprovals, href: "/approvals" },
-    { label: "Failed runs", value: summary.failedRuns, href: "/runs?status=failed" },
-    { label: "Token warnings", value: summary.tokenWarnings, href: "/connections/facebook" }
+    { label: t("dashConnectedPages"), value: summary.connectedPages, href: "/connections/facebook" },
+    { label: t("dashPendingApprovals"), value: summary.pendingApprovals, href: "/approvals" },
+    { label: t("dashFailedRuns"), value: summary.failedRuns, href: "/runs?status=failed" },
+    { label: t("dashTokenWarnings"), value: summary.tokenWarnings, href: "/connections/facebook" }
   ];
 
   const secondaryStats = [
@@ -68,10 +68,10 @@ export function DashboardData() {
   ];
 
   const recommendedAction = summary.tokenWarnings > 0
-    ? { label: "Reconnect destinations with token warnings", href: "/connections/facebook" }
+    ? { label: t("dashReconnectDestinations"), href: "/connections/facebook" }
     : summary.failedRuns > 0
-      ? { label: "Review failed runs and retry", href: "/runs?status=failed" }
-      : { label: "System healthy", href: "/dashboard" };
+      ? { label: t("dashReviewFailedRuns"), href: "/runs?status=failed" }
+      : { label: t("dashSystemHealthy"), href: "/dashboard" };
 
   return (
     <div className="stack">
@@ -96,15 +96,15 @@ export function DashboardData() {
       <section className="card stack">
         <div className="section-head">
           <div>
-            <h3>Operational snapshot</h3>
-            <span className="muted">A quick read on queue pressure, workflow health, and connector readiness.</span>
+            <h3>{t("dashOperationalSnapshot")}</h3>
+            <span className="muted">{t("dashOperationalSnapshotDesc")}</span>
           </div>
         </div>
         <div className="list">
-          <div className="list-item"><span>Publishing now</span><strong>{summary.runningRuns}</strong></div>
-          <div className="list-item"><span>Unread alerts</span><strong>{summary.unreadAlerts}</strong></div>
-          <div className="list-item"><span>Active connections</span><strong>{summary.activeConnections}</strong></div>
-          <div className="list-item"><span>Recommended action</span><Link href={recommendedAction.href}><strong>{recommendedAction.label}</strong></Link></div>
+          <div className="list-item"><span>{t("dashPublishingNow")}</span><strong>{summary.runningRuns}</strong></div>
+          <div className="list-item"><span>{t("dashUnreadAlerts")}</span><strong>{summary.unreadAlerts}</strong></div>
+          <div className="list-item"><span>{t("dashActiveConnections")}</span><strong>{summary.activeConnections}</strong></div>
+          <div className="list-item"><span>{t("dashRecommendedAction")}</span><Link href={recommendedAction.href}><strong>{recommendedAction.label}</strong></Link></div>
         </div>
       </section>
     </div>

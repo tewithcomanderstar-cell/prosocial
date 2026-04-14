@@ -24,65 +24,65 @@ export function Sidebar() {
 
   const groups: NavGroup[] = [
     {
-      title: "Overview",
+      title: t("groupOverview"),
       icon: "dashboard",
       items: [
         { href: "/dashboard", label: t("navDashboard"), icon: "dashboard" },
-        { href: "/runs", label: "Runs", icon: "logs" },
-        { href: "/notifications", label: "Alerts", icon: "integrations" },
-        { href: "/incidents", label: "Error Center", icon: "logs" }
+        { href: "/runs", label: t("navRuns"), icon: "logs" },
+        { href: "/notifications", label: t("navAlerts"), icon: "integrations" },
+        { href: "/incidents", label: t("navErrorCenter"), icon: "logs" }
       ]
     },
     {
-      title: "Automation",
+      title: t("groupAutomation"),
       icon: "planner",
       items: [
-        { href: "/auto-post", label: "Workflows", icon: "planner" },
-        { href: "/templates", label: "Templates", icon: "template" }
+        { href: "/auto-post", label: t("navWorkflows"), icon: "planner" },
+        { href: "/templates", label: t("navTemplates"), icon: "template" }
       ]
     },
     {
-      title: "Content",
+      title: t("groupContent"),
       icon: "compose",
       items: [
-        { href: "/posts/new", label: "Create Post", icon: "compose" },
-        { href: "/queue", label: "Queue", icon: "bulk" },
-        { href: "/planner", label: "Planner", icon: "planner" },
-        { href: "/media-library", label: "Media Library", icon: "media" },
-        { href: "/ai", label: "AI Tools", icon: "recommend" }
+        { href: "/posts/new", label: t("navCompose"), icon: "compose" },
+        { href: "/queue", label: t("navQueue"), icon: "bulk" },
+        { href: "/planner", label: t("navPlanner"), icon: "planner" },
+        { href: "/media-library", label: t("navMediaLibrary"), icon: "media" },
+        { href: "/ai", label: t("navAiTools"), icon: "recommend" }
       ]
     },
     {
-      title: "Facebook",
+      title: t("groupFacebook"),
       icon: "facebook",
       items: [
-        { href: "/connected-accounts", label: "Pages", icon: "accounts" },
-        { href: "/comments", label: "Auto Comments", icon: "integrations" },
+        { href: "/connected-accounts", label: t("navPages"), icon: "accounts" },
+        { href: "/comments", label: t("navAutoComments"), icon: "integrations" },
         { href: "/connections/facebook", label: t("navFacebook"), icon: "facebook" },
         { href: "/connections/google-drive", label: t("navGoogle"), icon: "drive" }
       ]
     },
     {
-      title: "Team",
+      title: t("groupTeam"),
       icon: "team",
       items: [
-        { href: "/approvals", label: "Approvals", icon: "team" },
-        { href: "/team", label: "Members & Roles", icon: "team" },
+        { href: "/approvals", label: t("navApprovals"), icon: "team" },
+        { href: "/team", label: t("navMembersRoles"), icon: "team" },
         { href: "/personas", label: t("navPersonas"), icon: "personas" }
       ]
     },
     {
-      title: "System",
+      title: t("groupSystem"),
       icon: "system",
       items: [
-        { href: "/integrations", label: "API / Webhooks", icon: "integrations" },
+        { href: "/integrations", label: t("navApiWebhooks"), icon: "integrations" },
         { href: "/analytics", label: t("navAnalytics"), icon: "analytics" },
         { href: "/settings", label: t("navSettings"), icon: "settings" },
         { href: "/logs", label: t("navLogs"), icon: "logs" },
         { href: "/setup", label: t("navSetup"), icon: "setup" },
-        { href: "/profile", label: "Profile", icon: "profile" },
-        { href: "/login", label: "Login", icon: "login" },
-        { href: "/privacy-policy", label: "Privacy Policy", icon: "privacy" }
+        { href: "/profile", label: t("navProfile"), icon: "profile" },
+        { href: "/login", label: t("navLogin"), icon: "login" },
+        { href: "/privacy-policy", label: t("navPrivacy"), icon: "privacy" }
       ]
     }
   ];
