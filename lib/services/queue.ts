@@ -86,6 +86,8 @@ type JobExecution = {
   correlationId?: string;
 };
 
+type JobType = "post" | "comment-reply";
+
 type LeanCommentInbox = {
   _id: string;
   pageId: string;
@@ -267,7 +269,7 @@ function classifyPublishFailure(error: unknown) {
   };
 }
 
-async function acquireNextRunnableJob(): Promise<Record<string, unknown> | null> {
+async function acquireNextRunnableJob(jobType?: JobType): Promise<Record<string, unknown> | null> {
   const now = new Date();
   const lockExpiresAt = new Date(now.getTime() + USER_JOB_LOCK_WINDOW_MS);
   const correlationId = randomUUID();
@@ -283,6 +285,7 @@ async function acquireNextRunnableJob(): Promise<Record<string, unknown> | null>
 
   const job = await Job.findOneAndUpdate(
     {
+      ...(jobType ? { type: jobType } : {}),
       status: { $in: ["queued", "retrying", "rate_limited"] },
       nextRunAt: { $lte: now },
       ...userScope,
@@ -752,12 +755,12 @@ async function executeCommentReplyJob(job: JobExecution) {
   return { status: "success" };
 }
 
-export async function processQueuedJobs(limit = 10) {
+export async function processQueuedJobs(limit = 10, jobType?: JobType) {
   const processed: Array<{ jobId: string; status: string }> = [];
   let processedCount = 0;
 
   while (processedCount < limit) {
-    const item = await acquireNextRunnableJob();
+    const item = await acquireNextRunnableJob(jobType);
     if (!item) {
       break;
     }
@@ -896,6 +899,10 @@ export async function processQueuedJobs(limit = 10) {
   }
 
   return processed;
+}
+
+export async function processCommentReplyJobs(limit = 5) {
+  return processQueuedJobs(limit, "comment-reply");
 }
 
 

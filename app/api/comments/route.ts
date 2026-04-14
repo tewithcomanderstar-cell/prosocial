@@ -2,6 +2,7 @@ import { z } from "zod";
 import { isUnauthorizedError, jsonError, jsonOk, parseBody, requireAuth } from "@/lib/api";
 import { ingestCommentAndMaybeQueue } from "@/lib/services/comment-automation";
 import { handleRoleError, requireRole } from "@/lib/services/permissions";
+import { processCommentReplyJobs } from "@/lib/services/queue";
 import { CommentInbox } from "@/models/CommentInbox";
 
 const schema = z.object({
@@ -36,7 +37,8 @@ export async function POST(request: Request) {
       replyText: payload.replyText,
       autoQueue: payload.autoQueue
     });
-    return jsonOk(result, result.queuedJobId ? "Comment reply queued" : "Comment inbox updated");
+    const processedJobs = result.queuedJobId ? await processCommentReplyJobs(1) : [];
+    return jsonOk({ ...result, processedJobs }, result.queuedJobId ? "Comment reply queued" : "Comment inbox updated");
   } catch (error) {
     return handleRoleError(error);
   }
