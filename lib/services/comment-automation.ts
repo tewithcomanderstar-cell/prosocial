@@ -2,6 +2,7 @@ import { connectDb } from "@/lib/db";
 import { createNotification, logAction, logAndNotifyError } from "@/lib/services/logging";
 import { Job } from "@/models/Job";
 import { CommentInbox } from "@/models/CommentInbox";
+import { FacebookConnection } from "@/models/FacebookConnection";
 import { GrowthAutomationRule } from "@/models/GrowthAutomationRule";
 import { KeywordTrigger } from "@/models/KeywordTrigger";
 import { PostingSettings } from "@/models/PostingSettings";
@@ -11,6 +12,28 @@ type MatchedCommentRule = {
   ruleId: string;
   ruleType: "growth-rule" | "keyword-trigger";
   replyText: string;
+};
+
+type FacebookWebhookPayload = {
+  object?: string;
+  entry?: Array<{
+    id?: string;
+    changes?: Array<{
+      field?: string;
+      value?: {
+        item?: string;
+        verb?: string;
+        comment_id?: string;
+        parent_id?: string;
+        post_id?: string;
+        message?: string;
+        from?: {
+          id?: string;
+          name?: string;
+        };
+      };
+    }>;
+  }>;
 };
 
 function normalizeText(input: string) {
@@ -68,6 +91,11 @@ async function isAutoCommentEnabled(userId: string) {
   ).lean<{ autoCommentEnabled?: boolean } | null>();
 
   return Boolean(settings?.autoCommentEnabled);
+}
+
+async function findUserIdByPageId(pageId: string) {
+  const connection = await FacebookConnection.findOne({ "pages.pageId": pageId }).lean<{ userId: string } | null>();
+  return connection?.userId ? String(connection.userId) : null;
 }
 
 export async function ingestCommentAndMaybeQueue(params: {
@@ -241,4 +269,58 @@ export async function notifyCommentFailure(params: {
       pageId: params.pageId
     }
   });
+}
+
+export async function ingestFacebookWebhookPayload(payload: FacebookWebhookPayload) {
+  await connectDb();
+
+  if (payload.object !== "page") {
+    return { accepted: 0, ignored: 0 };
+  }
+
+  let accepted = 0;
+  let ignored = 0;
+
+  for (const entry of payload.entry ?? []) {
+    const pageId = entry.id;
+    if (!pageId) {
+      ignored += 1;
+      continue;
+    }
+
+    const userId = await findUserIdByPageId(pageId);
+    if (!userId) {
+      ignored += 1;
+      continue;
+    }
+
+    for (const change of entry.changes ?? []) {
+      const value = change.value;
+      const isCommentEvent =
+        change.field === "feed" &&
+        value?.item === "comment" &&
+        value?.verb === "add" &&
+        value.comment_id &&
+        value.message &&
+        value.from?.name;
+
+      if (!isCommentEvent) {
+        ignored += 1;
+        continue;
+      }
+
+      await ingestCommentAndMaybeQueue({
+        userId,
+        pageId,
+        authorName: value.from?.name ?? "Facebook user",
+        message: value.message ?? "",
+        externalCommentId: value.comment_id,
+        autoQueue: true
+      });
+
+      accepted += 1;
+    }
+  }
+
+  return { accepted, ignored };
 }

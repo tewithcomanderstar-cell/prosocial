@@ -57,6 +57,7 @@ export function Sidebar() {
       icon: "facebook",
       items: [
         { href: "/connected-accounts", label: "Pages", icon: "accounts" },
+        { href: "/comments", label: "Auto Comments", icon: "integrations" },
         { href: "/connections/facebook", label: t("navFacebook"), icon: "facebook" },
         { href: "/connections/google-drive", label: t("navGoogle"), icon: "drive" }
       ]
