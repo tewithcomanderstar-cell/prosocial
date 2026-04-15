@@ -5,7 +5,8 @@ import { connectDb } from "@/lib/db";
 import {
   FacebookOAuthError,
   exchangeFacebookCode,
-  fetchFacebookPages
+  fetchFacebookPages,
+  subscribePageToWebhook
 } from "@/lib/services/facebook";
 import { logAction } from "@/lib/services/logging";
 
@@ -48,6 +49,19 @@ export async function GET(request: Request) {
 
     const tokenPayload = await exchangeFacebookCode(code);
     const pages = await fetchFacebookPages(tokenPayload.access_token);
+    const webhookResults = await Promise.allSettled(
+      pages.map(async (page) => {
+        await subscribePageToWebhook(page.pageId, page.pageAccessToken);
+        return page.pageId;
+      })
+    );
+
+    const subscribedPageIds = webhookResults
+      .filter((result): result is PromiseFulfilledResult<string> => result.status === "fulfilled")
+      .map((result) => result.value);
+    const failedSubscriptions = webhookResults
+      .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+      .map((result) => (result.reason instanceof Error ? result.reason.message : "unknown"));
 
     await FacebookConnection.findOneAndUpdate(
       { userId },
@@ -68,7 +82,11 @@ export async function GET(request: Request) {
       type: "auth",
       level: "success",
       message: "Facebook Pages connected successfully",
-      metadata: { pagesConnected: pages.length }
+      metadata: {
+        pagesConnected: pages.length,
+        pagesSubscribedToWebhook: subscribedPageIds.length,
+        webhookSubscriptionFailures: failedSubscriptions
+      }
     });
 
     return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/connections/facebook?success=1`);

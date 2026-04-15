@@ -59,7 +59,11 @@ export function getFacebookOAuthUrl() {
   const url = new URL("https://www.facebook.com/v21.0/dialog/oauth");
   url.searchParams.set("client_id", process.env.FACEBOOK_APP_ID ?? "");
   url.searchParams.set("redirect_uri", process.env.FACEBOOK_REDIRECT_URI ?? "");
-  url.searchParams.set("scope", process.env.FACEBOOK_PAGE_CONNECT_SCOPE ?? "pages_show_list");
+  url.searchParams.set(
+    "scope",
+    process.env.FACEBOOK_PAGE_CONNECT_SCOPE ??
+      "pages_show_list,pages_manage_metadata,pages_read_engagement,pages_manage_engagement"
+  );
   url.searchParams.set("auth_type", "rerequest");
   return url.toString();
 }
@@ -164,6 +168,28 @@ export async function fetchFacebookPages(userAccessToken: string) {
     pageAccessToken: page.access_token,
     category: page.category
   }));
+}
+
+export async function subscribePageToWebhook(pageId: string, pageAccessToken: string) {
+  const body = new URLSearchParams({
+    subscribed_fields: "feed",
+    access_token: pageAccessToken
+  });
+
+  const response = await fetchWithRetry(`https://graph.facebook.com/v21.0/${pageId}/subscribed_apps`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body
+  });
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => ({}))) as FacebookGraphErrorPayload;
+    throw classifyFacebookError(payload, "Failed to subscribe Facebook Page to webhooks");
+  }
+
+  return response.json() as Promise<{ success?: boolean }>;
 }
 
 async function uploadPhotoByUrl(pageId: string, pageAccessToken: string, url: string) {
