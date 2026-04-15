@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo } from "react";
 import { dictionaries, Language, TranslationKey } from "@/lib/i18n";
 
 type LanguageContextValue = {
@@ -12,20 +12,16 @@ type LanguageContextValue = {
 const LanguageContext = createContext<LanguageContextValue | null>(null);
 
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
-  const [language, setLanguageState] = useState<Language>("en");
+  const language: Language = "th";
 
   useEffect(() => {
-    const saved = window.localStorage.getItem("ui-language");
-    if (saved === "en" || saved === "th") {
-      setLanguageState(saved);
-      document.documentElement.lang = saved;
-    }
+    window.localStorage.setItem("ui-language", "th");
+    document.documentElement.lang = "th";
   }, []);
 
-  function setLanguage(language: Language) {
-    setLanguageState(language);
-    window.localStorage.setItem("ui-language", language);
-    document.documentElement.lang = language;
+  function setLanguage(_: Language) {
+    window.localStorage.setItem("ui-language", "th");
+    document.documentElement.lang = "th";
   }
 
   const value = useMemo(

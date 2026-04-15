@@ -4,7 +4,6 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { AppIcon, AppIconName } from "@/components/app-icon";
-import { LanguageToggle } from "@/components/language-toggle";
 import { useI18n } from "@/components/language-provider";
 
 type NavItem = {
@@ -106,11 +105,6 @@ export function Sidebar() {
           </div>
         </div>
       </div>
-
-      <div className="sidebar-card sidebar-language-card">
-        <LanguageToggle />
-      </div>
-
       <nav className="nav-groups">
         {groups.map((group) => (
           <section key={group.title} className="nav-group sidebar-card">
