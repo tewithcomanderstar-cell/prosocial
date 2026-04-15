@@ -9,8 +9,8 @@ import { GrowthAutomationRule } from "@/models/GrowthAutomationRule";
 import { KeywordTrigger } from "@/models/KeywordTrigger";
 import { PostingSettings } from "@/models/PostingSettings";
 
-const COMMENT_REPLY_BASE_DELAY_SECONDS = Number(process.env.COMMENT_REPLY_BASE_DELAY_SECONDS ?? "15");
-const COMMENT_REPLY_SPACING_SECONDS = Number(process.env.COMMENT_REPLY_SPACING_SECONDS ?? "45");
+const COMMENT_REPLY_BASE_DELAY_SECONDS = Number(process.env.COMMENT_REPLY_BASE_DELAY_SECONDS ?? "0");
+const COMMENT_REPLY_SPACING_SECONDS = Number(process.env.COMMENT_REPLY_SPACING_SECONDS ?? "8");
 
 type RuleDecision =
   | {
@@ -117,7 +117,7 @@ async function computeCommentReplyRunAt(userId: string, pageId: string) {
     .sort({ nextRunAt: -1 })
     .lean<{ nextRunAt?: Date } | null>();
 
-  if (!latestPendingReply?.nextRunAt) {
+  if (!latestPendingReply?.nextRunAt || COMMENT_REPLY_SPACING_SECONDS <= 0) {
     return baseRunAt;
   }
 

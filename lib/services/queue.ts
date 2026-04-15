@@ -9,7 +9,7 @@ import { notifyCommentFailure } from "@/lib/services/comment-automation";
 import { logCommentStage } from "@/lib/services/comment-logging";
 import { updateAutoPostRecords } from "@/lib/services/automation-records";
 import { FacebookPublishError, publishPostToFacebook, replyToFacebookComment } from "@/lib/services/facebook";
-import { ensureValidFacebookConnection, ensureValidGoogleDriveConnection } from "@/lib/services/integration-auth";
+import { ensureValidFacebookConnection, ensureValidGoogleDriveConnection, getStoredFacebookConnection } from "@/lib/services/integration-auth";
 import { fetchDriveImageBinary } from "@/lib/services/google-drive";
 import { recordMetricSnapshot } from "@/lib/services/analytics";
 import { isDuplicatePostBlocked } from "@/lib/services/duplicate";
@@ -22,7 +22,7 @@ import { computeNextRunAt, randomItem } from "@/lib/utils";
 const AUTO_POST_PAGE_SPACING_MINUTES = Number(process.env.AUTO_POST_PAGE_SPACING_MINUTES ?? "10");
 const FACEBOOK_RATE_LIMIT_COOLDOWN_MINUTES = Number(process.env.FACEBOOK_RATE_LIMIT_COOLDOWN_MINUTES ?? "60");
 const COMMENT_REPLY_RATE_LIMIT_COOLDOWN_MINUTES = Number(process.env.COMMENT_REPLY_RATE_LIMIT_COOLDOWN_MINUTES ?? "30");
-const COMMENT_REPLY_IMMEDIATE_BATCH_SIZE = Number(process.env.COMMENT_REPLY_IMMEDIATE_BATCH_SIZE ?? "1");
+const COMMENT_REPLY_IMMEDIATE_BATCH_SIZE = Number(process.env.COMMENT_REPLY_IMMEDIATE_BATCH_SIZE ?? "5");
 const USER_JOB_LOCK_WINDOW_MS = Number(process.env.USER_JOB_LOCK_WINDOW_MS ?? String(5 * 60 * 1000));
 
 type ResolvedImage =
@@ -740,7 +740,7 @@ async function executeCommentReplyJob(job: JobExecution) {
 
   const commentInboxId = typeof job.payload?.commentInboxId === "string" ? job.payload.commentInboxId : "";
   const comment = (await CommentInbox.findById(commentInboxId).lean()) as LeanCommentInbox | null;
-  const connection = (await ensureValidFacebookConnection(job.userId)) as LeanFacebookConnection;
+  const connection = (await getStoredFacebookConnection(job.userId)) as LeanFacebookConnection;
 
   if (!comment || !connection) {
     throw new Error("Missing comment inbox entry or Facebook connection");
@@ -998,7 +998,8 @@ export async function processQueuedJobs(limit = 10, jobType?: JobType) {
 }
 
 export async function processCommentReplyJobs(limit = 5) {
-  return processQueuedJobs(Math.min(limit, COMMENT_REPLY_IMMEDIATE_BATCH_SIZE), "comment-reply");
+  const safeLimit = Math.max(1, Math.min(limit, COMMENT_REPLY_IMMEDIATE_BATCH_SIZE));
+  return processQueuedJobs(safeLimit, "comment-reply");
 }
 
 

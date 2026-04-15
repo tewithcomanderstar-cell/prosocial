@@ -69,6 +69,21 @@ export async function ensureValidFacebookConnection(userId: string) {
   return connection;
 }
 
+export async function getStoredFacebookConnection(userId: string) {
+  await connectDb();
+  const connection = await FacebookConnection.findOne({ userId });
+
+  if (!connection) {
+    throw new Error("Facebook is not connected");
+  }
+
+  if (!connection.pages?.length) {
+    throw new Error("No Facebook pages connected");
+  }
+
+  return connection;
+}
+
 async function refreshGoogleDriveToken(userId: string, refreshToken: string) {
   const response = await fetchWithRetry("https://oauth2.googleapis.com/token", {
     method: "POST",

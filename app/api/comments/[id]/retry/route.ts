@@ -11,7 +11,7 @@ export async function POST(_: Request, context: { params: Promise<{ id: string }
     const result = await retryCommentReply(userId, id);
     after(async () => {
       try {
-        await processCommentReplyJobs(1);
+        await processCommentReplyJobs(3);
       } catch (error) {
         console.error("[COMMENTS] deferred retry processing failed", error);
       }

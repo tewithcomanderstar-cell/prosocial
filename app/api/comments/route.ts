@@ -63,7 +63,7 @@ export async function POST(request: Request) {
     if (result.queuedJobId) {
       after(async () => {
         try {
-          await processCommentReplyJobs(1);
+          await processCommentReplyJobs(3);
         } catch (error) {
           console.error("[COMMENTS] deferred comment reply processing failed", error);
         }

@@ -27,7 +27,7 @@ export async function POST(request: Request) {
     if (result.accepted > 0) {
       after(async () => {
         try {
-          await processCommentReplyJobs(Math.min(result.accepted, 1));
+          await processCommentReplyJobs(result.accepted);
         } catch (error) {
           console.error("[WEBHOOK] deferred comment reply processing failed", error);
         }
