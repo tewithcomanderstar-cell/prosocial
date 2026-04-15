@@ -81,7 +81,7 @@ html:lang(en) .auth-form-title,
 html:lang(en) .minimal-post-head h1,
 html:lang(en) .stat strong {
   font-family: var(--font-display);
-  letter-spacing: -0.06em;
+  letter-spacing: -0.045em;
 }
 html:lang(en) .window-title,
 html:lang(en) .nav-group-title,
@@ -93,17 +93,17 @@ html:lang(en) .auth-form-kicker {
   text-transform: none;
 }
 html:lang(en) .brand h1 {
-  font-size: 2.05rem;
-  line-height: 0.92;
-  font-weight: 700;
+  font-size: 2rem;
+  line-height: 0.98;
+  font-weight: 800;
 }
 html:lang(en) .nav a,
 html:lang(en) .button,
 html:lang(en) .button-secondary,
 html:lang(en) .choice-chip,
 html:lang(en) .badge {
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  font-weight: 600;
+  letter-spacing: -0.015em;
 }
 html:lang(en) .card h2,
 html:lang(en) .card h3,
@@ -116,7 +116,23 @@ html:lang(en) .label-hint,
 html:lang(en) .page-subtitle,
 html:lang(en) .auth-copy,
 html:lang(en) .window-title {
-  letter-spacing: -0.01em;
+  letter-spacing: -0.005em;
+}
+html:lang(en) .window-title {
+  font-weight: 700;
+}
+html:lang(en) .brand-copy,
+html:lang(en) .brand-copy .kicker,
+html:lang(en) .nav-group-title,
+html:lang(en) .nav a,
+html:lang(en) .label,
+html:lang(en) .button,
+html:lang(en) .button-secondary,
+html:lang(en) .choice-chip,
+html:lang(en) .badge,
+html:lang(en) .table th,
+html:lang(en) .table td {
+  font-feature-settings: "ss01" 1, "ss02" 1, "cv01" 1;
 }
 
 a { color: inherit; text-decoration: none; }
