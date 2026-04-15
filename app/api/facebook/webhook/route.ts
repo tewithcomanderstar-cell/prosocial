@@ -1,3 +1,4 @@
+import { after } from "next/server";
 import { ingestFacebookWebhookPayload } from "@/lib/services/comment-automation";
 import { jsonError, jsonOk } from "@/lib/api";
 import { processCommentReplyJobs } from "@/lib/services/queue";
@@ -23,8 +24,16 @@ export async function POST(request: Request) {
   try {
     const payload = await request.json();
     const result = await ingestFacebookWebhookPayload(payload);
-    const processedJobs = result.accepted > 0 ? await processCommentReplyJobs(Math.min(result.accepted, 5)) : [];
-    return jsonOk({ ...result, processedJobs }, "Facebook webhook processed");
+    if (result.accepted > 0) {
+      after(async () => {
+        try {
+          await processCommentReplyJobs(Math.min(result.accepted, 1));
+        } catch (error) {
+          console.error("[WEBHOOK] deferred comment reply processing failed", error);
+        }
+      });
+    }
+    return jsonOk(result, "Facebook webhook accepted");
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : "Unable to process webhook", 500);
   }

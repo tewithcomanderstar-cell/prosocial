@@ -8,7 +8,7 @@ type CommentRecord = {
   pageId: string;
   authorName: string;
   message: string;
-  status: "pending" | "matched" | "queued" | "replying" | "replied" | "failed" | "ignored";
+  status: "pending" | "matched" | "received" | "queued" | "processing" | "replying" | "replied" | "failed" | "ignored";
   replyText?: string;
   matchedTrigger?: string;
   externalCommentId?: string;
@@ -20,6 +20,12 @@ type CommentRecord = {
   repliedAt?: string;
   autoReplyEnabled?: boolean;
   matchedRuleType?: "growth-rule" | "keyword-trigger" | "auto-comment-pool";
+  executionLogs?: Array<{
+    _id?: string;
+    stage: string;
+    message: string;
+    createdAt?: string;
+  }>;
 };
 
 type AutoCommentConfig = {
@@ -488,6 +494,22 @@ export function CommentAutomationPanel() {
                         <div>{isThai ? "เปิด Auto Reply" : "Auto reply enabled"}: {comment.autoReplyEnabled ? (isThai ? "ใช่" : "Yes") : (isThai ? "ไม่" : "No")}</div>
                       </div>
                     </div>
+                    {comment.executionLogs?.length ? (
+                      <div className="card" style={{ padding: 12, background: "rgba(15,23,42,.04)" }}>
+                        <strong style={{ display: "block", marginBottom: 6 }}>{isThai ? "ประวัติการทำงาน" : "Execution history"}</strong>
+                        <div style={{ display: "grid", gap: 6 }}>
+                          {comment.executionLogs.map((log: NonNullable<CommentRecord["executionLogs"]>[number], index: number) => (
+                            <div key={`${log.stage}-${log.createdAt ?? index}`} style={{ fontSize: 13, color: "#475569" }}>
+                              <strong style={{ color: "#0f172a" }}>{log.stage}</strong>
+                              {" � "}
+                              <span>{log.message}</span>
+                              {" � "}
+                              <span>{formatBangkokTime(log.createdAt)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
                     {comment.replyText ? (
                       <div>
                         <div style={{ fontSize: 13, color: "#64748b", marginBottom: 6 }}>{isThai ? "ข้อความตอบกลับ" : "Reply"}</div>
@@ -601,3 +623,8 @@ export function CommentAutomationPanel() {
     </div>
   );
 }
+
+
+
+
+

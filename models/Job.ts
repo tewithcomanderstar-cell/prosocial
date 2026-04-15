@@ -14,6 +14,7 @@ const jobSchema = new Schema(
     targetPageId: { type: String, index: true },
     payload: { type: Schema.Types.Mixed, default: {} },
     fingerprint: { type: String, index: true },
+    dedupeKey: { type: String, index: true, sparse: true },
     status: {
       type: String,
       enum: ["queued", "processing", "success", "failed", "retrying", "rate_limited", "duplicate_blocked"],

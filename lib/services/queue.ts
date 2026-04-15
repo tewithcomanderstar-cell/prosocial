@@ -6,6 +6,7 @@ import { MediaCache } from "@/models/MediaCache";
 import { Post } from "@/models/Post";
 import { Schedule } from "@/models/Schedule";
 import { notifyCommentFailure } from "@/lib/services/comment-automation";
+import { logCommentStage } from "@/lib/services/comment-logging";
 import { updateAutoPostRecords } from "@/lib/services/automation-records";
 import { FacebookPublishError, publishPostToFacebook, replyToFacebookComment } from "@/lib/services/facebook";
 import { ensureValidFacebookConnection, ensureValidGoogleDriveConnection } from "@/lib/services/integration-auth";
@@ -95,6 +96,8 @@ type LeanCommentInbox = {
   pageId: string;
   externalCommentId?: string;
   replyText?: string;
+  replyExternalId?: string | null;
+  correlationId?: string;
 };
 
 type EnqueueOptions = {
@@ -743,6 +746,23 @@ async function executeCommentReplyJob(job: JobExecution) {
     throw new Error("Missing comment inbox entry or Facebook connection");
   }
 
+  if (comment.replyExternalId) {
+    await Job.findByIdAndUpdate(job._id, {
+      status: "success",
+      completedAt: new Date(),
+      attempts: job.attempts + 1,
+      result: { deduped: true, replyExternalId: comment.replyExternalId },
+      lastError: null,
+      failureReason: null,
+      errorCode: null,
+      errorDetails: null,
+      nextRetryAt: null,
+      lockExpiresAt: null
+    });
+
+    return { status: "success" };
+  }
+
   if (!comment.externalCommentId || !comment.replyText?.trim()) {
     throw new Error("Comment reply is missing the Facebook comment ID or reply text");
   }
@@ -753,10 +773,23 @@ async function executeCommentReplyJob(job: JobExecution) {
   }
 
   await CommentInbox.findByIdAndUpdate(comment._id, {
-    status: "replying",
+    status: "processing",
     lastAttemptAt: new Date(),
     $inc: { replyAttempts: 1 },
     replyError: null
+  });
+
+  await logCommentStage({
+    userId: job.userId,
+    commentInboxId,
+    externalCommentId: comment.externalCommentId,
+    correlationId: comment.correlationId ?? job.correlationId,
+    stage: "job_processing",
+    message: "Comment reply job is processing",
+    metadata: {
+      pageId: comment.pageId,
+      jobId: job._id
+    }
   });
 
   const replyResult = await replyToFacebookComment({
@@ -783,6 +816,20 @@ async function executeCommentReplyJob(job: JobExecution) {
     repliedAt: new Date(),
     replyExternalId: typeof replyResult?.id === "string" ? replyResult.id : null,
     replyError: null
+  });
+
+  await logCommentStage({
+    userId: job.userId,
+    commentInboxId,
+    externalCommentId: comment.externalCommentId,
+    correlationId: comment.correlationId ?? job.correlationId,
+    stage: "reply_sent",
+    message: "Comment reply sent successfully",
+    metadata: {
+      pageId: comment.pageId,
+      jobId: job._id,
+      replyExternalId: typeof replyResult?.id === "string" ? replyResult.id : undefined
+    }
   });
 
   await logAction({
@@ -890,6 +937,8 @@ export async function processQueuedJobs(limit = 10, jobType?: JobType) {
           userId: job.userId,
           commentInboxId,
           pageId: job.targetPageId,
+          externalCommentId: typeof job.payload?.externalCommentId === "string" ? job.payload.externalCommentId : undefined,
+          correlationId: job.correlationId,
           message: shouldRetry
             ? `Comment reply failed and will retry (${attempts}/${job.maxAttempts}): ${failure.failureReason}`
             : `Comment reply failed after ${attempts} attempts: ${failure.failureReason}`,
