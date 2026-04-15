@@ -5,31 +5,22 @@ import { logCommentStage } from "@/lib/services/comment-logging";
 import { Job } from "@/models/Job";
 import { CommentInbox } from "@/models/CommentInbox";
 import { FacebookConnection } from "@/models/FacebookConnection";
-import { GrowthAutomationRule } from "@/models/GrowthAutomationRule";
-import { KeywordTrigger } from "@/models/KeywordTrigger";
 import { PostingSettings } from "@/models/PostingSettings";
 
 const COMMENT_REPLY_BASE_DELAY_SECONDS = Number(process.env.COMMENT_REPLY_BASE_DELAY_SECONDS ?? "0");
 const COMMENT_REPLY_SPACING_SECONDS = Number(process.env.COMMENT_REPLY_SPACING_SECONDS ?? "8");
 
-type RuleDecision =
-  | {
-      action: "ignore";
-      trigger: string;
-      ruleId: string;
-      ruleType: "keyword-trigger";
-      reason: string;
-    }
+type ReplyDecision =
   | {
       action: "reply";
-      trigger: string;
-      ruleId: string;
-      ruleType: "growth-rule" | "keyword-trigger" | "auto-comment-pool";
+      trigger: "auto-comment-pool";
+      ruleId: "auto-comment-pool";
+      ruleType: "auto-comment-pool";
       replyText: string;
-      matchMode: "exact" | "contains" | "fallback";
+      matchMode: "fallback";
     }
   | {
-      action: "manual_review";
+      action: "skip";
       reason: string;
     };
 
@@ -129,92 +120,8 @@ async function computeCommentReplyRunAt(userId: string, pageId: string) {
   return new Date(latestRunAt.getTime() + COMMENT_REPLY_SPACING_SECONDS * 1000);
 }
 
-async function evaluateCommentRules(userId: string, pageId: string, message: string): Promise<RuleDecision> {
-  const normalizedMessage = normalizeText(message);
+async function pickAutoReply(userId: string, pageId: string): Promise<ReplyDecision> {
   const autoCommentSettings = await getAutoCommentSettings(userId);
-
-  const [growthRules, keywordTriggers] = await Promise.all([
-    GrowthAutomationRule.find({ userId, enabled: true }).lean<
-      Array<{
-        _id: string;
-        triggerKeyword: string;
-        replyText: string;
-      }>
-    >(),
-    KeywordTrigger.find({ userId, enabled: true, triggerType: "comment" }).lean<
-      Array<{
-        _id: string;
-        keyword: string;
-        action: string;
-        replyText?: string;
-      }>
-    >()
-  ]);
-
-  const ignoreRules = keywordTriggers.filter((rule) => {
-    const action = normalizeText(rule.action ?? "");
-    return action === "ignore" || action === "block";
-  });
-
-  for (const rule of ignoreRules) {
-    const trigger = normalizeText(rule.keyword);
-    if (trigger && normalizedMessage.includes(trigger)) {
-      return {
-        action: "ignore",
-        trigger: rule.keyword,
-        ruleId: String(rule._id),
-        ruleType: "keyword-trigger",
-        reason: "Matched ignore rule"
-      };
-    }
-  }
-
-  const replyKeywordRules = keywordTriggers.filter((rule) => {
-    const action = normalizeText(rule.action ?? "");
-    return action !== "ignore" && action !== "block" && rule.replyText?.trim();
-  });
-
-  for (const rule of replyKeywordRules) {
-    const trigger = normalizeText(rule.keyword);
-    if (trigger && normalizedMessage === trigger) {
-      return {
-        action: "reply",
-        trigger: rule.keyword,
-        ruleId: String(rule._id),
-        ruleType: "keyword-trigger",
-        replyText: rule.replyText!.trim(),
-        matchMode: "exact"
-      };
-    }
-  }
-
-  for (const rule of growthRules) {
-    const trigger = normalizeText(rule.triggerKeyword);
-    if (trigger && normalizedMessage.includes(trigger)) {
-      return {
-        action: "reply",
-        trigger: rule.triggerKeyword,
-        ruleId: String(rule._id),
-        ruleType: "growth-rule",
-        replyText: rule.replyText.trim(),
-        matchMode: "contains"
-      };
-    }
-  }
-
-  for (const rule of replyKeywordRules) {
-    const trigger = normalizeText(rule.keyword);
-    if (trigger && normalizedMessage.includes(trigger)) {
-      return {
-        action: "reply",
-        trigger: rule.keyword,
-        ruleId: String(rule._id),
-        ruleType: "keyword-trigger",
-        replyText: rule.replyText!.trim(),
-        matchMode: "contains"
-      };
-    }
-  }
 
   if (autoCommentSettings.enabled && autoCommentSettings.pageIds.includes(pageId) && autoCommentSettings.replies.length > 0) {
     const replyText = randomItem(autoCommentSettings.replies);
@@ -229,8 +136,8 @@ async function evaluateCommentRules(userId: string, pageId: string, message: str
   }
 
   return {
-    action: "manual_review",
-    reason: "No matching rule or fallback reply configured"
+    action: "skip",
+    reason: "Auto reply is disabled for this page or the reply library is empty"
   };
 }
 
@@ -287,17 +194,14 @@ export async function ingestCommentAndMaybeQueue(params: IngestParams) {
   const autoCommentSettings = await getAutoCommentSettings(params.userId);
   const autoReplyEnabled = params.autoQueue !== false && autoCommentSettings.enabled;
   const manualReplyText = params.replyText?.trim();
-  const ruleDecision = manualReplyText
-    ? null
-    : await evaluateCommentRules(params.userId, params.pageId, params.message);
+  const replyDecision = manualReplyText ? null : await pickAutoReply(params.userId, params.pageId);
 
-  const effectiveReplyText = manualReplyText || (ruleDecision?.action === "reply" ? ruleDecision.replyText : "");
+  const effectiveReplyText = manualReplyText || (replyDecision?.action === "reply" ? replyDecision.replyText : "");
   const shouldQueue = Boolean(
     params.externalCommentId &&
       effectiveReplyText &&
       autoReplyEnabled &&
-      autoCommentSettings.pageIds.includes(params.pageId) &&
-      (ruleDecision?.action === "reply" || manualReplyText)
+      autoCommentSettings.pageIds.includes(params.pageId)
   );
 
   const externalKey =
@@ -313,16 +217,7 @@ export async function ingestCommentAndMaybeQueue(params: IngestParams) {
     replyText?: string;
   } | null>();
 
-  const nextStatus =
-    ruleDecision?.action === "ignore"
-      ? "ignored"
-      : shouldQueue
-        ? "queued"
-        : effectiveReplyText
-          ? "received"
-          : ruleDecision?.action === "manual_review"
-            ? "received"
-            : "ignored";
+  const nextStatus = shouldQueue ? "queued" : "received";
 
   const comment = await CommentInbox.findOneAndUpdate(
     {
@@ -344,9 +239,9 @@ export async function ingestCommentAndMaybeQueue(params: IngestParams) {
         normalizedType: "comment_created",
         status: existing?.replyExternalId ? existing.status : nextStatus,
         replyText: effectiveReplyText || undefined,
-        matchedTrigger: ruleDecision && "trigger" in ruleDecision ? ruleDecision.trigger : undefined,
-        matchedRuleId: ruleDecision && "ruleId" in ruleDecision ? ruleDecision.ruleId : undefined,
-        matchedRuleType: ruleDecision?.action === "reply" ? ruleDecision.ruleType : undefined,
+        matchedTrigger: replyDecision?.action === "reply" ? replyDecision.trigger : undefined,
+        matchedRuleId: replyDecision?.action === "reply" ? replyDecision.ruleId : undefined,
+        matchedRuleType: replyDecision?.action === "reply" ? replyDecision.ruleType : undefined,
         autoReplyEnabled,
         queuedAt: shouldQueue && !existing?.replyExternalId ? new Date() : undefined,
         replyError: null,
@@ -372,37 +267,19 @@ export async function ingestCommentAndMaybeQueue(params: IngestParams) {
     }
   });
 
-  if (ruleDecision?.action === "ignore") {
-    await logCommentStage({
-      userId: params.userId,
-      commentInboxId,
-      externalCommentId: externalKey,
-      correlationId,
-      stage: "event_ignored",
-      message: ruleDecision.reason,
-      metadata: {
-        pageId: params.pageId,
-        ruleId: ruleDecision.ruleId,
-        trigger: ruleDecision.trigger
-      }
-    });
-
-    return { comment, queuedJobId: null };
-  }
-
-  if (ruleDecision?.action === "reply") {
+  if (replyDecision?.action === "reply") {
     await logCommentStage({
       userId: params.userId,
       commentInboxId,
       externalCommentId: externalKey,
       correlationId,
       stage: "rule_matched",
-      message: `Matched ${ruleDecision.matchMode} reply rule`,
+      message: "Selected a random reply from the auto reply library",
       metadata: {
         pageId: params.pageId,
-        ruleId: ruleDecision.ruleId,
-        ruleType: ruleDecision.ruleType,
-        trigger: ruleDecision.trigger
+        ruleId: replyDecision.ruleId,
+        ruleType: replyDecision.ruleType,
+        trigger: replyDecision.trigger
       }
     });
   }
@@ -415,19 +292,16 @@ export async function ingestCommentAndMaybeQueue(params: IngestParams) {
     await logAction({
       userId: params.userId,
       type: "comment",
-      level: effectiveReplyText ? "info" : "warn",
-      message: effectiveReplyText
-        ? "Comment matched a rule but was not queued for auto reply"
-        : ruleDecision?.action === "manual_review"
-          ? "Comment requires manual review"
-          : "Comment ingested with no matching auto-reply rule",
+      level: "warn",
+      message: "Comment was received but auto reply is not enabled for this page or no reply library is configured",
       metadata: {
         pageId: params.pageId,
         commentInboxId,
         externalCommentId: externalKey,
         autoReplyEnabled,
         autoCommentPageSelected: autoCommentSettings.pageIds.includes(params.pageId),
-        autoCommentReplyPoolSize: autoCommentSettings.replies.length
+        autoCommentReplyPoolSize: autoCommentSettings.replies.length,
+        skipReason: replyDecision?.action === "skip" ? replyDecision.reason : null
       }
     });
 
@@ -441,9 +315,9 @@ export async function ingestCommentAndMaybeQueue(params: IngestParams) {
     externalCommentId: externalKey,
     replyText: effectiveReplyText,
     correlationId,
-    matchedTrigger: ruleDecision && "trigger" in ruleDecision ? ruleDecision.trigger : undefined,
-    matchedRuleId: ruleDecision && "ruleId" in ruleDecision ? ruleDecision.ruleId : undefined,
-    matchedRuleType: ruleDecision?.action === "reply" ? ruleDecision.ruleType : undefined
+    matchedTrigger: replyDecision?.action === "reply" ? replyDecision.trigger : undefined,
+    matchedRuleId: replyDecision?.action === "reply" ? replyDecision.ruleId : undefined,
+    matchedRuleType: replyDecision?.action === "reply" ? replyDecision.ruleType : undefined
   });
 
   await logCommentStage({
