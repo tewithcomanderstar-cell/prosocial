@@ -14,6 +14,7 @@
   --shadow-soft: 0 12px 28px rgba(79, 97, 134, 0.09);
   --font-display: "Space Grotesk", "Noto Sans Thai", "Segoe UI", sans-serif;
   --font-body: "Noto Sans Thai", "Segoe UI", sans-serif;
+  --font-body-en: "Space Grotesk", "Segoe UI", sans-serif;
   --font-display-th: "Noto Sans Thai", "Segoe UI", sans-serif;
   --font-body-th: "Noto Sans Thai", "Segoe UI", sans-serif;
 }
@@ -28,7 +29,14 @@ body {
     radial-gradient(circle at top left, rgba(127, 165, 255, 0.28), transparent 24%),
     radial-gradient(circle at top right, rgba(255, 184, 208, 0.16), transparent 20%),
     linear-gradient(180deg, #dfe7f4 0%, #cfdaee 100%);
-  font-family: var(--font-body);
+  font-family: var(--font-body-en);
+}
+html:lang(en) body,
+html:lang(en) button,
+html:lang(en) input,
+html:lang(en) textarea,
+html:lang(en) select {
+  font-family: var(--font-body-en);
 }
 html:lang(th) body,
 html:lang(th) button,
@@ -45,6 +53,70 @@ html:lang(th) .auth-form-kicker,
 html:lang(th) .language-label {
   letter-spacing: 0.03em;
   text-transform: none;
+}
+html:lang(en) .window-title,
+html:lang(en) .nav-group-title,
+html:lang(en) .nav a,
+html:lang(en) .kicker,
+html:lang(en) .language-label,
+html:lang(en) .label,
+html:lang(en) .label-hint,
+html:lang(en) .button,
+html:lang(en) .button-secondary,
+html:lang(en) .choice-chip,
+html:lang(en) .badge,
+html:lang(en) .auth-kicker,
+html:lang(en) .auth-form-kicker,
+html:lang(en) .social-button,
+html:lang(en) .audience-pill {
+  font-family: var(--font-body-en);
+}
+html:lang(en) .brand h1,
+html:lang(en) .page-title,
+html:lang(en) .card h2,
+html:lang(en) .card h3,
+html:lang(en) .quick-card h2,
+html:lang(en) .auth-title,
+html:lang(en) .auth-form-title,
+html:lang(en) .minimal-post-head h1,
+html:lang(en) .stat strong {
+  font-family: var(--font-display);
+  letter-spacing: -0.06em;
+}
+html:lang(en) .window-title,
+html:lang(en) .nav-group-title,
+html:lang(en) .language-label,
+html:lang(en) .kicker,
+html:lang(en) .auth-kicker,
+html:lang(en) .auth-form-kicker {
+  letter-spacing: 0;
+  text-transform: none;
+}
+html:lang(en) .brand h1 {
+  font-size: 2.05rem;
+  line-height: 0.92;
+  font-weight: 700;
+}
+html:lang(en) .nav a,
+html:lang(en) .button,
+html:lang(en) .button-secondary,
+html:lang(en) .choice-chip,
+html:lang(en) .badge {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+html:lang(en) .card h2,
+html:lang(en) .card h3,
+html:lang(en) .quick-card h2,
+html:lang(en) .auth-form-title {
+  font-weight: 700;
+}
+html:lang(en) .muted,
+html:lang(en) .label-hint,
+html:lang(en) .page-subtitle,
+html:lang(en) .auth-copy,
+html:lang(en) .window-title {
+  letter-spacing: -0.01em;
 }
 
 a { color: inherit; text-decoration: none; }
