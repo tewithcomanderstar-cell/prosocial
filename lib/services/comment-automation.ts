@@ -434,22 +434,25 @@ export async function ingestFacebookWebhookPayload(payload: FacebookWebhookPaylo
   await connectDb();
 
   if (payload.object !== "page") {
-    return { accepted: 0, ignored: 0 };
+    return { accepted: 0, ignored: 0, reasons: ["payload_object_not_page"] };
   }
 
   let accepted = 0;
   let ignored = 0;
+  const reasons = new Set<string>();
 
   for (const entry of payload.entry ?? []) {
     const pageId = entry.id;
     if (!pageId) {
       ignored += 1;
+      reasons.add("missing_page_id");
       continue;
     }
 
     const userId = await findUserIdByPageId(pageId);
     if (!userId) {
       ignored += 1;
+      reasons.add(`page_not_connected:${pageId}`);
       continue;
     }
 
@@ -465,6 +468,9 @@ export async function ingestFacebookWebhookPayload(payload: FacebookWebhookPaylo
 
       if (!isCommentEvent) {
         ignored += 1;
+        reasons.add(
+          `ignored_change:${change.field ?? "unknown"}:${value?.item ?? "unknown"}:${value?.verb ?? "unknown"}`
+        );
         continue;
       }
 
@@ -488,5 +494,5 @@ export async function ingestFacebookWebhookPayload(payload: FacebookWebhookPaylo
     }
   }
 
-  return { accepted, ignored };
+  return { accepted, ignored, reasons: Array.from(reasons) };
 }
