@@ -12,9 +12,9 @@
   --success: #2f7d57;
   --shadow: 0 20px 48px rgba(79, 97, 134, 0.12);
   --shadow-soft: 0 12px 28px rgba(79, 97, 134, 0.09);
-  --font-display: "Space Grotesk", "Noto Sans Thai", "Segoe UI", sans-serif;
+  --font-display: var(--font-english), "Segoe UI", sans-serif;
   --font-body: "Noto Sans Thai", "Segoe UI", sans-serif;
-  --font-body-en: "Space Grotesk", "Segoe UI", sans-serif;
+  --font-body-en: var(--font-english), "Segoe UI", sans-serif;
   --font-display-th: "Noto Sans Thai", "Segoe UI", sans-serif;
   --font-body-th: "Noto Sans Thai", "Segoe UI", sans-serif;
 }

@@ -1,5 +1,5 @@
 ﻿import type { Metadata } from "next";
-import { Noto_Sans_Thai, Space_Grotesk } from "next/font/google";
+import { Noto_Sans_Thai, Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
 import { Sidebar } from "@/components/sidebar";
 import { LanguageProvider } from "@/components/language-provider";
@@ -10,9 +10,10 @@ const notoSansThai = Noto_Sans_Thai({
   weight: ["400", "500", "600", "700"]
 });
 
-const spaceGrotesk = Space_Grotesk({
+const plusJakartaSans = Plus_Jakarta_Sans({
   subsets: ["latin"],
-  variable: "--font-display"
+  variable: "--font-english",
+  weight: ["500", "600", "700", "800"]
 });
 
 export const metadata: Metadata = {
@@ -23,7 +24,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body className={`${notoSansThai.variable} ${spaceGrotesk.variable}`}>
+      <body className={`${notoSansThai.variable} ${plusJakartaSans.variable}`}>
         <LanguageProvider>
           <div className="desktop-bg">
             <div className="desktop-orb orb-a" />
