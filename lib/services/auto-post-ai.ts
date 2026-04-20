@@ -399,6 +399,13 @@ function stripFileExtension(value: string) {
   return value.replace(/\.[a-z0-9]+$/i, "").trim();
 }
 
+function summarizeImageStyleLabel(name: string) {
+  return stripNumericSuffix(stripFileExtension(name))
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function normalizeHashtags(hashtags?: string[]) {
   return (hashtags ?? [])
     .map((hashtag) => hashtag.trim())
@@ -512,9 +519,11 @@ async function buildMultiImageCaption(config: LeanAutoPostConfig, images: DriveI
     }
 
     const parts = [
-      `Image ${index + 1} file: ${stripFileExtension(image.name)}`,
-      creativeText ? `Main visual theme: ${creativeText}` : "",
-      exactText ? `Visible text: ${exactText}` : ""
+      creativeText ? `ภาพที่ ${index + 1}: ธีมหลักที่เห็นคือ ${creativeText}` : "",
+      exactText ? `ภาพที่ ${index + 1}: ข้อความสำคัญบนภาพคือ ${exactText}` : "",
+      !creativeText && !exactText && summarizeImageStyleLabel(image.name)
+        ? `ภาพที่ ${index + 1}: ฟีลโดยรวมใกล้เคียงกับ ${summarizeImageStyleLabel(image.name)}`
+        : ""
     ].filter(Boolean);
 
     if (parts.length) {
@@ -522,14 +531,36 @@ async function buildMultiImageCaption(config: LeanAutoPostConfig, images: DriveI
     }
   }
 
-  const fileList = images.map((image) => stripFileExtension(image.name)).filter(Boolean).join(", ");
-  if (fileList) {
-    sourceChunks.push(`All selected image files:\n${fileList}`);
-  }
-
   const keyword = `${config.folderName || "Google Drive"} photo set`;
   const builtInPrompt =
-    "เขียนแคปชั่น Facebook ภาษาไทยสำหรับโพสต์หลายภาพ ให้เป็นสไตล์คอนเทนต์น่ารัก ละมุน ชวนหยุดดู ชวนเซฟ และชวนคอมเมนต์ เปิดโพสต์ด้วย hook แบบชวนหยุดอ่าน เช่น ยังไม่มีไอเดียใช่มั้ย หรือ หยุดตรงนี้ก่อนเลยน้า จากนั้นสรุปว่าโพสต์นี้รวมไอเดียอะไร แล้วไล่อธิบายทีละรูปเป็น แบบ 1 / แบบ 2 / แบบ 3 ... ให้แต่ละรูปมีฟีลต่างกัน ปิดท้ายด้วย CTA ให้คอมเมนต์ เซฟ และแชร์ โดยต้องอิงจากรายละเอียดในภาพจริง ห้ามเขียนกว้างหรือมั่ว";
+    `เขียนแคปชั่น Facebook ภาษาไทยสำหรับโพสต์หลายภาพ ให้เป็นโพสต์สำเร็จรูปพร้อมใช้จริง
+
+สไตล์ที่ต้องการ:
+- น่ารัก ละมุน เป็นกันเอง
+- ชวนหยุดดู ชวนอ่านต่อ ชวนเซฟ ชวนคอมเมนต์
+- อ่านลื่นแบบเพจคอนเทนต์สวยๆ
+- ใช้อีโมจิพอดีๆ ได้ แต่ไม่เยอะเกิน
+
+โครงสร้างที่ต้องการทุกโพสต์:
+1. เปิดด้วย hook แบบชวนหยุดอ่านทันที
+2. เกริ่นว่ารวมไอเดีย/รวมแบบอะไร
+3. มีประโยคชวนให้ดูทีละรูป
+4. ไล่เป็น:
+แบบ 1 :
+แบบ 2 :
+แบบ 3 :
+แบบ 4 :
+ถ้ามีมากกว่า 4 รูปให้เขียนต่อจนครบ
+5. ปิดท้ายด้วย CTA ให้คอมเมนต์ / เซฟ / แชร์
+
+กติกาสำคัญ:
+- ห้ามพูดถึงชื่อไฟล์ภาพ
+- ห้ามพูดถึงการวิเคราะห์ภาพ
+- ห้ามพูดถึงคำว่า OCR, source, prompt, ภาพนี้น่าจะ, รูปนี้อาจจะ
+- ห้ามเขียนเหมือนโน้ตหลังบ้านหรือบรีฟงาน
+- ห้ามถามกลับเพื่อขอข้อมูลเพิ่ม
+- ต้องอิงจากรายละเอียดในภาพจริงเท่านั้น
+- ถ้ารายละเอียดบางรูปไม่ชัด ให้สรุปจากธีมที่เห็น โดยยังต้องเขียนให้อ่านเหมือนโพสต์จริง`;
   const customPrompt = [builtInPrompt, config.aiPrompt?.trim() || ""].filter(Boolean).join("\n\n");
 
   try {

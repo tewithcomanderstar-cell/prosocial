@@ -70,7 +70,22 @@ function buildGenerationPrompt(keyword: string, options: GenerateFacebookContent
     ? `Source material (${options.sourceLabel?.trim() || "reference"}):\n${options.sourceText.trim()}`
     : "No extra source material was provided.";
 
-  return `${personaPrompt}\n\nTopic or keyword:\n${keyword}\n\n${promptInstruction}\n\n${sourceBlock}`;
+  return `${personaPrompt}
+
+Topic or keyword:
+${keyword}
+
+${promptInstruction}
+
+Hard rules:
+- Final output must read like a finished Facebook post ready to publish.
+- Never mention file names, image IDs, OCR, source material, prompt instructions, or internal analysis.
+- Never write like a draft note, checklist, analyst memo, or content plan.
+- Do not ask the audience to provide missing details about the images.
+- If details are incomplete, write naturally from the strongest visible theme only.
+- Keep the caption polished, confident, natural, and audience-facing.
+
+${sourceBlock}`;
 }
 
 export async function generateFacebookContent(keyword: string, options: GenerateFacebookContentOptions = {}) {
@@ -85,7 +100,7 @@ export async function generateFacebookContent(keyword: string, options: Generate
         {
           role: "system",
           content:
-            "You write Thai Facebook marketing content. Treat the custom prompt like a real ChatGPT instruction from the user and follow it closely. Use the source material when provided, but do not invent facts beyond it. Return strict JSON with a variants array of 3 to 5 items. Each item must include caption and hashtags. Keep captions ready to post, natural, audience-aware, and aligned to the requested persona and prompt."
+            "You write Thai Facebook marketing content. Treat the custom prompt like a real ChatGPT instruction from the user and follow it closely. Use the source material when provided, but do not invent facts beyond it. The final caption must always read like a finished public-facing post, never like internal notes. Never mention file names, image IDs, OCR text extraction, source material, or analysis steps. Never output planning language, placeholders, or requests for missing information. Return strict JSON with a variants array of 3 to 5 items. Each item must include caption and hashtags. Keep captions ready to post, natural, audience-aware, and aligned to the requested persona and prompt."
         },
         {
           role: "user",
