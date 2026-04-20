@@ -166,7 +166,12 @@ function statusTone(status?: AutoPostStatus) {
   }
 }
 
-export function AutoPostPanel() {
+type AutoPostPanelProps = {
+  forcedAutomationMode?: AutomationMode;
+  hideAutomationModeSelector?: boolean;
+};
+
+export function AutoPostPanel({ forcedAutomationMode, hideAutomationModeSelector = false }: AutoPostPanelProps) {
   const [config, setConfig] = useState<AutoPostConfig>(defaults);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [pages, setPages] = useState<FacebookPage[]>([]);
@@ -197,7 +202,12 @@ export function AutoPostPanel() {
 
       if (statusJson.ok) {
         const statusData = statusJson.data as StatusResponse;
-        setConfig((current) => ({ ...current, ...defaults, ...statusData.config }));
+        setConfig((current) => ({
+          ...current,
+          ...defaults,
+          ...statusData.config,
+          ...(forcedAutomationMode ? { automationMode: forcedAutomationMode } : {})
+        }));
         setLogs((statusData.logs ?? []).slice(0, 10).map((log) => ({ ...log, message: sanitizeText(log.message) })));
       }
 
@@ -268,7 +278,11 @@ export function AutoPostPanel() {
     const response = await fetch("/api/auto-post", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...config, enabled: enabledOverride ?? config.enabled })
+      body: JSON.stringify({
+        ...config,
+        automationMode: forcedAutomationMode ?? config.automationMode,
+        enabled: enabledOverride ?? config.enabled
+      })
     });
     const result = await response.json();
     if (!result.ok) throw new Error(result.message || "Unable to save Auto Post settings");
@@ -451,17 +465,23 @@ export function AutoPostPanel() {
           </div>
         </div>
 
-        <label className="label">
-          Automation Mode
-          <select
-            className="select"
-            value={config.automationMode}
-            onChange={(event) => setConfig((current) => ({ ...current, automationMode: event.target.value as AutomationMode }))}
-          >
-            <option value="standard">Auto Post ปกติ</option>
-            <option value="multi-image-ai">โหมดหลายภาพ AI</option>
-          </select>
-        </label>
+        {!hideAutomationModeSelector ? (
+          <label className="label">
+            Automation Mode
+            <select
+              className="select"
+              value={config.automationMode}
+              onChange={(event) => setConfig((current) => ({ ...current, automationMode: event.target.value as AutomationMode }))}
+            >
+              <option value="standard">Auto Post ปกติ</option>
+              <option value="multi-image-ai">โหมดหลายภาพ AI</option>
+            </select>
+          </label>
+        ) : (
+          <div className="muted">
+            โหมดนี้ถูกตั้งเป็น <strong>โหมดหลายภาพ AI</strong> ถาวรสำหรับหน้านี้
+          </div>
+        )}
 
         {config.automationMode === "multi-image-ai" ? (
           <label className="label">

@@ -38,6 +38,7 @@ export function Sidebar() {
       icon: "planner",
       items: [
         { href: "/auto-post", label: t("navWorkflows"), icon: "planner" },
+        { href: "/auto-post-ai", label: t("navAutoPostAi"), icon: "planner" },
         { href: "/templates", label: t("navTemplates"), icon: "template" }
       ]
     },
