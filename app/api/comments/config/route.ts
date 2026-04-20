@@ -5,6 +5,8 @@ import { PostingSettings } from "@/models/PostingSettings";
 
 const schema = z.object({
   autoCommentEnabled: z.boolean(),
+  autoCommentAutoSyncEnabled: z.boolean().default(false),
+  autoCommentIntervalMinutes: z.union([z.literal(15), z.literal(30), z.literal(60)]).default(15),
   autoCommentPageIds: z.array(z.string()).default([]),
   autoCommentPostIds: z.array(z.string()).default([]),
   autoCommentReplies: z.array(z.string()).default([])
@@ -19,6 +21,9 @@ export async function GET() {
       { upsert: true, new: true }
     ).lean<{
       autoCommentEnabled?: boolean;
+      autoCommentAutoSyncEnabled?: boolean;
+      autoCommentIntervalMinutes?: 15 | 30 | 60;
+      autoCommentLastSyncedAt?: Date | string | null;
       autoCommentPageIds?: string[];
       autoCommentPostIds?: string[];
       autoCommentReplies?: string[];
@@ -26,6 +31,12 @@ export async function GET() {
 
     return jsonOk({
       autoCommentEnabled: Boolean(settings?.autoCommentEnabled),
+      autoCommentAutoSyncEnabled: Boolean(settings?.autoCommentAutoSyncEnabled),
+      autoCommentIntervalMinutes:
+        settings?.autoCommentIntervalMinutes === 30 || settings?.autoCommentIntervalMinutes === 60
+          ? settings.autoCommentIntervalMinutes
+          : 15,
+      autoCommentLastSyncedAt: settings?.autoCommentLastSyncedAt ?? null,
       autoCommentPageIds: (settings?.autoCommentPageIds ?? []).filter(Boolean),
       autoCommentPostIds: (settings?.autoCommentPostIds ?? []).map((item) => item.trim()).filter(Boolean),
       autoCommentReplies: (settings?.autoCommentReplies ?? []).map((item) => item.trim()).filter(Boolean)
@@ -45,6 +56,8 @@ export async function POST(request: Request) {
       {
         $set: {
           autoCommentEnabled: payload.autoCommentEnabled,
+          autoCommentAutoSyncEnabled: payload.autoCommentAutoSyncEnabled,
+          autoCommentIntervalMinutes: payload.autoCommentIntervalMinutes,
           autoCommentPageIds: (payload.autoCommentPageIds ?? []).filter(Boolean),
           autoCommentPostIds: Array.from(new Set((payload.autoCommentPostIds ?? []).map((item) => item.trim()).filter(Boolean))),
           autoCommentReplies: (payload.autoCommentReplies ?? []).map((item) => item.trim()).filter(Boolean)

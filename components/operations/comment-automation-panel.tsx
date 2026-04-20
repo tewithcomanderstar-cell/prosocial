@@ -33,6 +33,9 @@ type CommentRecord = {
 
 type AutoCommentConfig = {
   autoCommentEnabled: boolean;
+  autoCommentAutoSyncEnabled: boolean;
+  autoCommentIntervalMinutes: 15 | 30 | 60;
+  autoCommentLastSyncedAt?: string | null;
   autoCommentPageIds: string[];
   autoCommentReplies: string[];
 };
@@ -43,12 +46,17 @@ type FacebookPage = {
 };
 
 const AUTO_COMMENT_REPLY_SLOTS = 5;
+const AUTO_SYNC_INTERVALS: Array<{ value: 15 | 30 | 60; label: string }> = [
+  { value: 15, label: "ทุก 15 นาที" },
+  { value: 30, label: "ทุก 30 นาที" },
+  { value: 60, label: "ทุก 1 ชั่วโมง" }
+];
 
 function normalizeReplySlots(replies: string[]) {
   return Array.from({ length: AUTO_COMMENT_REPLY_SLOTS }, (_, index) => replies[index] ?? "");
 }
 
-function formatTimestamp(value?: string) {
+function formatTimestamp(value?: string | null) {
   if (!value) return "-";
 
   return new Intl.DateTimeFormat("th-TH", {
@@ -130,6 +138,9 @@ export function CommentAutomationPanel() {
   const [pages, setPages] = useState<FacebookPage[]>([]);
   const [autoConfig, setAutoConfig] = useState<AutoCommentConfig>({
     autoCommentEnabled: false,
+    autoCommentAutoSyncEnabled: false,
+    autoCommentIntervalMinutes: 15,
+    autoCommentLastSyncedAt: null,
     autoCommentPageIds: [],
     autoCommentReplies: normalizeReplySlots([])
   });
@@ -180,6 +191,12 @@ export function CommentAutomationPanel() {
       setPages(pagesPayload.data?.pages ?? []);
       setAutoConfig({
         autoCommentEnabled: Boolean(autoConfigPayload.data?.autoCommentEnabled),
+        autoCommentAutoSyncEnabled: Boolean(autoConfigPayload.data?.autoCommentAutoSyncEnabled),
+        autoCommentIntervalMinutes:
+          autoConfigPayload.data?.autoCommentIntervalMinutes === 30 || autoConfigPayload.data?.autoCommentIntervalMinutes === 60
+            ? autoConfigPayload.data.autoCommentIntervalMinutes
+            : 15,
+        autoCommentLastSyncedAt: autoConfigPayload.data?.autoCommentLastSyncedAt ?? null,
         autoCommentPageIds: autoConfigPayload.data?.autoCommentPageIds ?? [],
         autoCommentReplies: normalizeReplySlots(autoConfigPayload.data?.autoCommentReplies ?? [])
       });
@@ -233,6 +250,8 @@ export function CommentAutomationPanel() {
         credentials: "include",
         body: JSON.stringify({
           autoCommentEnabled: autoConfig.autoCommentEnabled,
+          autoCommentAutoSyncEnabled: autoConfig.autoCommentAutoSyncEnabled,
+          autoCommentIntervalMinutes: autoConfig.autoCommentIntervalMinutes,
           autoCommentPageIds: autoConfig.autoCommentPageIds,
           autoCommentReplies: autoConfig.autoCommentReplies.map((item) => item.trim()).filter(Boolean),
           autoCommentPostIds: []
@@ -312,8 +331,8 @@ export function CommentAutomationPanel() {
 
         <form className="stack" onSubmit={handleSaveAutoConfig}>
           <p style={{ margin: 0, color: "var(--muted)" }}>
-            ระบบจะสแกนโพสต์ล่าสุดของเพจที่เลือก แล้วหาเฉพาะโพสต์ที่มีคอมเมนต์ จากนั้นจะดึงคอมเมนต์เข้ามาใน inbox
-            และตอบกลับอัตโนมัติจาก Reply library ที่คุณตั้งไว้
+            ระบบจะสแกนโพสต์ล่าสุดของเพจที่เลือก หาโพสต์ที่มีคอมเมนต์ แล้วดึงคอมเมนต์เข้ามาใน inbox
+            จากนั้นจะตอบกลับอัตโนมัติจาก Reply library ที่คุณตั้งไว้
           </p>
 
           <label style={{ display: "flex", gap: 12, alignItems: "center", fontWeight: 700 }}>
@@ -324,6 +343,49 @@ export function CommentAutomationPanel() {
             />
             <span>เปิดโหมดตอบคอมเมนต์อัตโนมัติสำหรับเพจที่เลือก</span>
           </label>
+
+          <div className="card" style={{ padding: 16, background: "rgba(59,130,246,.05)", display: "grid", gap: 12 }}>
+            <label style={{ display: "flex", gap: 12, alignItems: "center", fontWeight: 700 }}>
+              <input
+                type="checkbox"
+                checked={autoConfig.autoCommentAutoSyncEnabled}
+                onChange={(event) =>
+                  setAutoConfig((current) => ({
+                    ...current,
+                    autoCommentAutoSyncEnabled: event.target.checked
+                  }))
+                }
+              />
+              <span>ดึงคอมเมนต์ออโต้</span>
+            </label>
+
+            <div className="stack">
+              <strong>ช่วงเวลาการดึงคอมเมนต์อัตโนมัติ</strong>
+              <div className="chip-grid">
+                {AUTO_SYNC_INTERVALS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={`choice-chip ${autoConfig.autoCommentIntervalMinutes === option.value ? "active" : ""}`}
+                    onClick={() =>
+                      setAutoConfig((current) => ({
+                        ...current,
+                        autoCommentIntervalMinutes: option.value
+                      }))
+                    }
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              <small style={{ color: "var(--muted)" }}>
+                รอบอัตโนมัติจะใช้ cron กลางของระบบทุก 5 นาทีเป็นตัวปลุก แล้วจะสแกนจริงตามช่วงเวลา 15 นาที, 30 นาที หรือ 1 ชั่วโมงที่คุณเลือกไว้
+              </small>
+              <small style={{ color: "var(--muted)" }}>
+                ดึงคอมเมนต์ล่าสุด: {formatTimestamp(autoConfig.autoCommentLastSyncedAt)}
+              </small>
+            </div>
+          </div>
 
           <div className="stack">
             <strong>เลือกเพจ Facebook</strong>

@@ -65,6 +65,9 @@ type IngestParams = {
 
 type AutoCommentSettings = {
   enabled: boolean;
+  autoSyncEnabled: boolean;
+  intervalMinutes: 15 | 30 | 60;
+  lastSyncedAt: Date | null;
   pageIds: string[];
   replies: string[];
 };
@@ -105,12 +108,21 @@ async function getAutoCommentSettings(userId: string) {
     { upsert: true, new: true }
   ).lean<{
     autoCommentEnabled?: boolean;
+    autoCommentAutoSyncEnabled?: boolean;
+    autoCommentIntervalMinutes?: 15 | 30 | 60;
+    autoCommentLastSyncedAt?: Date | string | null;
     autoCommentPageIds?: string[];
     autoCommentReplies?: string[];
   } | null>();
 
   return {
     enabled: Boolean(settings?.autoCommentEnabled),
+    autoSyncEnabled: Boolean(settings?.autoCommentAutoSyncEnabled),
+    intervalMinutes:
+      settings?.autoCommentIntervalMinutes === 30 || settings?.autoCommentIntervalMinutes === 60
+        ? settings.autoCommentIntervalMinutes
+        : 15,
+    lastSyncedAt: settings?.autoCommentLastSyncedAt ? new Date(settings.autoCommentLastSyncedAt) : null,
     pageIds: (settings?.autoCommentPageIds ?? []).filter(Boolean),
     replies: (settings?.autoCommentReplies ?? []).map((item) => item.trim()).filter(Boolean)
   } satisfies AutoCommentSettings;
@@ -124,6 +136,7 @@ async function findUserIdByPageId(pageId: string) {
 async function listTrackedAutoCommentUsers() {
   const settings = await PostingSettings.find({
     autoCommentEnabled: true,
+    autoCommentAutoSyncEnabled: true,
     autoCommentPageIds: { $exists: true, $ne: [] },
     autoCommentReplies: { $exists: true, $ne: [] }
   })
@@ -131,6 +144,18 @@ async function listTrackedAutoCommentUsers() {
     .lean<Array<{ userId: string }>>();
 
   return settings.map((item) => String(item.userId));
+}
+
+function isAutoCommentSyncDue(settings: AutoCommentSettings) {
+  if (!settings.autoSyncEnabled) {
+    return false;
+  }
+
+  if (!settings.lastSyncedAt) {
+    return true;
+  }
+
+  return Date.now() - settings.lastSyncedAt.getTime() >= settings.intervalMinutes * 60 * 1000;
 }
 
 async function computeCommentReplyRunAt(userId: string, pageId: string) {
@@ -451,7 +476,7 @@ export async function finalizeTrackedPostIfComplete(userId: string, postId: stri
   return result.modifiedCount > 0;
 }
 
-export async function syncTrackedAutoCommentPosts(userId?: string) {
+export async function syncTrackedAutoCommentPosts(userId?: string, options: { force?: boolean } = {}) {
   await connectDb();
 
   const userIds = userId ? [userId] : await listTrackedAutoCommentUsers();
@@ -462,7 +487,8 @@ export async function syncTrackedAutoCommentPosts(userId?: string) {
 
   for (const currentUserId of userIds) {
     const settings = await getAutoCommentSettings(currentUserId);
-    if (!settings.enabled || settings.pageIds.length === 0 || settings.replies.length === 0) {
+    const shouldSync = options.force ? settings.enabled : settings.enabled && isAutoCommentSyncDue(settings);
+    if (!shouldSync || settings.pageIds.length === 0 || settings.replies.length === 0) {
       continue;
     }
 
@@ -579,6 +605,10 @@ export async function syncTrackedAutoCommentPosts(userId?: string) {
     }
 
     summaries.push({ userId: currentUserId, posts });
+    await PostingSettings.updateOne(
+      { userId: currentUserId },
+      { $set: { autoCommentLastSyncedAt: new Date() } }
+    );
   }
 
   return {

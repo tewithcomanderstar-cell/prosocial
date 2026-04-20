@@ -16,6 +16,9 @@ const postingSettingsSchema = new Schema(
       default: "medium"
     },
     autoCommentEnabled: { type: Boolean, default: false },
+    autoCommentAutoSyncEnabled: { type: Boolean, default: false },
+    autoCommentIntervalMinutes: { type: Number, enum: [15, 30, 60], default: 15 },
+    autoCommentLastSyncedAt: { type: Date, default: null },
     autoCommentPageIds: { type: [String], default: [] },
     autoCommentPostIds: { type: [String], default: [] },
     autoCommentReplies: { type: [String], default: [] },

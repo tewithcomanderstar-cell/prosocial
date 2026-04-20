@@ -6,7 +6,7 @@ import { processCommentReplyJobs } from "@/lib/services/queue";
 export async function POST() {
   try {
     const { userId } = await requireRole(["admin", "editor"]);
-    const syncSummary = await syncTrackedAutoCommentPosts(userId);
+    const syncSummary = await syncTrackedAutoCommentPosts(userId, { force: true });
     const processedReplies = await processCommentReplyJobs(5);
 
     return jsonOk(
