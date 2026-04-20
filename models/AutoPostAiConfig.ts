@@ -1,5 +1,7 @@
 import { Schema, model, models } from "mongoose";
 
+const DEFAULT_MULTI_IMAGE_AI_PROMPT = `เขียนแคปชั่น Facebook ภาษาไทยสำหรับโพสต์หลายภาพ ให้เป็นสไตล์คอนเทนต์น่ารัก ละมุน ชวนหยุดดู ชวนเซฟ และชวนคอมเมนต์ เปิดโพสต์ด้วย hook แบบชวนหยุดอ่าน เช่น ยังไม่มีไอเดียใช่มั้ย หรือ หยุดตรงนี้ก่อนเลยน้า จากนั้นสรุปว่าโพสต์นี้รวมไอเดียอะไร แล้วไล่อธิบายทีละรูปเป็น แบบ 1 / แบบ 2 / แบบ 3 ... ให้แต่ละรูปมีฟีลต่างกัน ปิดท้ายด้วย CTA ให้คอมเมนต์ เซฟ และแชร์ โดยต้องอิงจากรายละเอียดในภาพจริง ห้ามเขียนกว้างหรือมั่ว`;
+
 const autoPostAiConfigSchema = new Schema(
   {
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true, unique: true, index: true },
@@ -33,7 +35,7 @@ const autoPostAiConfigSchema = new Schema(
     },
     captions: { type: [String], default: [] },
     hashtags: { type: [String], default: [] },
-    aiPrompt: { type: String, default: "" },
+    aiPrompt: { type: String, default: DEFAULT_MULTI_IMAGE_AI_PROMPT },
     postingWindowStart: { type: String, default: "06:00" },
     postingWindowEnd: { type: String, default: "00:00" },
     language: {

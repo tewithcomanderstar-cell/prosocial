@@ -529,7 +529,7 @@ async function buildMultiImageCaption(config: LeanAutoPostConfig, images: DriveI
 
   const keyword = `${config.folderName || "Google Drive"} photo set`;
   const builtInPrompt =
-    "Create a high-retention Thai Facebook caption for a multi-image post. Identify the shared theme across the selected images, build a strong opening hook, make people stop scrolling, and encourage saves, likes, comments, and shares naturally. Keep it specific to the images and avoid generic filler.";
+    "เขียนแคปชั่น Facebook ภาษาไทยสำหรับโพสต์หลายภาพ ให้เป็นสไตล์คอนเทนต์น่ารัก ละมุน ชวนหยุดดู ชวนเซฟ และชวนคอมเมนต์ เปิดโพสต์ด้วย hook แบบชวนหยุดอ่าน เช่น ยังไม่มีไอเดียใช่มั้ย หรือ หยุดตรงนี้ก่อนเลยน้า จากนั้นสรุปว่าโพสต์นี้รวมไอเดียอะไร แล้วไล่อธิบายทีละรูปเป็น แบบ 1 / แบบ 2 / แบบ 3 ... ให้แต่ละรูปมีฟีลต่างกัน ปิดท้ายด้วย CTA ให้คอมเมนต์ เซฟ และแชร์ โดยต้องอิงจากรายละเอียดในภาพจริง ห้ามเขียนกว้างหรือมั่ว";
   const customPrompt = [builtInPrompt, config.aiPrompt?.trim() || ""].filter(Boolean).join("\n\n");
 
   try {

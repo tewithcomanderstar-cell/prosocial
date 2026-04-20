@@ -54,6 +54,8 @@ const INTERVAL_OPTIONS = [
   { value: 120, label: "2 hours" }
 ] as const;
 
+const DEFAULT_MULTI_IMAGE_AI_PROMPT = `เขียนแคปชั่น Facebook ภาษาไทยสำหรับโพสต์หลายภาพ ให้เป็นสไตล์คอนเทนต์น่ารัก ละมุน ชวนหยุดดู ชวนเซฟ และชวนคอมเมนต์ เปิดโพสต์ด้วย hook แบบชวนหยุดอ่าน เช่น ยังไม่มีไอเดียใช่มั้ย หรือ หยุดตรงนี้ก่อนเลยน้า จากนั้นสรุปว่าโพสต์นี้รวมไอเดียอะไร แล้วไล่อธิบายทีละรูปเป็น แบบ 1 / แบบ 2 / แบบ 3 ... ให้แต่ละรูปมีฟีลต่างกัน ปิดท้ายด้วย CTA ให้คอมเมนต์ เซฟ และแชร์ โดยต้องอิงจากรายละเอียดในภาพจริง ห้ามเขียนกว้างหรือมั่ว`;
+
 const defaults: AutoPostConfig = {
   enabled: false,
   folderId: "root",
@@ -65,7 +67,7 @@ const defaults: AutoPostConfig = {
   multiImageCountMode: "4",
   captions: [],
   hashtags: [],
-  aiPrompt: "",
+  aiPrompt: DEFAULT_MULTI_IMAGE_AI_PROMPT,
   postingWindowStart: "06:00",
   postingWindowEnd: "00:00",
   language: "th",
@@ -203,7 +205,8 @@ export function AutoPostAiPanel() {
           ...current,
           ...defaults,
           ...statusData.config,
-          ...(forcedAutomationMode ? { automationMode: forcedAutomationMode } : {})
+          ...(forcedAutomationMode ? { automationMode: forcedAutomationMode } : {}),
+          aiPrompt: statusData.config.aiPrompt?.trim() ? statusData.config.aiPrompt : DEFAULT_MULTI_IMAGE_AI_PROMPT
         }));
         setLogs((statusData.logs ?? []).slice(0, 10).map((log) => ({ ...log, message: sanitizeText(log.message) })));
       }

@@ -4,6 +4,8 @@ import { handleRoleError, requireRole } from "@/lib/services/permissions";
 import { logAction } from "@/lib/services/logging";
 import { AutoPostAiConfig } from "@/models/AutoPostAiConfig";
 
+const DEFAULT_MULTI_IMAGE_AI_PROMPT = `เขียนแคปชั่น Facebook ภาษาไทยสำหรับโพสต์หลายภาพ ให้เป็นสไตล์คอนเทนต์น่ารัก ละมุน ชวนหยุดดู ชวนเซฟ และชวนคอมเมนต์ เปิดโพสต์ด้วย hook แบบชวนหยุดอ่าน เช่น ยังไม่มีไอเดียใช่มั้ย หรือ หยุดตรงนี้ก่อนเลยน้า จากนั้นสรุปว่าโพสต์นี้รวมไอเดียอะไร แล้วไล่อธิบายทีละรูปเป็น แบบ 1 / แบบ 2 / แบบ 3 ... ให้แต่ละรูปมีฟีลต่างกัน ปิดท้ายด้วย CTA ให้คอมเมนต์ เซฟ และแชร์ โดยต้องอิงจากรายละเอียดในภาพจริง ห้ามเขียนกว้างหรือมั่ว`;
+
 type LeanAutoPostConfig = {
   enabled?: boolean;
   nextRunAt?: Date | null;
@@ -55,7 +57,7 @@ const schema = z.object({
   multiImageCountMode: z.enum(["4", "5", "6-10"]).default("4"),
   captions: z.array(z.string()).default([]),
   hashtags: z.array(z.string()).default([]),
-  aiPrompt: z.string().default(""),
+  aiPrompt: z.string().default(DEFAULT_MULTI_IMAGE_AI_PROMPT),
   postingWindowStart: z.string().regex(/^\d{2}:\d{2}$/).default("06:00"),
   postingWindowEnd: z.string().regex(/^\d{2}:\d{2}$/).default("00:00"),
   language: z.enum(["th", "en"]).default("th")
@@ -76,7 +78,8 @@ export async function GET() {
           retryCount: 0,
           intervalMinutes: 60,
           automationMode: "multi-image-ai",
-          multiImageCountMode: "4"
+          multiImageCountMode: "4",
+          aiPrompt: DEFAULT_MULTI_IMAGE_AI_PROMPT
         }
       },
       { upsert: true, new: true }
