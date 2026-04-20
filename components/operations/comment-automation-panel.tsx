@@ -34,7 +34,6 @@ type CommentRecord = {
 type AutoCommentConfig = {
   autoCommentEnabled: boolean;
   autoCommentPageIds: string[];
-  autoCommentPostIds: string[];
   autoCommentReplies: string[];
 };
 
@@ -47,17 +46,6 @@ const AUTO_COMMENT_REPLY_SLOTS = 5;
 
 function normalizeReplySlots(replies: string[]) {
   return Array.from({ length: AUTO_COMMENT_REPLY_SLOTS }, (_, index) => replies[index] ?? "");
-}
-
-function normalizePostIds(postIds: string) {
-  return Array.from(
-    new Set(
-      postIds
-        .split(/\r?\n/)
-        .map((item) => item.trim())
-        .filter(Boolean)
-    )
-  );
 }
 
 function formatTimestamp(value?: string) {
@@ -117,11 +105,11 @@ function progressNote(status: CommentStatus) {
     case "pending":
       return "ระบบกำลังเตรียมรายการตอบกลับ";
     case "matched":
-      return "เลือกคำตอบจาก Reply library แล้ว";
+      return "ระบบเลือกคำตอบจาก Reply library แล้ว";
     case "received":
       return "ระบบดึงคอมเมนต์เข้ามาแล้ว";
     case "queued":
-      return "รายการนี้เข้าแถวรอตอบแล้ว";
+      return "รายการนี้เข้าคิวรอตอบแล้ว";
     case "processing":
       return "ระบบกำลังประมวลผลคอมเมนต์นี้";
     case "replying":
@@ -143,10 +131,8 @@ export function CommentAutomationPanel() {
   const [autoConfig, setAutoConfig] = useState<AutoCommentConfig>({
     autoCommentEnabled: false,
     autoCommentPageIds: [],
-    autoCommentPostIds: [],
     autoCommentReplies: normalizeReplySlots([])
   });
-  const [postIdsInput, setPostIdsInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [savingAutoConfig, setSavingAutoConfig] = useState(false);
@@ -195,10 +181,8 @@ export function CommentAutomationPanel() {
       setAutoConfig({
         autoCommentEnabled: Boolean(autoConfigPayload.data?.autoCommentEnabled),
         autoCommentPageIds: autoConfigPayload.data?.autoCommentPageIds ?? [],
-        autoCommentPostIds: autoConfigPayload.data?.autoCommentPostIds ?? [],
         autoCommentReplies: normalizeReplySlots(autoConfigPayload.data?.autoCommentReplies ?? [])
       });
-      setPostIdsInput((autoConfigPayload.data?.autoCommentPostIds ?? []).join("\n"));
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "โหลด Auto Comment ไม่สำเร็จ");
     } finally {
@@ -250,8 +234,8 @@ export function CommentAutomationPanel() {
         body: JSON.stringify({
           autoCommentEnabled: autoConfig.autoCommentEnabled,
           autoCommentPageIds: autoConfig.autoCommentPageIds,
-          autoCommentPostIds: normalizePostIds(postIdsInput),
-          autoCommentReplies: autoConfig.autoCommentReplies.map((item) => item.trim()).filter(Boolean)
+          autoCommentReplies: autoConfig.autoCommentReplies.map((item) => item.trim()).filter(Boolean),
+          autoCommentPostIds: []
         })
       });
       const result = await response.json();
@@ -277,16 +261,16 @@ export function CommentAutomationPanel() {
       });
       const result = await response.json();
       if (!response.ok) {
-        throw new Error(result.message || "ดึงคอมเมนต์จาก post_id ไม่สำเร็จ");
+        throw new Error(result.message || "ดึงโพสต์และคอมเมนต์อัตโนมัติไม่สำเร็จ");
       }
 
-      const fetched = Number(result.data?.totalFetchedComments ?? 0);
-      const queued = Number(result.data?.totalQueuedReplies ?? 0);
-      const removed = Number(result.data?.totalRemovedPostIds ?? 0);
-      setSuccessMessage(`ดึงคอมเมนต์แล้ว ${fetched} รายการ, เข้าคิวตอบ ${queued} รายการ, ปิดงาน post_id ${removed} รายการ`);
+      const scannedPosts = Number(result.data?.totalScannedPosts ?? 0);
+      const fetchedComments = Number(result.data?.totalFetchedComments ?? 0);
+      const queuedReplies = Number(result.data?.totalQueuedReplies ?? 0);
+      setSuccessMessage(`สแกนโพสต์ ${scannedPosts} รายการ, ดึงคอมเมนต์ ${fetchedComments} รายการ, เข้าคิวตอบ ${queuedReplies} รายการ`);
       await loadData(true);
     } catch (syncError) {
-      setError(syncError instanceof Error ? syncError.message : "ดึงคอมเมนต์จาก post_id ไม่สำเร็จ");
+      setError(syncError instanceof Error ? syncError.message : "ดึงโพสต์และคอมเมนต์อัตโนมัติไม่สำเร็จ");
     } finally {
       setSyncingNow(false);
     }
@@ -328,8 +312,8 @@ export function CommentAutomationPanel() {
 
         <form className="stack" onSubmit={handleSaveAutoConfig}>
           <p style={{ margin: 0, color: "var(--muted)" }}>
-            ระบบจะใช้ <strong>post_id</strong> ที่คุณใส่ไว้เป็นตัวดึงคอมเมนต์จาก Facebook จากนั้นจะบันทึกลง inbox
-            และไล่ตอบทีละคอมเมนต์จนจบงานของโพสต์นั้น
+            ระบบจะสแกนโพสต์ล่าสุดของเพจที่เลือก แล้วหาเฉพาะโพสต์ที่มีคอมเมนต์ จากนั้นจะดึงคอมเมนต์เข้ามาใน inbox
+            และตอบกลับอัตโนมัติจาก Reply library ที่คุณตั้งไว้
           </p>
 
           <label style={{ display: "flex", gap: 12, alignItems: "center", fontWeight: 700 }}>
@@ -360,20 +344,12 @@ export function CommentAutomationPanel() {
             </div>
           </div>
 
-          <label className="label">
-            <span>Post ID ที่ต้องการติดตาม</span>
-            <textarea
-              className="input"
-              rows={5}
-              value={postIdsInput}
-              onChange={(event) => setPostIdsInput(event.target.value)}
-              placeholder={"ใส่ post_id ทีละ 1 บรรทัด\nตัวอย่าง: 123456789012345_987654321098765"}
-            />
-            <small style={{ color: "var(--muted)" }}>
-              ใส่ 1 post_id ต่อ 1 บรรทัด ระบบจะดึงคอมเมนต์จากโพสต์เหล่านี้ทุกครั้งที่รอบ sync ทำงาน และจะถอด post_id
-              ออกจากระบบเมื่อคอมเมนต์ของโพสต์นั้นตอบครบแล้ว
-            </small>
-          </label>
+          <div className="card" style={{ padding: 16, background: "rgba(59,130,246,.05)" }}>
+            <strong style={{ display: "block", marginBottom: 8 }}>ระบบดึงโพสต์ให้อัตโนมัติ</strong>
+            <p style={{ margin: 0, color: "#475569" }}>
+              ไม่ต้องใส่ post_id เองแล้ว ระบบจะดูโพสต์ล่าสุดของเพจที่เลือก และหยิบเฉพาะโพสต์ที่มีคอมเมนต์เข้ามาประมวลผล
+            </p>
+          </div>
 
           <label className="label">
             <span>Reply library</span>

@@ -33,6 +33,16 @@ type FacebookCommentNode = {
   };
 };
 
+type FacebookPostNode = {
+  id?: string;
+  updated_time?: string;
+  comments?: {
+    summary?: {
+      total_count?: number;
+    };
+  };
+};
+
 export class FacebookPublishError extends Error {
   constructor(
     message: string,
@@ -392,4 +402,31 @@ export async function fetchCommentsForFacebookPost(params: {
   }
 
   return comments;
+}
+
+export async function fetchRecentFacebookPostsWithComments(params: {
+  pageId: string;
+  pageAccessToken: string;
+  limit?: number;
+}) {
+  const maxItems = Math.max(1, Math.min(params.limit ?? 25, 100));
+  const url = new URL(`https://graph.facebook.com/v21.0/${params.pageId}/posts`);
+  url.searchParams.set("fields", "id,updated_time,comments.limit(1).summary(true)");
+  url.searchParams.set("limit", String(maxItems));
+  url.searchParams.set("access_token", params.pageAccessToken);
+
+  const response = await fetchWithRetry(url.toString(), { cache: "no-store" });
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => ({}))) as FacebookGraphErrorPayload;
+    throw classifyFacebookPublishError(payload, "Failed to fetch Facebook page posts");
+  }
+
+  const payload = (await response.json()) as { data?: FacebookPostNode[] };
+  return (payload.data ?? [])
+    .filter((item) => (item.comments?.summary?.total_count ?? 0) > 0 && item.id)
+    .map((item) => ({
+      postId: item.id as string,
+      updatedAt: item.updated_time,
+      commentCount: item.comments?.summary?.total_count ?? 0
+    }));
 }

@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import { connectDb } from "@/lib/db";
 import { createNotification, logAction, logAndNotifyError } from "@/lib/services/logging";
 import { logCommentStage } from "@/lib/services/comment-logging";
-import { fetchCommentsForFacebookPost } from "@/lib/services/facebook";
+import { fetchCommentsForFacebookPost, fetchRecentFacebookPostsWithComments } from "@/lib/services/facebook";
 import { getStoredFacebookConnection } from "@/lib/services/integration-auth";
 import { Job } from "@/models/Job";
 import { CommentInbox } from "@/models/CommentInbox";
@@ -66,7 +66,6 @@ type IngestParams = {
 type AutoCommentSettings = {
   enabled: boolean;
   pageIds: string[];
-  postIds: string[];
   replies: string[];
 };
 
@@ -78,11 +77,11 @@ type LeanFacebookConnection = {
 };
 
 type TrackedPostSyncSummary = {
-  postId: string;
+  scopeId: string;
   pageId: string;
+  scannedPosts: number;
   fetchedComments: number;
   queuedReplies: number;
-  removedFromTracking: boolean;
   status: "synced" | "skipped" | "error";
   reason?: string;
 };
@@ -107,14 +106,12 @@ async function getAutoCommentSettings(userId: string) {
   ).lean<{
     autoCommentEnabled?: boolean;
     autoCommentPageIds?: string[];
-    autoCommentPostIds?: string[];
     autoCommentReplies?: string[];
   } | null>();
 
   return {
     enabled: Boolean(settings?.autoCommentEnabled),
     pageIds: (settings?.autoCommentPageIds ?? []).filter(Boolean),
-    postIds: (settings?.autoCommentPostIds ?? []).map((item) => item.trim()).filter(Boolean),
     replies: (settings?.autoCommentReplies ?? []).map((item) => item.trim()).filter(Boolean)
   } satisfies AutoCommentSettings;
 }
@@ -124,15 +121,11 @@ async function findUserIdByPageId(pageId: string) {
   return connection?.userId ? String(connection.userId) : null;
 }
 
-function derivePageIdFromPostId(postId: string) {
-  const [pageId] = postId.split("_");
-  return pageId?.trim() || null;
-}
-
 async function listTrackedAutoCommentUsers() {
   const settings = await PostingSettings.find({
     autoCommentEnabled: true,
-    autoCommentPostIds: { $exists: true, $ne: [] }
+    autoCommentPageIds: { $exists: true, $ne: [] },
+    autoCommentReplies: { $exists: true, $ne: [] }
   })
     .select({ userId: 1 })
     .lean<Array<{ userId: string }>>();
@@ -465,11 +458,11 @@ export async function syncTrackedAutoCommentPosts(userId?: string) {
   const summaries: Array<{ userId: string; posts: TrackedPostSyncSummary[] }> = [];
   let totalFetchedComments = 0;
   let totalQueuedReplies = 0;
-  let totalRemovedPostIds = 0;
+  let totalScannedPosts = 0;
 
   for (const currentUserId of userIds) {
     const settings = await getAutoCommentSettings(currentUserId);
-    if (!settings.enabled || settings.postIds.length === 0) {
+    if (!settings.enabled || settings.pageIds.length === 0 || settings.replies.length === 0) {
       continue;
     }
 
@@ -488,43 +481,15 @@ export async function syncTrackedAutoCommentPosts(userId?: string) {
 
     const posts: TrackedPostSyncSummary[] = [];
 
-    for (const trackedPostId of settings.postIds) {
-      const pageId = derivePageIdFromPostId(trackedPostId);
-
-      if (!pageId) {
-        posts.push({
-          postId: trackedPostId,
-          pageId: "",
-          fetchedComments: 0,
-          queuedReplies: 0,
-          removedFromTracking: false,
-          status: "skipped",
-          reason: "invalid_post_id"
-        });
-        continue;
-      }
-
-      if (!settings.pageIds.includes(pageId)) {
-        posts.push({
-          postId: trackedPostId,
-          pageId,
-          fetchedComments: 0,
-          queuedReplies: 0,
-          removedFromTracking: false,
-          status: "skipped",
-          reason: "page_not_selected"
-        });
-        continue;
-      }
-
+    for (const pageId of settings.pageIds) {
       const page = connection.pages.find((item) => item.pageId === pageId);
       if (!page) {
         posts.push({
-          postId: trackedPostId,
+          scopeId: pageId,
           pageId,
+          scannedPosts: 0,
           fetchedComments: 0,
           queuedReplies: 0,
-          removedFromTracking: false,
           status: "skipped",
           reason: "missing_page_token"
         });
@@ -532,71 +497,81 @@ export async function syncTrackedAutoCommentPosts(userId?: string) {
       }
 
       try {
-        const comments = await fetchCommentsForFacebookPost({
-          postId: trackedPostId,
+        const recentPosts = await fetchRecentFacebookPostsWithComments({
+          pageId,
           pageAccessToken: page.pageAccessToken,
-          limit: 100
+          limit: 20
         });
 
+        let scannedPosts = 0;
         let fetchedComments = 0;
         let queuedReplies = 0;
 
-        for (const comment of comments) {
-          if (comment.senderId && comment.senderId === pageId) {
-            continue;
-          }
-
-          fetchedComments += 1;
-          const result = await ingestCommentAndMaybeQueue({
-            userId: currentUserId,
-            pageId,
-            authorName: comment.authorName,
-            message: comment.message,
-            senderId: comment.senderId,
-            postId: trackedPostId,
-            parentCommentId: comment.parentCommentId,
-            externalCommentId: comment.externalCommentId,
-            autoQueue: true,
-            rawPayload: {
-              source: "tracked-post-sync",
-              postId: trackedPostId,
-              syncedAt: new Date().toISOString(),
-              createdAt: comment.createdAt
-            }
+        for (const recentPost of recentPosts) {
+          scannedPosts += 1;
+          const comments = await fetchCommentsForFacebookPost({
+            postId: recentPost.postId,
+            pageAccessToken: page.pageAccessToken,
+            limit: 100
           });
 
-          if (result.queuedJobId) {
-            queuedReplies += 1;
+          for (const comment of comments) {
+            if (comment.senderId && comment.senderId === pageId) {
+              continue;
+            }
+
+            fetchedComments += 1;
+            const result = await ingestCommentAndMaybeQueue({
+              userId: currentUserId,
+              pageId,
+              authorName: comment.authorName,
+              message: comment.message,
+              senderId: comment.senderId,
+              postId: recentPost.postId,
+              parentCommentId: comment.parentCommentId,
+              externalCommentId: comment.externalCommentId,
+              autoQueue: true,
+              rawPayload: {
+                source: "page-comment-scan",
+                pageId,
+                postId: recentPost.postId,
+                syncedAt: new Date().toISOString(),
+                createdAt: comment.createdAt
+              }
+            });
+
+            if (result.queuedJobId) {
+              queuedReplies += 1;
+            }
           }
         }
 
-        const removedFromTracking = await finalizeTrackedPostIfComplete(currentUserId, trackedPostId);
+        totalScannedPosts += scannedPosts;
         totalFetchedComments += fetchedComments;
         totalQueuedReplies += queuedReplies;
-        totalRemovedPostIds += removedFromTracking ? 1 : 0;
 
         posts.push({
-          postId: trackedPostId,
+          scopeId: pageId,
           pageId,
+          scannedPosts,
           fetchedComments,
           queuedReplies,
-          removedFromTracking,
           status: "synced"
         });
       } catch (error) {
         await logAndNotifyError({
           userId: currentUserId,
-          message: `Auto Comment could not sync Facebook comments for post ${trackedPostId}`,
-          metadata: { source: "tracked-post-sync", pageId, postId: trackedPostId },
+          message: `Auto Comment could not scan Facebook posts for page ${pageId}`,
+          metadata: { source: "page-comment-scan", pageId },
           error
         });
 
         posts.push({
-          postId: trackedPostId,
+          scopeId: pageId,
           pageId,
+          scannedPosts: 0,
           fetchedComments: 0,
           queuedReplies: 0,
-          removedFromTracking: false,
           status: "error",
           reason: error instanceof Error ? error.message : "sync_failed"
         });
@@ -608,9 +583,9 @@ export async function syncTrackedAutoCommentPosts(userId?: string) {
 
   return {
     usersProcessed: summaries.length,
+    totalScannedPosts,
     totalFetchedComments,
     totalQueuedReplies,
-    totalRemovedPostIds,
     summaries
   };
 }
