@@ -16,6 +16,23 @@ type FacebookGraphErrorPayload = {
   };
 };
 
+type FacebookGraphPaging = {
+  next?: string;
+};
+
+type FacebookCommentNode = {
+  id?: string;
+  message?: string;
+  created_time?: string;
+  parent?: {
+    id?: string;
+  };
+  from?: {
+    id?: string;
+    name?: string;
+  };
+};
+
 export class FacebookPublishError extends Error {
   constructor(
     message: string,
@@ -314,4 +331,65 @@ export async function replyToFacebookComment(params: {
   }
 
   return response.json() as Promise<{ id: string }>;
+}
+
+export async function fetchCommentsForFacebookPost(params: {
+  postId: string;
+  pageAccessToken: string;
+  limit?: number;
+}) {
+  const maxItems = Math.max(1, Math.min(params.limit ?? 100, 500));
+  const comments: Array<{
+    externalCommentId: string;
+    message: string;
+    parentCommentId?: string;
+    senderId?: string;
+    authorName: string;
+    createdAt?: string;
+  }> = [];
+
+  let nextUrl: string | null = (() => {
+    const url = new URL(`https://graph.facebook.com/v21.0/${params.postId}/comments`);
+    url.searchParams.set("fields", "id,message,created_time,parent{id},from{id,name}");
+    url.searchParams.set("filter", "stream");
+    url.searchParams.set("limit", String(Math.min(maxItems, 100)));
+    url.searchParams.set("access_token", params.pageAccessToken);
+    return url.toString();
+  })();
+
+  while (nextUrl && comments.length < maxItems) {
+    const response = await fetchWithRetry(nextUrl, { cache: "no-store" });
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => ({}))) as FacebookGraphErrorPayload;
+      throw classifyFacebookPublishError(payload, "Failed to fetch Facebook comments");
+    }
+
+    const payload = (await response.json()) as {
+      data?: FacebookCommentNode[];
+      paging?: FacebookGraphPaging;
+    };
+
+    for (const item of payload.data ?? []) {
+      if (!item.id || !item.message?.trim()) {
+        continue;
+      }
+
+      comments.push({
+        externalCommentId: item.id,
+        message: item.message.trim(),
+        parentCommentId: item.parent?.id,
+        senderId: item.from?.id,
+        authorName: item.from?.name?.trim() || "Facebook user",
+        createdAt: item.created_time
+      });
+
+      if (comments.length >= maxItems) {
+        break;
+      }
+    }
+
+    nextUrl = payload.paging?.next ?? null;
+  }
+
+  return comments;
 }

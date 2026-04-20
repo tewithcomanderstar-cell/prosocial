@@ -2,13 +2,22 @@
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { AppIcon } from "@/components/app-icon";
-import { useI18n } from "@/components/language-provider";
 
-type CommentStatus = "pending" | "matched" | "received" | "queued" | "processing" | "replying" | "replied" | "failed" | "ignored";
+type CommentStatus =
+  | "pending"
+  | "matched"
+  | "received"
+  | "queued"
+  | "processing"
+  | "replying"
+  | "replied"
+  | "failed"
+  | "ignored";
 
 type CommentRecord = {
   _id: string;
   pageId: string;
+  postId?: string;
   authorName: string;
   message: string;
   status: CommentStatus;
@@ -25,6 +34,7 @@ type CommentRecord = {
 type AutoCommentConfig = {
   autoCommentEnabled: boolean;
   autoCommentPageIds: string[];
+  autoCommentPostIds: string[];
   autoCommentReplies: string[];
 };
 
@@ -33,156 +43,27 @@ type FacebookPage = {
   name: string;
 };
 
-type Copy = {
-  autoTitle: string;
-  autoHint: string;
-  autoToggle: string;
-  pagesTitle: string;
-  replyLibraryTitle: string;
-  replySlot: string;
-  save: string;
-  saving: string;
-  refresh: string;
-  refreshing: string;
-  inboxTitle: string;
-  inboxLoading: string;
-  inboxEmpty: string;
-  received: string;
-  queued: string;
-  replied: string;
-  failed: string;
-  page: string;
-  externalCommentId: string;
-  deliveryStatus: string;
-  receivedAt: string;
-  queuedAt: string;
-  lastAttemptAt: string;
-  repliedAt: string;
-  replyText: string;
-  attempts: string;
-  retryReply: string;
-  retrying: string;
-  statusLabel: Record<CommentStatus, string>;
-  progressNote: Record<CommentStatus, string>;
-};
-
 const AUTO_COMMENT_REPLY_SLOTS = 5;
-
-const copy: Record<"th" | "en", Copy> = {
-  th: {
-    autoTitle: "โหมดตอบกลับอัตโนมัติ",
-    autoHint: "เลือกเพจที่ต้องการเปิด Auto Reply และใส่คำตอบที่ระบบจะสุ่มไปตอบคอมเมนต์แบบเรียลไทม์",
-    autoToggle: "เปิดตอบกลับคอมเมนต์อัตโนมัติในสเตตัสสำหรับเพจที่เลือก",
-    pagesTitle: "เลือกเพจ Facebook",
-    replyLibraryTitle: "Reply library",
-    replySlot: "คำตอบ",
-    save: "บันทึกโหมดตอบกลับอัตโนมัติ",
-    saving: "กำลังบันทึก...",
-    refresh: "รีเฟรช",
-    refreshing: "กำลังรีเฟรช...",
-    inboxTitle: "Comment Inbox",
-    inboxLoading: "กำลังโหลดคอมเมนต์...",
-    inboxEmpty: "ยังไม่มีคอมเมนต์เข้า inbox",
-    received: "รับเข้าแล้ว",
-    queued: "เข้าคิวแล้ว",
-    replied: "ตอบแล้ว",
-    failed: "ล้มเหลว",
-    page: "เพจ",
-    externalCommentId: "Comment ID",
-    deliveryStatus: "สถานะการตอบกลับ",
-    receivedAt: "รับเข้า",
-    queuedAt: "เข้าคิว",
-    lastAttemptAt: "พยายามล่าสุด",
-    repliedAt: "ตอบแล้ว",
-    replyText: "ข้อความตอบกลับ",
-    attempts: "จำนวนครั้งที่ลอง",
-    retryReply: "ลองตอบใหม่",
-    retrying: "กำลังลองใหม่...",
-    statusLabel: {
-      pending: "รอรับเข้า",
-      matched: "เตรียมคำตอบแล้ว",
-      received: "รับเข้าแล้ว",
-      queued: "เข้าคิวแล้ว",
-      processing: "กำลังประมวลผล",
-      replying: "กำลังตอบกลับ",
-      replied: "ตอบแล้ว",
-      failed: "ล้มเหลว",
-      ignored: "ข้ามแล้ว"
-    },
-    progressNote: {
-      pending: "ระบบกำลังเตรียมงานตอบกลับ",
-      matched: "ระบบสุ่มคำตอบจาก Reply library แล้ว",
-      received: "ระบบรับคอมเมนต์เข้ามาแล้ว",
-      queued: "ระบบสร้างคิวตอบกลับเรียบร้อย",
-      processing: "ระบบกำลังประมวลผลคอมเมนต์นี้",
-      replying: "ระบบกำลังส่งคำตอบกลับไปที่ Facebook",
-      replied: "ตอบกลับสำเร็จแล้ว",
-      failed: "ตอบกลับไม่สำเร็จ ลองตรวจข้อความผิดพลาดแล้วกดตอบใหม่ได้",
-      ignored: "รายการนี้ถูกข้ามเพราะยังไม่พร้อมตอบกลับ"
-    }
-  },
-  en: {
-    autoTitle: "Auto Reply Mode",
-    autoHint: "Select the Facebook Pages that should auto-reply and fill in the reply library the system should randomize from in real time.",
-    autoToggle: "Enable automatic comment replies for the selected pages",
-    pagesTitle: "Select Facebook Pages",
-    replyLibraryTitle: "Reply library",
-    replySlot: "Reply",
-    save: "Save auto reply mode",
-    saving: "Saving...",
-    refresh: "Refresh",
-    refreshing: "Refreshing...",
-    inboxTitle: "Comment Inbox",
-    inboxLoading: "Loading comments...",
-    inboxEmpty: "No comments have reached the inbox yet.",
-    received: "Received",
-    queued: "Queued",
-    replied: "Replied",
-    failed: "Failed",
-    page: "Page",
-    externalCommentId: "Comment ID",
-    deliveryStatus: "Reply status",
-    receivedAt: "Received",
-    queuedAt: "Queued",
-    lastAttemptAt: "Last attempt",
-    repliedAt: "Replied",
-    replyText: "Reply text",
-    attempts: "Attempts",
-    retryReply: "Retry reply",
-    retrying: "Retrying...",
-    statusLabel: {
-      pending: "Pending",
-      matched: "Reply selected",
-      received: "Received",
-      queued: "Queued",
-      processing: "Processing",
-      replying: "Replying",
-      replied: "Replied",
-      failed: "Failed",
-      ignored: "Ignored"
-    },
-    progressNote: {
-      pending: "The system is preparing a reply job.",
-      matched: "A reply has been selected from the reply library.",
-      received: "The comment was received by the system.",
-      queued: "The reply job is queued.",
-      processing: "The system is processing this comment.",
-      replying: "The system is sending the reply to Facebook.",
-      replied: "The reply was sent successfully.",
-      failed: "The reply failed. Review the error and retry.",
-      ignored: "This item was skipped because auto reply is not ready."
-    }
-  }
-};
 
 function normalizeReplySlots(replies: string[]) {
   return Array.from({ length: AUTO_COMMENT_REPLY_SLOTS }, (_, index) => replies[index] ?? "");
 }
 
-function formatTimestamp(value: string | undefined, locale: "th-TH" | "en-US") {
+function normalizePostIds(postIds: string) {
+  return Array.from(
+    new Set(
+      postIds
+        .split(/\r?\n/)
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )
+  );
+}
+
+function formatTimestamp(value?: string) {
   if (!value) return "-";
 
-  return new Intl.DateTimeFormat(locale, {
+  return new Intl.DateTimeFormat("th-TH", {
     dateStyle: "medium",
     timeStyle: "short",
     timeZone: "Asia/Bangkok"
@@ -206,23 +87,73 @@ function statusTone(status: CommentStatus) {
   }
 }
 
-export function CommentAutomationPanel() {
-  const { language } = useI18n();
-  const locale = language === "th" ? "th-TH" : "en-US";
-  const text = copy[language];
+function statusLabel(status: CommentStatus) {
+  switch (status) {
+    case "pending":
+      return "รอรับเข้า";
+    case "matched":
+      return "เตรียมคำตอบแล้ว";
+    case "received":
+      return "รับเข้าแล้ว";
+    case "queued":
+      return "เข้าคิวแล้ว";
+    case "processing":
+      return "กำลังประมวลผล";
+    case "replying":
+      return "กำลังตอบกลับ";
+    case "replied":
+      return "ตอบแล้ว";
+    case "failed":
+      return "ล้มเหลว";
+    case "ignored":
+      return "ข้ามแล้ว";
+    default:
+      return status;
+  }
+}
 
+function progressNote(status: CommentStatus) {
+  switch (status) {
+    case "pending":
+      return "ระบบกำลังเตรียมรายการตอบกลับ";
+    case "matched":
+      return "เลือกคำตอบจาก Reply library แล้ว";
+    case "received":
+      return "ระบบดึงคอมเมนต์เข้ามาแล้ว";
+    case "queued":
+      return "รายการนี้เข้าแถวรอตอบแล้ว";
+    case "processing":
+      return "ระบบกำลังประมวลผลคอมเมนต์นี้";
+    case "replying":
+      return "ระบบกำลังส่งคำตอบกลับไปที่ Facebook";
+    case "replied":
+      return "ตอบคอมเมนต์สำเร็จแล้ว";
+    case "failed":
+      return "ตอบคอมเมนต์ไม่สำเร็จ สามารถลองใหม่ได้";
+    case "ignored":
+      return "รายการนี้ถูกข้าม";
+    default:
+      return "";
+  }
+}
+
+export function CommentAutomationPanel() {
   const [comments, setComments] = useState<CommentRecord[]>([]);
   const [pages, setPages] = useState<FacebookPage[]>([]);
   const [autoConfig, setAutoConfig] = useState<AutoCommentConfig>({
     autoCommentEnabled: false,
     autoCommentPageIds: [],
+    autoCommentPostIds: [],
     autoCommentReplies: normalizeReplySlots([])
   });
+  const [postIdsInput, setPostIdsInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [savingAutoConfig, setSavingAutoConfig] = useState(false);
+  const [syncingNow, setSyncingNow] = useState(false);
   const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const commentSummary = useMemo(
     () => ({
@@ -255,19 +186,21 @@ export function CommentAutomationPanel() {
         autoConfigResponse.json()
       ]);
 
-      if (!commentsResponse.ok) throw new Error(commentsPayload.message || "Unable to load comments");
-      if (!pagesResponse.ok) throw new Error(pagesPayload.message || "Unable to load Facebook pages");
-      if (!autoConfigResponse.ok) throw new Error(autoConfigPayload.message || "Unable to load auto comment config");
+      if (!commentsResponse.ok) throw new Error(commentsPayload.message || "โหลด Comment Inbox ไม่สำเร็จ");
+      if (!pagesResponse.ok) throw new Error(pagesPayload.message || "โหลดรายชื่อเพจไม่สำเร็จ");
+      if (!autoConfigResponse.ok) throw new Error(autoConfigPayload.message || "โหลดการตั้งค่า Auto Comment ไม่สำเร็จ");
 
       setComments(commentsPayload.data?.comments ?? []);
       setPages(pagesPayload.data?.pages ?? []);
       setAutoConfig({
         autoCommentEnabled: Boolean(autoConfigPayload.data?.autoCommentEnabled),
         autoCommentPageIds: autoConfigPayload.data?.autoCommentPageIds ?? [],
+        autoCommentPostIds: autoConfigPayload.data?.autoCommentPostIds ?? [],
         autoCommentReplies: normalizeReplySlots(autoConfigPayload.data?.autoCommentReplies ?? [])
       });
+      setPostIdsInput((autoConfigPayload.data?.autoCommentPostIds ?? []).join("\n"));
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Unable to load Auto Comment data");
+      setError(loadError instanceof Error ? loadError.message : "โหลด Auto Comment ไม่สำเร็จ");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -307,6 +240,7 @@ export function CommentAutomationPanel() {
     event.preventDefault();
     setSavingAutoConfig(true);
     setError(null);
+    setSuccessMessage(null);
 
     try {
       const response = await fetch("/api/comments/config", {
@@ -316,22 +250,52 @@ export function CommentAutomationPanel() {
         body: JSON.stringify({
           autoCommentEnabled: autoConfig.autoCommentEnabled,
           autoCommentPageIds: autoConfig.autoCommentPageIds,
+          autoCommentPostIds: normalizePostIds(postIdsInput),
           autoCommentReplies: autoConfig.autoCommentReplies.map((item) => item.trim()).filter(Boolean)
         })
       });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.message || "Unable to save auto comment config");
+      if (!response.ok) throw new Error(result.message || "บันทึกการตั้งค่า Auto Comment ไม่สำเร็จ");
+      setSuccessMessage("บันทึกโหมดตอบคอมเมนต์อัตโนมัติแล้ว");
       await loadData(true);
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Unable to save auto comment config");
+      setError(saveError instanceof Error ? saveError.message : "บันทึกการตั้งค่า Auto Comment ไม่สำเร็จ");
     } finally {
       setSavingAutoConfig(false);
+    }
+  }
+
+  async function handleSyncNow() {
+    setSyncingNow(true);
+    setError(null);
+    setSuccessMessage(null);
+
+    try {
+      const response = await fetch("/api/comments/sync", {
+        method: "POST",
+        credentials: "include"
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.message || "ดึงคอมเมนต์จาก post_id ไม่สำเร็จ");
+      }
+
+      const fetched = Number(result.data?.totalFetchedComments ?? 0);
+      const queued = Number(result.data?.totalQueuedReplies ?? 0);
+      const removed = Number(result.data?.totalRemovedPostIds ?? 0);
+      setSuccessMessage(`ดึงคอมเมนต์แล้ว ${fetched} รายการ, เข้าคิวตอบ ${queued} รายการ, ปิดงาน post_id ${removed} รายการ`);
+      await loadData(true);
+    } catch (syncError) {
+      setError(syncError instanceof Error ? syncError.message : "ดึงคอมเมนต์จาก post_id ไม่สำเร็จ");
+    } finally {
+      setSyncingNow(false);
     }
   }
 
   async function handleRetry(commentId: string) {
     setRetryingId(commentId);
     setError(null);
+    setSuccessMessage(null);
 
     try {
       const response = await fetch(`/api/comments/${commentId}/retry`, {
@@ -339,10 +303,11 @@ export function CommentAutomationPanel() {
         credentials: "include"
       });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.message || "Unable to retry comment reply");
+      if (!response.ok) throw new Error(result.message || "ลองตอบคอมเมนต์ใหม่ไม่สำเร็จ");
+      setSuccessMessage("ส่งรายการกลับเข้าคิวตอบคอมเมนต์แล้ว");
       await loadData(true);
     } catch (retryError) {
-      setError(retryError instanceof Error ? retryError.message : "Unable to retry comment reply");
+      setError(retryError instanceof Error ? retryError.message : "ลองตอบคอมเมนต์ใหม่ไม่สำเร็จ");
     } finally {
       setRetryingId(null);
     }
@@ -354,12 +319,18 @@ export function CommentAutomationPanel() {
         <div className="section-head">
           <div className="section-title-wrap">
             <AppIcon name="integrations" className="section-icon" />
-            <h2>{text.autoTitle}</h2>
+            <h2>โหมดตอบกลับอัตโนมัติ</h2>
           </div>
+          <button type="button" className="button-secondary" onClick={() => void handleSyncNow()} disabled={syncingNow}>
+            {syncingNow ? "กำลังดึงคอมเมนต์..." : "ดึงคอมเมนต์ตอนนี้"}
+          </button>
         </div>
 
         <form className="stack" onSubmit={handleSaveAutoConfig}>
-          <p style={{ margin: 0, color: "var(--muted)" }}>{text.autoHint}</p>
+          <p style={{ margin: 0, color: "var(--muted)" }}>
+            ระบบจะใช้ <strong>post_id</strong> ที่คุณใส่ไว้เป็นตัวดึงคอมเมนต์จาก Facebook จากนั้นจะบันทึกลง inbox
+            และไล่ตอบทีละคอมเมนต์จนจบงานของโพสต์นั้น
+          </p>
 
           <label style={{ display: "flex", gap: 12, alignItems: "center", fontWeight: 700 }}>
             <input
@@ -367,11 +338,11 @@ export function CommentAutomationPanel() {
               checked={autoConfig.autoCommentEnabled}
               onChange={(event) => setAutoConfig((current) => ({ ...current, autoCommentEnabled: event.target.checked }))}
             />
-            <span>{text.autoToggle}</span>
+            <span>เปิดโหมดตอบคอมเมนต์อัตโนมัติสำหรับเพจที่เลือก</span>
           </label>
 
           <div className="stack">
-            <strong>{text.pagesTitle}</strong>
+            <strong>เลือกเพจ Facebook</strong>
             <div className="chip-grid">
               {pages.map((page) => {
                 const active = autoConfig.autoCommentPageIds.includes(page.pageId);
@@ -390,7 +361,22 @@ export function CommentAutomationPanel() {
           </div>
 
           <label className="label">
-            <span>{text.replyLibraryTitle}</span>
+            <span>Post ID ที่ต้องการติดตาม</span>
+            <textarea
+              className="input"
+              rows={5}
+              value={postIdsInput}
+              onChange={(event) => setPostIdsInput(event.target.value)}
+              placeholder={"ใส่ post_id ทีละ 1 บรรทัด\nตัวอย่าง: 123456789012345_987654321098765"}
+            />
+            <small style={{ color: "var(--muted)" }}>
+              ใส่ 1 post_id ต่อ 1 บรรทัด ระบบจะดึงคอมเมนต์จากโพสต์เหล่านี้ทุกครั้งที่รอบ sync ทำงาน และจะถอด post_id
+              ออกจากระบบเมื่อคอมเมนต์ของโพสต์นั้นตอบครบแล้ว
+            </small>
+          </label>
+
+          <label className="label">
+            <span>Reply library</span>
             <div className="stack">
               {normalizeReplySlots(autoConfig.autoCommentReplies).map((value, index) => (
                 <input
@@ -398,14 +384,14 @@ export function CommentAutomationPanel() {
                   className="input"
                   value={value}
                   onChange={(event) => updateAutoReplySlot(index, event.target.value)}
-                  placeholder={`${text.replySlot} ${index + 1}`}
+                  placeholder={`คำตอบ ${index + 1}`}
                 />
               ))}
             </div>
           </label>
 
           <button type="submit" className="button" disabled={savingAutoConfig}>
-            {savingAutoConfig ? text.saving : text.save}
+            {savingAutoConfig ? "กำลังบันทึก..." : "บันทึกโหมดตอบกลับอัตโนมัติ"}
           </button>
         </form>
       </section>
@@ -416,56 +402,63 @@ export function CommentAutomationPanel() {
         </div>
       ) : null}
 
+      {successMessage ? (
+        <div className="card" style={{ borderColor: "rgba(34,197,94,.25)", color: "#166534" }}>
+          {successMessage}
+        </div>
+      ) : null}
+
       <section className="card section-card">
         <div className="section-head">
           <div className="section-title-wrap">
             <AppIcon name="bulk" className="section-icon" />
-            <h2>{text.inboxTitle}</h2>
+            <h2>Comment Inbox</h2>
           </div>
           <button type="button" className="button-secondary" onClick={() => void loadData(true)} disabled={refreshing}>
-            {refreshing ? text.refreshing : text.refresh}
+            {refreshing ? "กำลังรีเฟรช..." : "รีเฟรช"}
           </button>
         </div>
 
         <div className="chip-grid">
-          <span className="choice-chip active">{text.received} {commentSummary.received}</span>
-          <span className="choice-chip active">{text.queued} {commentSummary.queued}</span>
-          <span className="choice-chip active">{text.replied} {commentSummary.replied}</span>
-          <span className="choice-chip active">{text.failed} {commentSummary.failed}</span>
+          <span className="choice-chip active">รับเข้าแล้ว {commentSummary.received}</span>
+          <span className="choice-chip active">เข้าคิวแล้ว {commentSummary.queued}</span>
+          <span className="choice-chip active">ตอบแล้ว {commentSummary.replied}</span>
+          <span className="choice-chip active">ล้มเหลว {commentSummary.failed}</span>
         </div>
 
         <div className="stack">
-          {loading ? <p>{text.inboxLoading}</p> : null}
-          {!loading && comments.length === 0 ? <p>{text.inboxEmpty}</p> : null}
+          {loading ? <p>กำลังโหลดคอมเมนต์...</p> : null}
+          {!loading && comments.length === 0 ? <p>ยังไม่มีคอมเมนต์เข้า inbox</p> : null}
           {!loading
             ? comments.map((comment) => (
                 <article key={comment._id} className="card" style={{ padding: 16, gap: 10, display: "grid" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
                     <strong>{comment.authorName}</strong>
-                    <span className={`badge badge-${statusTone(comment.status)}`}>{text.statusLabel[comment.status]}</span>
+                    <span className={`badge badge-${statusTone(comment.status)}`}>{statusLabel(comment.status)}</span>
                   </div>
 
                   <div style={{ color: "#475569", display: "grid", gap: 4 }}>
-                    <div>{text.page}: {comment.pageId}</div>
-                    <div>{text.externalCommentId}: {comment.externalCommentId || "-"}</div>
+                    <div>เพจ: {comment.pageId}</div>
+                    <div>Post ID: {comment.postId || "-"}</div>
+                    <div>Comment ID: {comment.externalCommentId || "-"}</div>
                   </div>
 
                   <p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{comment.message}</p>
 
                   <div className="card" style={{ padding: 12, background: "rgba(59,130,246,.05)" }}>
-                    <strong style={{ display: "block", marginBottom: 6 }}>{text.deliveryStatus}</strong>
-                    <div style={{ color: "#475569", marginBottom: 8 }}>{text.progressNote[comment.status]}</div>
+                    <strong style={{ display: "block", marginBottom: 6 }}>สถานะการตอบกลับ</strong>
+                    <div style={{ color: "#475569", marginBottom: 8 }}>{progressNote(comment.status)}</div>
                     <div style={{ display: "grid", gap: 4, color: "#64748b", fontSize: 13 }}>
-                      <div>{text.receivedAt}: {formatTimestamp(comment.createdAt, locale)}</div>
-                      <div>{text.queuedAt}: {formatTimestamp(comment.queuedAt, locale)}</div>
-                      <div>{text.lastAttemptAt}: {formatTimestamp(comment.lastAttemptAt, locale)}</div>
-                      <div>{text.repliedAt}: {formatTimestamp(comment.repliedAt, locale)}</div>
+                      <div>รับเข้า: {formatTimestamp(comment.createdAt)}</div>
+                      <div>เข้าคิว: {formatTimestamp(comment.queuedAt)}</div>
+                      <div>พยายามล่าสุด: {formatTimestamp(comment.lastAttemptAt)}</div>
+                      <div>ตอบแล้ว: {formatTimestamp(comment.repliedAt)}</div>
                     </div>
                   </div>
 
                   {comment.replyText ? (
                     <div>
-                      <div style={{ fontSize: 13, color: "#64748b", marginBottom: 6 }}>{text.replyText}</div>
+                      <div style={{ fontSize: 13, color: "#64748b", marginBottom: 6 }}>ข้อความตอบกลับ</div>
                       <p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{comment.replyText}</p>
                     </div>
                   ) : null}
@@ -473,7 +466,7 @@ export function CommentAutomationPanel() {
                   {comment.replyError ? <div style={{ color: "#b91c1c" }}>{comment.replyError}</div> : null}
 
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
-                    <small style={{ color: "#64748b" }}>{text.attempts}: {comment.replyAttempts ?? 0}</small>
+                    <small style={{ color: "#64748b" }}>จำนวนครั้งที่ลอง: {comment.replyAttempts ?? 0}</small>
                     {comment.status === "failed" && comment.replyText && comment.externalCommentId ? (
                       <button
                         type="button"
@@ -481,7 +474,7 @@ export function CommentAutomationPanel() {
                         disabled={retryingId === comment._id}
                         onClick={() => void handleRetry(comment._id)}
                       >
-                        {retryingId === comment._id ? text.retrying : text.retryReply}
+                        {retryingId === comment._id ? "กำลังลองใหม่..." : "ลองตอบใหม่"}
                       </button>
                     ) : null}
                   </div>

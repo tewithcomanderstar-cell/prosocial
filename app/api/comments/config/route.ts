@@ -6,6 +6,7 @@ import { PostingSettings } from "@/models/PostingSettings";
 const schema = z.object({
   autoCommentEnabled: z.boolean(),
   autoCommentPageIds: z.array(z.string()).default([]),
+  autoCommentPostIds: z.array(z.string()).default([]),
   autoCommentReplies: z.array(z.string()).default([])
 });
 
@@ -19,12 +20,14 @@ export async function GET() {
     ).lean<{
       autoCommentEnabled?: boolean;
       autoCommentPageIds?: string[];
+      autoCommentPostIds?: string[];
       autoCommentReplies?: string[];
     } | null>();
 
     return jsonOk({
       autoCommentEnabled: Boolean(settings?.autoCommentEnabled),
       autoCommentPageIds: (settings?.autoCommentPageIds ?? []).filter(Boolean),
+      autoCommentPostIds: (settings?.autoCommentPostIds ?? []).map((item) => item.trim()).filter(Boolean),
       autoCommentReplies: (settings?.autoCommentReplies ?? []).map((item) => item.trim()).filter(Boolean)
     });
   } catch (error) {
@@ -43,6 +46,7 @@ export async function POST(request: Request) {
         $set: {
           autoCommentEnabled: payload.autoCommentEnabled,
           autoCommentPageIds: (payload.autoCommentPageIds ?? []).filter(Boolean),
+          autoCommentPostIds: Array.from(new Set((payload.autoCommentPostIds ?? []).map((item) => item.trim()).filter(Boolean))),
           autoCommentReplies: (payload.autoCommentReplies ?? []).map((item) => item.trim()).filter(Boolean)
         }
       },

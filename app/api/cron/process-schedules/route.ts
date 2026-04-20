@@ -1,6 +1,7 @@
 import { connectDb } from "@/lib/db";
 import { jsonError, jsonOk } from "@/lib/api";
 import { processDueAutoPosts } from "@/lib/services/auto-post";
+import { syncTrackedAutoCommentPosts } from "@/lib/services/comment-automation";
 import { processQueuedJobs } from "@/lib/services/queue";
 import { queueDueSchedules } from "@/lib/services/scheduler";
 import { runPlatformScheduler } from "@/src/jobs/schedulers/run-platform-scheduler";
@@ -34,15 +35,17 @@ export async function GET(request: Request) {
     }
 
     await connectDb();
-    const [scheduledQueued, autoPostsQueued] = await Promise.all([
+    const [scheduledQueued, autoPostsQueued, syncedComments] = await Promise.all([
       queueDueSchedules(),
-      processDueAutoPosts()
+      processDueAutoPosts(),
+      syncTrackedAutoCommentPosts()
     ]);
     const processedJobs = inlinePublisherEnabled ? await processQueuedJobs(inlineBatchSize) : [];
     console.info("[SCHEDULER] completed", {
       correlationId,
       scheduledQueued,
       autoPostsQueued,
+      syncedComments,
       processedJobs: processedJobs.length,
       durationMs: Date.now() - startedAt
     });
@@ -51,6 +54,7 @@ export async function GET(request: Request) {
       {
         scheduledQueued,
         autoPostsQueued,
+        syncedComments,
         processedJobs,
         schedulerEngine,
         inlinePublisherEnabled,

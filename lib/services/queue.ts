@@ -5,7 +5,7 @@ import { Job } from "@/models/Job";
 import { MediaCache } from "@/models/MediaCache";
 import { Post } from "@/models/Post";
 import { Schedule } from "@/models/Schedule";
-import { notifyCommentFailure } from "@/lib/services/comment-automation";
+import { finalizeTrackedPostIfComplete, notifyCommentFailure } from "@/lib/services/comment-automation";
 import { logCommentStage } from "@/lib/services/comment-logging";
 import { updateAutoPostRecords } from "@/lib/services/automation-records";
 import { FacebookPublishError, publishPostToFacebook, replyToFacebookComment } from "@/lib/services/facebook";
@@ -94,6 +94,7 @@ type JobType = "post" | "comment-reply";
 type LeanCommentInbox = {
   _id: string;
   pageId: string;
+  postId?: string;
   externalCommentId?: string;
   replyText?: string;
   replyExternalId?: string | null;
@@ -845,6 +846,10 @@ async function executeCommentReplyJob(job: JobExecution) {
       correlationId: job.correlationId
     }
   });
+
+  if (comment.postId) {
+    await finalizeTrackedPostIfComplete(job.userId, comment.postId);
+  }
 
   return { status: "success" };
 }

@@ -2,6 +2,8 @@ import { randomUUID } from "crypto";
 import { connectDb } from "@/lib/db";
 import { createNotification, logAction, logAndNotifyError } from "@/lib/services/logging";
 import { logCommentStage } from "@/lib/services/comment-logging";
+import { fetchCommentsForFacebookPost } from "@/lib/services/facebook";
+import { getStoredFacebookConnection } from "@/lib/services/integration-auth";
 import { Job } from "@/models/Job";
 import { CommentInbox } from "@/models/CommentInbox";
 import { FacebookConnection } from "@/models/FacebookConnection";
@@ -61,6 +63,30 @@ type IngestParams = {
   correlationId?: string;
 };
 
+type AutoCommentSettings = {
+  enabled: boolean;
+  pageIds: string[];
+  postIds: string[];
+  replies: string[];
+};
+
+type LeanFacebookConnection = {
+  pages: Array<{
+    pageId: string;
+    pageAccessToken: string;
+  }>;
+};
+
+type TrackedPostSyncSummary = {
+  postId: string;
+  pageId: string;
+  fetchedComments: number;
+  queuedReplies: number;
+  removedFromTracking: boolean;
+  status: "synced" | "skipped" | "error";
+  reason?: string;
+};
+
 function normalizeText(input: string) {
   return input.trim().toLowerCase();
 }
@@ -81,19 +107,37 @@ async function getAutoCommentSettings(userId: string) {
   ).lean<{
     autoCommentEnabled?: boolean;
     autoCommentPageIds?: string[];
+    autoCommentPostIds?: string[];
     autoCommentReplies?: string[];
   } | null>();
 
   return {
     enabled: Boolean(settings?.autoCommentEnabled),
     pageIds: (settings?.autoCommentPageIds ?? []).filter(Boolean),
+    postIds: (settings?.autoCommentPostIds ?? []).map((item) => item.trim()).filter(Boolean),
     replies: (settings?.autoCommentReplies ?? []).map((item) => item.trim()).filter(Boolean)
-  };
+  } satisfies AutoCommentSettings;
 }
 
 async function findUserIdByPageId(pageId: string) {
   const connection = await FacebookConnection.findOne({ "pages.pageId": pageId }).lean<{ userId: string } | null>();
   return connection?.userId ? String(connection.userId) : null;
+}
+
+function derivePageIdFromPostId(postId: string) {
+  const [pageId] = postId.split("_");
+  return pageId?.trim() || null;
+}
+
+async function listTrackedAutoCommentUsers() {
+  const settings = await PostingSettings.find({
+    autoCommentEnabled: true,
+    autoCommentPostIds: { $exists: true, $ne: [] }
+  })
+    .select({ userId: 1 })
+    .lean<Array<{ userId: string }>>();
+
+  return settings.map((item) => String(item.userId));
 }
 
 async function computeCommentReplyRunAt(userId: string, pageId: string) {
@@ -384,6 +428,191 @@ export async function retryCommentReply(userId: string, commentInboxId: string) 
   });
 
   return { jobId: enqueueResult.jobId };
+}
+
+export async function finalizeTrackedPostIfComplete(userId: string, postId: string) {
+  await connectDb();
+
+  const blockingStatuses = ["pending", "matched", "received", "queued", "processing", "replying", "failed"];
+  const blockingCount = await CommentInbox.countDocuments({
+    userId,
+    postId,
+    status: { $in: blockingStatuses }
+  });
+
+  if (blockingCount > 0) {
+    return false;
+  }
+
+  const terminalCount = await CommentInbox.countDocuments({
+    userId,
+    postId,
+    status: { $in: ["replied", "ignored"] }
+  });
+
+  if (terminalCount === 0) {
+    return false;
+  }
+
+  const result = await PostingSettings.updateOne({ userId }, { $pull: { autoCommentPostIds: postId } });
+  return result.modifiedCount > 0;
+}
+
+export async function syncTrackedAutoCommentPosts(userId?: string) {
+  await connectDb();
+
+  const userIds = userId ? [userId] : await listTrackedAutoCommentUsers();
+  const summaries: Array<{ userId: string; posts: TrackedPostSyncSummary[] }> = [];
+  let totalFetchedComments = 0;
+  let totalQueuedReplies = 0;
+  let totalRemovedPostIds = 0;
+
+  for (const currentUserId of userIds) {
+    const settings = await getAutoCommentSettings(currentUserId);
+    if (!settings.enabled || settings.postIds.length === 0) {
+      continue;
+    }
+
+    let connection: LeanFacebookConnection;
+    try {
+      connection = (await getStoredFacebookConnection(currentUserId)) as LeanFacebookConnection;
+    } catch (error) {
+      await logAndNotifyError({
+        userId: currentUserId,
+        message: "Auto Comment could not load the stored Facebook connection for tracked posts",
+        metadata: { source: "tracked-post-sync" },
+        error
+      });
+      continue;
+    }
+
+    const posts: TrackedPostSyncSummary[] = [];
+
+    for (const trackedPostId of settings.postIds) {
+      const pageId = derivePageIdFromPostId(trackedPostId);
+
+      if (!pageId) {
+        posts.push({
+          postId: trackedPostId,
+          pageId: "",
+          fetchedComments: 0,
+          queuedReplies: 0,
+          removedFromTracking: false,
+          status: "skipped",
+          reason: "invalid_post_id"
+        });
+        continue;
+      }
+
+      if (!settings.pageIds.includes(pageId)) {
+        posts.push({
+          postId: trackedPostId,
+          pageId,
+          fetchedComments: 0,
+          queuedReplies: 0,
+          removedFromTracking: false,
+          status: "skipped",
+          reason: "page_not_selected"
+        });
+        continue;
+      }
+
+      const page = connection.pages.find((item) => item.pageId === pageId);
+      if (!page) {
+        posts.push({
+          postId: trackedPostId,
+          pageId,
+          fetchedComments: 0,
+          queuedReplies: 0,
+          removedFromTracking: false,
+          status: "skipped",
+          reason: "missing_page_token"
+        });
+        continue;
+      }
+
+      try {
+        const comments = await fetchCommentsForFacebookPost({
+          postId: trackedPostId,
+          pageAccessToken: page.pageAccessToken,
+          limit: 100
+        });
+
+        let fetchedComments = 0;
+        let queuedReplies = 0;
+
+        for (const comment of comments) {
+          if (comment.senderId && comment.senderId === pageId) {
+            continue;
+          }
+
+          fetchedComments += 1;
+          const result = await ingestCommentAndMaybeQueue({
+            userId: currentUserId,
+            pageId,
+            authorName: comment.authorName,
+            message: comment.message,
+            senderId: comment.senderId,
+            postId: trackedPostId,
+            parentCommentId: comment.parentCommentId,
+            externalCommentId: comment.externalCommentId,
+            autoQueue: true,
+            rawPayload: {
+              source: "tracked-post-sync",
+              postId: trackedPostId,
+              syncedAt: new Date().toISOString(),
+              createdAt: comment.createdAt
+            }
+          });
+
+          if (result.queuedJobId) {
+            queuedReplies += 1;
+          }
+        }
+
+        const removedFromTracking = await finalizeTrackedPostIfComplete(currentUserId, trackedPostId);
+        totalFetchedComments += fetchedComments;
+        totalQueuedReplies += queuedReplies;
+        totalRemovedPostIds += removedFromTracking ? 1 : 0;
+
+        posts.push({
+          postId: trackedPostId,
+          pageId,
+          fetchedComments,
+          queuedReplies,
+          removedFromTracking,
+          status: "synced"
+        });
+      } catch (error) {
+        await logAndNotifyError({
+          userId: currentUserId,
+          message: `Auto Comment could not sync Facebook comments for post ${trackedPostId}`,
+          metadata: { source: "tracked-post-sync", pageId, postId: trackedPostId },
+          error
+        });
+
+        posts.push({
+          postId: trackedPostId,
+          pageId,
+          fetchedComments: 0,
+          queuedReplies: 0,
+          removedFromTracking: false,
+          status: "error",
+          reason: error instanceof Error ? error.message : "sync_failed"
+        });
+      }
+    }
+
+    summaries.push({ userId: currentUserId, posts });
+  }
+
+  return {
+    usersProcessed: summaries.length,
+    totalFetchedComments,
+    totalQueuedReplies,
+    totalRemovedPostIds,
+    summaries
+  };
 }
 
 export async function notifyCommentFailure(params: {
