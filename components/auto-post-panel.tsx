@@ -4,6 +4,8 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 type AutoPostStatus = "idle" | "running" | "posting" | "success" | "failed" | "retrying" | "paused" | "waiting";
 type CaptionStrategy = "manual" | "ai" | "hybrid";
+type AutomationMode = "standard" | "multi-image-ai";
+type MultiImageCountMode = "4" | "5" | "6-10";
 
 type AutoPostConfig = {
   enabled: boolean;
@@ -12,6 +14,8 @@ type AutoPostConfig = {
   targetPageIds: string[];
   intervalMinutes: number;
   captionStrategy: CaptionStrategy;
+  automationMode: AutomationMode;
+  multiImageCountMode: MultiImageCountMode;
   captions: string[];
   hashtags: string[];
   aiPrompt: string;
@@ -57,6 +61,8 @@ const defaults: AutoPostConfig = {
   targetPageIds: [],
   intervalMinutes: 60,
   captionStrategy: "hybrid",
+  automationMode: "standard",
+  multiImageCountMode: "4",
   captions: [],
   hashtags: [],
   aiPrompt: "",
@@ -446,11 +452,41 @@ export function AutoPostPanel() {
         </div>
 
         <label className="label">
+          Automation Mode
+          <select
+            className="select"
+            value={config.automationMode}
+            onChange={(event) => setConfig((current) => ({ ...current, automationMode: event.target.value as AutomationMode }))}
+          >
+            <option value="standard">Auto Post ปกติ</option>
+            <option value="multi-image-ai">โหมดหลายภาพ AI</option>
+          </select>
+        </label>
+
+        {config.automationMode === "multi-image-ai" ? (
+          <label className="label">
+            รูปต่อโพสต์
+            <select
+              className="select"
+              value={config.multiImageCountMode}
+              onChange={(event) =>
+                setConfig((current) => ({ ...current, multiImageCountMode: event.target.value as MultiImageCountMode }))
+              }
+            >
+              <option value="4">โพส 4 ภาพ</option>
+              <option value="5">โพส 5 ภาพ</option>
+              <option value="6-10">โพส 6-10 ภาพ</option>
+            </select>
+          </label>
+        ) : null}
+
+        <label className="label">
           Caption Mode
           <select
             className="select"
             value={config.captionStrategy}
             onChange={(event) => setConfig((current) => ({ ...current, captionStrategy: event.target.value as CaptionStrategy }))}
+            disabled={config.automationMode === "multi-image-ai"}
           >
             <option value="manual">Manual</option>
             <option value="hybrid">Manual + AI</option>
@@ -489,6 +525,14 @@ export function AutoPostPanel() {
         </label>
 
         <div className="muted">Unique image assignment per page is handled by the in-app automation engine for each run.</div>
+        {config.automationMode === "multi-image-ai" ? (
+          <div className="muted">
+            โหมดหลายภาพ AI จะสุ่มภาพที่มีธีมใกล้กันจากโฟลเดอร์, จับแกนหลักของภาพ และคิดแคปชั่นใหม่ให้เองโดยไม่ใช้ Caption Mode ปกติ
+          </div>
+        ) : null}
+        {config.automationMode === "multi-image-ai" ? (
+          <div className="muted">ระบบจะพยายามใช้ภาพให้หมดก่อน, ไม่ซ้ำในวันเดียวกัน และกันภาพเดิมซ้ำภายใน 24 ชั่วโมงเท่าที่จำนวนภาพเอื้ออำนวย</div>
+        ) : null}
         {config.captionStrategy === "ai" ? (
           <div className="muted">AI only extracts visible text from each image as-is and does not rewrite the caption.</div>
         ) : null}

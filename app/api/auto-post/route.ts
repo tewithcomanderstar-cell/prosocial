@@ -52,6 +52,8 @@ const schema = z.object({
   targetPageIds: z.array(z.string()).max(100, "Select up to 100 Facebook pages").default([]),
   intervalMinutes: intervalSchema.default(60),
   captionStrategy: z.enum(["manual", "ai", "hybrid"]),
+  automationMode: z.enum(["standard", "multi-image-ai"]).default("standard"),
+  multiImageCountMode: z.enum(["4", "5", "6-10"]).default("4"),
   captions: z.array(z.string()).default([]),
   hashtags: z.array(z.string()).default([]),
   aiPrompt: z.string().default(""),
@@ -146,13 +148,15 @@ export async function POST(request: Request) {
         folderId: normalizedFolderId,
         targetPageCount: (payload.targetPageIds ?? []).length,
         intervalMinutes: payload.intervalMinutes,
+        automationMode: payload.automationMode,
+        multiImageCountMode: payload.multiImageCountMode,
         captionStrategy: payload.captionStrategy,
         hashtagCount: (payload.hashtags ?? []).length,
         postingWindowStart: payload.postingWindowStart,
         postingWindowEnd: payload.postingWindowEnd,
         autoPostStatus,
         maxTargetPages: 100,
-        imageAssignmentMode: "unique-per-page"
+        imageAssignmentMode: payload.automationMode === "multi-image-ai" ? "similar-image-cluster" : "unique-per-page"
       }
     });
 

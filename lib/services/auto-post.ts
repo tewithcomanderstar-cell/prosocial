@@ -25,6 +25,8 @@ type LeanAutoPostConfig = {
   maxPostsPerDay?: number;
   maxPostsPerPagePerDay?: number;
   captionStrategy: "manual" | "ai" | "hybrid";
+  automationMode?: "standard" | "multi-image-ai";
+  multiImageCountMode?: "4" | "5" | "6-10";
   captions: string[];
   hashtags?: string[];
   aiPrompt?: string;
@@ -36,6 +38,7 @@ type LeanAutoPostConfig = {
   usedImageIds?: string[];
   dailyImageUsageDate?: string | null;
   dailyUsedImageIds?: string[];
+  recentImageUsage?: Array<{ imageId: string; usedAt: Date | string }>;
 };
 
 type LeanDriveConnection = {
@@ -46,6 +49,11 @@ type DriveImage = {
   id: string;
   name: string;
   mimeType?: string;
+};
+
+type RecentImageUsageEntry = {
+  imageId: string;
+  usedAt: Date;
 };
 
 type AutoPostRunSource = "manual-start" | "schedule";
@@ -208,6 +216,89 @@ function randomizeOrder<T>(items: T[]) {
   return copy;
 }
 
+function stripNumericSuffix(value: string) {
+  return value
+    .replace(/[\s_-]*\(\d+\)$/g, "")
+    .replace(/[\s_-]*\d+$/g, "")
+    .replace(/[\s_-]+$/g, "")
+    .trim();
+}
+
+function normalizeImageClusterKey(name: string) {
+  const base = stripNumericSuffix(stripFileExtension(name).toLowerCase());
+  return base
+    .replace(/\s+/g, " ")
+    .replace(/[^a-z0-9ก-๙ ]+/g, " ")
+    .trim();
+}
+
+function pruneRecentImageUsage(history: Array<{ imageId: string; usedAt: Date | string }> = [], now = new Date()) {
+  const threshold = now.getTime() - 24 * 60 * 60 * 1000;
+  return history
+    .map((entry) => ({
+      imageId: entry.imageId,
+      usedAt: entry.usedAt instanceof Date ? entry.usedAt : new Date(entry.usedAt)
+    }))
+    .filter((entry) => !Number.isNaN(entry.usedAt.getTime()) && entry.usedAt.getTime() > threshold);
+}
+
+function getAvailableImagesForCycle(
+  images: DriveImage[],
+  currentDayKey: string,
+  persistedDayKey?: string | null,
+  dailyUsedImageIds: string[] = [],
+  recentImageUsage: Array<{ imageId: string; usedAt: Date | string }> = []
+) {
+  const activeDailyUsedImageIds = persistedDayKey === currentDayKey ? dailyUsedImageIds : [];
+  const prunedRecentUsage = pruneRecentImageUsage(recentImageUsage);
+  const blockedIds = new Set<string>([
+    ...activeDailyUsedImageIds,
+    ...prunedRecentUsage.map((entry) => entry.imageId)
+  ]);
+
+  return {
+    availableImages: randomizeOrder(images.filter((image) => !blockedIds.has(image.id))),
+    activeDailyUsedImageIds,
+    prunedRecentUsage
+  };
+}
+
+function getMultiImageTargetCount(mode: "4" | "5" | "6-10" = "4", availableCount = Number.POSITIVE_INFINITY) {
+  if (mode === "5") {
+    return availableCount >= 5 ? 5 : 0;
+  }
+  if (mode === "6-10") {
+    const max = Math.min(10, availableCount);
+    if (max < 6) return 0;
+    return Math.floor(Math.random() * (max - 6 + 1)) + 6;
+  }
+  return availableCount >= 4 ? 4 : 0;
+}
+
+function selectSimilarImageGroup(availableImages: DriveImage[], count: number) {
+  if (availableImages.length < count) {
+    throw new Error(`Not enough eligible images to build a ${count}-image post right now.`);
+  }
+
+  const groups = new Map<string, DriveImage[]>();
+  for (const image of availableImages) {
+    const key = normalizeImageClusterKey(image.name) || image.id;
+    const existing = groups.get(key) ?? [];
+    existing.push(image);
+    groups.set(key, existing);
+  }
+
+  const preferredGroups = Array.from(groups.values())
+    .filter((group) => group.length >= count)
+    .sort((left, right) => right.length - left.length);
+
+  if (preferredGroups.length) {
+    return randomizeOrder(randomItem(preferredGroups)).slice(0, count);
+  }
+
+  return availableImages.slice(0, count);
+}
+
 function getBangkokDayKey(date = new Date()) {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Bangkok",
@@ -222,19 +313,26 @@ function buildDailyImageSelectionPlan(
   pageCount: number,
   currentDayKey: string,
   persistedDayKey?: string | null,
-  dailyUsedImageIds: string[] = []
+  dailyUsedImageIds: string[] = [],
+  recentImageUsage: Array<{ imageId: string; usedAt: Date | string }> = []
 ) {
   if (!images.length || pageCount <= 0) {
     return {
       chosenImages: [] as DriveImage[],
       nextDailyUsedImageIds: persistedDayKey === currentDayKey ? dailyUsedImageIds : [],
-      activeDayKey: currentDayKey
+      activeDayKey: currentDayKey,
+      nextRecentImageUsage: pruneRecentImageUsage(recentImageUsage)
     };
   }
 
-  const activeDayKey = persistedDayKey === currentDayKey ? currentDayKey : currentDayKey;
-  const activeDailyUsedImageIds = persistedDayKey === currentDayKey ? dailyUsedImageIds : [];
-  const availableImages = randomizeOrder(images.filter((image) => !activeDailyUsedImageIds.includes(image.id)));
+  const activeDayKey = currentDayKey;
+  const { availableImages, activeDailyUsedImageIds, prunedRecentUsage } = getAvailableImagesForCycle(
+    images,
+    currentDayKey,
+    persistedDayKey,
+    dailyUsedImageIds,
+    recentImageUsage
+  );
 
   if (availableImages.length < pageCount) {
     throw new Error(
@@ -246,7 +344,11 @@ function buildDailyImageSelectionPlan(
   return {
     chosenImages,
     nextDailyUsedImageIds: [...activeDailyUsedImageIds, ...chosenImages.map((image) => image.id)],
-    activeDayKey
+    activeDayKey,
+    nextRecentImageUsage: [
+      ...prunedRecentUsage,
+      ...chosenImages.map((image) => ({ imageId: image.id, usedAt: new Date() }))
+    ]
   };
 }
 
@@ -264,6 +366,7 @@ async function updateAutoPostState(
     usedImageIds: string[];
     dailyImageUsageDate: string | null;
     dailyUsedImageIds: string[];
+    recentImageUsage: RecentImageUsageEntry[];
     enabled: boolean;
     lastStatus: "pending" | "posted" | "failed" | "paused";
     lastWorkflowId: unknown;
@@ -392,6 +495,64 @@ async function buildCaption(config: LeanAutoPostConfig, image: DriveImage, drive
   return appendHashtags(`Fresh update from ${config.folderName || "your Google Drive"}`, config.hashtags);
 }
 
+async function buildMultiImageCaption(config: LeanAutoPostConfig, images: DriveImage[], driveAccessToken: string) {
+  const sampleImages = images.slice(0, Math.min(images.length, 4));
+  const sourceChunks: string[] = [];
+
+  for (const [index, image] of sampleImages.entries()) {
+    let creativeText = "";
+    let exactText = "";
+
+    try {
+      const imageFile = await fetchDriveImageBinary(driveAccessToken, image.id);
+      creativeText = await extractPrimaryCreativeTextFromImage(imageFile.bytes, imageFile.mimeType);
+      exactText = creativeText ? "" : await extractExactTextFromImage(imageFile.bytes, imageFile.mimeType);
+    } catch {
+      // Keep caption generation resilient even if one image cannot be analyzed.
+    }
+
+    const parts = [
+      `Image ${index + 1} file: ${stripFileExtension(image.name)}`,
+      creativeText ? `Main visual theme: ${creativeText}` : "",
+      exactText ? `Visible text: ${exactText}` : ""
+    ].filter(Boolean);
+
+    if (parts.length) {
+      sourceChunks.push(parts.join("\n"));
+    }
+  }
+
+  const fileList = images.map((image) => stripFileExtension(image.name)).filter(Boolean).join(", ");
+  if (fileList) {
+    sourceChunks.push(`All selected image files:\n${fileList}`);
+  }
+
+  const keyword = `${config.folderName || "Google Drive"} photo set`;
+  const builtInPrompt =
+    "Create a high-retention Thai Facebook caption for a multi-image post. Identify the shared theme across the selected images, build a strong opening hook, make people stop scrolling, and encourage saves, likes, comments, and shares naturally. Keep it specific to the images and avoid generic filler.";
+  const customPrompt = [builtInPrompt, config.aiPrompt?.trim() || ""].filter(Boolean).join("\n\n");
+
+  try {
+    const variants = await generateFacebookContent(keyword, {
+      userId: config.userId,
+      customPrompt,
+      sourceText: sourceChunks.join("\n\n"),
+      sourceLabel: "selected image set details"
+    });
+    const chosen = variants?.length ? randomItem(variants) : null;
+    if (chosen) {
+      return appendHashtags([chosen.caption, chosen.hashtags.join(" ")].filter(Boolean).join("\n\n"), config.hashtags);
+    }
+  } catch {
+    // Fall back below.
+  }
+
+  return appendHashtags(
+    `รวมภาพเด่นจาก ${config.folderName || "คลังรูป"} ชุดนี้ไว้ให้แล้ว ลองดูทีละภาพแล้วจะเห็นธีมหลักชัดขึ้นแบบครบกว่าโพสต์เดี่ยว`,
+    config.hashtags
+  );
+}
+
 async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: QueueAutoPostsOptions): Promise<QueueAutoPostsResult> {
   const triggeredAt = new Date();
   const nextRunAt = getNextAutoRun(config.intervalMinutes, config.postingWindowStart, config.postingWindowEnd, triggeredAt);
@@ -454,13 +615,7 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
   let lastPostId: unknown = null;
   let lastSelectedImageId: string | null = null;
   const dayKey = getBangkokDayKey(triggeredAt);
-  const { chosenImages, nextDailyUsedImageIds, activeDayKey } = buildDailyImageSelectionPlan(
-    images,
-    eligiblePageIds.length,
-    dayKey,
-    config.dailyImageUsageDate ?? null,
-    config.dailyUsedImageIds ?? []
-  );
+  const automationMode = config.automationMode ?? "standard";
   const batchDelayMinutes = options.immediate ? 0 : getRandomDelayMinutes(config.minRandomDelayMinutes ?? 0, config.maxRandomDelayMinutes ?? 0);
   const batchRequestedStartAt = new Date(Date.now() + batchDelayMinutes * 60 * 1000);
   const batchStartAt = fitBatchStartToPostingWindow(
@@ -470,10 +625,56 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
     config.postingWindowEnd
   );
 
+  const selectedImageIdsForRun: string[] = [];
+  let nextDailyUsedImageIds = config.dailyImageUsageDate === dayKey ? [...(config.dailyUsedImageIds ?? [])] : [];
+  let nextRecentImageUsage = pruneRecentImageUsage(config.recentImageUsage ?? [], triggeredAt);
+
   for (let index = 0; index < eligiblePageIds.length; index += 1) {
     const pageId = eligiblePageIds[index];
-    const chosenImage = chosenImages[index] ?? images[index % images.length];
-    const caption = await buildCaption(config, chosenImage, driveConnection.accessToken);
+    let selectedImages: DriveImage[] = [];
+
+    if (automationMode === "multi-image-ai") {
+      const { availableImages } = getAvailableImagesForCycle(
+        images,
+        dayKey,
+        dayKey,
+        nextDailyUsedImageIds,
+        nextRecentImageUsage
+      );
+      const count = getMultiImageTargetCount(config.multiImageCountMode ?? "4", availableImages.length);
+      if (!count) {
+        throw new Error(`Not enough eligible images to build the selected multi-image post size for page ${pageId}.`);
+      }
+      selectedImages = selectSimilarImageGroup(availableImages, count);
+    } else {
+      const plan = buildDailyImageSelectionPlan(
+        images,
+        1,
+        dayKey,
+        dayKey,
+        nextDailyUsedImageIds,
+        nextRecentImageUsage
+      );
+      selectedImages = plan.chosenImages;
+    }
+
+    if (!selectedImages.length) {
+      throw new Error("No eligible images available for the next auto-post run");
+    }
+
+    const selectedImageIds = selectedImages.map((image) => image.id);
+    nextDailyUsedImageIds = [...nextDailyUsedImageIds, ...selectedImageIds];
+    nextRecentImageUsage = [
+      ...nextRecentImageUsage,
+      ...selectedImageIds.map((imageId) => ({ imageId, usedAt: triggeredAt }))
+    ];
+    selectedImageIdsForRun.push(...selectedImageIds);
+
+    const primaryImage = selectedImages[0];
+    const caption =
+      automationMode === "multi-image-ai"
+        ? await buildMultiImageCaption(config, selectedImages, driveConnection.accessToken)
+        : await buildCaption(config, primaryImage, driveConnection.accessToken);
     const normalizedHashtags = normalizeHashtags(config.hashtags);
     const startAt = new Date(batchStartAt.getTime() + index * AUTO_POST_BATCH_PAGE_SPACING_MINUTES * 60 * 1000);
 
@@ -482,7 +683,7 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
       title: `Auto Post ${pageId} ${triggeredAt.toISOString()}`,
       content: caption,
       hashtags: normalizedHashtags,
-      imageUrls: [`drive:${chosenImage.id}`],
+      imageUrls: selectedImageIds.map((imageId) => `drive:${imageId}`),
       targetPageIds: [pageId],
       randomizeImages: false,
       randomizeCaption: false,
@@ -492,7 +693,7 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
     });
 
     lastPostId = post._id;
-    lastSelectedImageId = chosenImage.id;
+    lastSelectedImageId = primaryImage.id;
 
     const queuedForPost = await enqueuePostJobsForPost(config.userId, String(post._id), {
       applyRandomDelay: false,
@@ -500,8 +701,10 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
       payloadExtras: {
         autoPostConfigId: config._id,
         autoSource: "google-drive",
+        automationMode,
         selectedFolderId: config.folderId,
-        selectedImageId: chosenImage.id,
+        selectedImageId: primaryImage.id,
+        selectedImageIds,
         scheduledDelayMinutes: batchDelayMinutes + index * AUTO_POST_BATCH_PAGE_SPACING_MINUTES,
         workflowId: records.workflowId,
         workflowRunId: records.workflowRunId,
@@ -523,8 +726,9 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
     lastPostId,
     lastSelectedImageId,
     usedImageIds: [],
-    dailyImageUsageDate: activeDayKey,
+    dailyImageUsageDate: dayKey,
     dailyUsedImageIds: nextDailyUsedImageIds,
+    recentImageUsage: nextRecentImageUsage,
     lastWorkflowId: records.workflowId,
     lastWorkflowRunId: records.workflowRunId,
     lastContentItemId: records.contentItemId
@@ -546,6 +750,9 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
       postingWindowStart: config.postingWindowStart ?? null,
       postingWindowEnd: config.postingWindowEnd ?? null,
       lastSelectedImageId,
+      selectedImageIds: selectedImageIdsForRun,
+      automationMode,
+      multiImageCountMode: config.multiImageCountMode ?? "4",
       workflowId: records.workflowId,
       workflowRunId: records.workflowRunId,
       contentItemId: records.contentItemId
