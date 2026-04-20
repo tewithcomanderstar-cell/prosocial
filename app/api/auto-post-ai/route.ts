@@ -2,7 +2,7 @@
 import { jsonError, jsonOk, parseBody } from "@/lib/api";
 import { handleRoleError, requireRole } from "@/lib/services/permissions";
 import { logAction } from "@/lib/services/logging";
-import { AutoPostConfig } from "@/models/AutoPostConfig";
+import { AutoPostAiConfig } from "@/models/AutoPostAiConfig";
 
 type LeanAutoPostConfig = {
   enabled?: boolean;
@@ -51,7 +51,8 @@ const schema = z.object({
   folderName: z.string().min(1).default("My Drive"),
   targetPageIds: z.array(z.string()).max(100, "Select up to 100 Facebook pages").default([]),
   intervalMinutes: intervalSchema.default(60),
-  captionStrategy: z.enum(["manual", "ai", "hybrid"]),
+  captionStrategy: z.enum(["manual", "ai", "hybrid"]).default("hybrid"),
+  multiImageCountMode: z.enum(["4", "5", "6-10"]).default("4"),
   captions: z.array(z.string()).default([]),
   hashtags: z.array(z.string()).default([]),
   aiPrompt: z.string().default(""),
@@ -64,7 +65,7 @@ export async function GET() {
   try {
     const { requireAuth } = await import("@/lib/api");
     const userId = await requireAuth();
-    const config = (await AutoPostConfig.findOneAndUpdate(
+    const config = (await AutoPostAiConfig.findOneAndUpdate(
       { userId },
       {
         $setOnInsert: {
@@ -73,21 +74,23 @@ export async function GET() {
           autoPostStatus: "paused",
           jobStatus: "pending",
           retryCount: 0,
-          intervalMinutes: 60
+          intervalMinutes: 60,
+          automationMode: "multi-image-ai",
+          multiImageCountMode: "4"
         }
       },
       { upsert: true, new: true }
     ).lean()) as LeanAutoPostConfig | null;
 
     if (config?.folderId === BROKEN_FOLDER_ID) {
-      await AutoPostConfig.findOneAndUpdate({ userId }, { folderId: FIXED_FOLDER_ID });
+      await AutoPostAiConfig.findOneAndUpdate({ userId }, { folderId: FIXED_FOLDER_ID });
       config.folderId = FIXED_FOLDER_ID;
     }
 
     if (config?.lastError) {
       const sanitizedLastError = sanitizeLegacyMessage(config.lastError);
       if (sanitizedLastError !== config.lastError) {
-        await AutoPostConfig.findOneAndUpdate({ userId }, { lastError: sanitizedLastError });
+        await AutoPostAiConfig.findOneAndUpdate({ userId }, { lastError: sanitizedLastError });
         config.lastError = sanitizedLastError;
       }
     }
@@ -103,7 +106,7 @@ export async function POST(request: Request) {
     const { userId } = await requireRole(["admin", "editor"]);
     const payload = parseBody(schema, await request.json());
     const normalizedFolderId = normalizeFolderId(payload.folderId ?? "root");
-    const current = (await AutoPostConfig.findOne({ userId }).lean()) as LeanAutoPostConfig | null;
+    const current = (await AutoPostAiConfig.findOne({ userId }).lean()) as LeanAutoPostConfig | null;
 
     const nextRunAt = payload.enabled
       ? current?.enabled
@@ -117,10 +120,11 @@ export async function POST(request: Request) {
         : "waiting"
       : "paused";
 
-    const config = await AutoPostConfig.findOneAndUpdate(
+    const config = await AutoPostAiConfig.findOneAndUpdate(
       { userId },
       {
         ...payload,
+        automationMode: "multi-image-ai",
         folderId: normalizedFolderId,
         captions: (payload.captions ?? []).map((caption) => caption.trim()).filter(Boolean),
         hashtags: (payload.hashtags ?? []).map((hashtag) => hashtag.trim()).filter(Boolean),
@@ -140,25 +144,28 @@ export async function POST(request: Request) {
       userId,
       type: "settings",
       level: "success",
-      message: payload.enabled ? "Auto Post configuration updated" : "Auto Post paused",
+      message: payload.enabled ? "Auto Post AI configuration updated" : "Auto Post AI paused",
       metadata: {
-        autoPost: true,
+        autoPostAi: true,
         folderId: normalizedFolderId,
         targetPageCount: (payload.targetPageIds ?? []).length,
         intervalMinutes: payload.intervalMinutes,
+        multiImageCountMode: payload.multiImageCountMode,
         captionStrategy: payload.captionStrategy,
         hashtagCount: (payload.hashtags ?? []).length,
         postingWindowStart: payload.postingWindowStart,
         postingWindowEnd: payload.postingWindowEnd,
         autoPostStatus,
         maxTargetPages: 100,
-        imageAssignmentMode: "unique-per-page"
+        imageAssignmentMode: "similar-image-cluster"
       }
     });
 
-    return jsonOk({ config }, payload.enabled ? "Auto Post settings saved" : "Auto Post paused");
+    return jsonOk({ config }, payload.enabled ? "Auto Post AI settings saved" : "Auto Post AI paused");
   } catch (error) {
     return handleRoleError(error);
   }
 }
+
+
 

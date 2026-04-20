@@ -1,5 +1,5 @@
-import { Suspense } from "react";
-import { AutoPostPanel } from "@/components/auto-post-panel";
+﻿import { Suspense } from "react";
+import { AutoPostAiPanel } from "@/components/auto-post-ai-panel";
 import { SectionCard } from "@/components/section-card";
 
 export default function AutoPostAiPage() {
@@ -11,7 +11,7 @@ export default function AutoPostAiPage() {
         tooltip="ระบบโพสต์อัตโนมัติแบบหลายภาพ พร้อมแคปชั่น AI จากรายละเอียดของภาพ"
       >
         <Suspense fallback={<div className="muted">Loading...</div>}>
-          <AutoPostPanel forcedAutomationMode="multi-image-ai" hideAutomationModeSelector />
+          <AutoPostAiPanel />
         </Suspense>
       </SectionCard>
     </div>

@@ -4,6 +4,8 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 type AutoPostStatus = "idle" | "running" | "posting" | "success" | "failed" | "retrying" | "paused" | "waiting";
 type CaptionStrategy = "manual" | "ai" | "hybrid";
+type AutomationMode = "standard" | "multi-image-ai";
+type MultiImageCountMode = "4" | "5" | "6-10";
 
 type AutoPostConfig = {
   enabled: boolean;
@@ -12,6 +14,8 @@ type AutoPostConfig = {
   targetPageIds: string[];
   intervalMinutes: number;
   captionStrategy: CaptionStrategy;
+  automationMode: AutomationMode;
+  multiImageCountMode: MultiImageCountMode;
   captions: string[];
   hashtags: string[];
   aiPrompt: string;
@@ -57,6 +61,8 @@ const defaults: AutoPostConfig = {
   targetPageIds: [],
   intervalMinutes: 60,
   captionStrategy: "hybrid",
+  automationMode: "multi-image-ai",
+  multiImageCountMode: "4",
   captions: [],
   hashtags: [],
   aiPrompt: "",
@@ -160,7 +166,9 @@ function statusTone(status?: AutoPostStatus) {
   }
 }
 
-export function AutoPostPanel() {
+export function AutoPostAiPanel() {
+  const forcedAutomationMode: AutomationMode = "multi-image-ai";
+  const hideAutomationModeSelector = true;
   const [config, setConfig] = useState<AutoPostConfig>(defaults);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [pages, setPages] = useState<FacebookPage[]>([]);
@@ -178,7 +186,7 @@ export function AutoPostPanel() {
 
     try {
       const [statusRes, pagesRes, foldersRes] = await Promise.all([
-        fetch("/api/auto-post/status", { cache: "no-store" }),
+        fetch("/api/auto-post-ai/status", { cache: "no-store" }),
         fetch("/api/facebook/pages", { cache: "no-store" }),
         fetch("/api/google-drive/folders", { cache: "no-store" })
       ]);
@@ -191,7 +199,12 @@ export function AutoPostPanel() {
 
       if (statusJson.ok) {
         const statusData = statusJson.data as StatusResponse;
-        setConfig((current) => ({ ...current, ...defaults, ...statusData.config }));
+        setConfig((current) => ({
+          ...current,
+          ...defaults,
+          ...statusData.config,
+          ...(forcedAutomationMode ? { automationMode: forcedAutomationMode } : {})
+        }));
         setLogs((statusData.logs ?? []).slice(0, 10).map((log) => ({ ...log, message: sanitizeText(log.message) })));
       }
 
@@ -259,10 +272,14 @@ export function AutoPostPanel() {
   }
 
   async function saveConfig(enabledOverride?: boolean) {
-    const response = await fetch("/api/auto-post", {
+    const response = await fetch("/api/auto-post-ai", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...config, enabled: enabledOverride ?? config.enabled })
+      body: JSON.stringify({
+        ...config,
+        automationMode: "multi-image-ai",
+        enabled: enabledOverride ?? config.enabled
+      })
     });
     const result = await response.json();
     if (!result.ok) throw new Error(result.message || "Unable to save Auto Post settings");
@@ -294,7 +311,7 @@ export function AutoPostPanel() {
 
     try {
       await saveConfig(true);
-      const response = await fetch("/api/auto-post/start", { method: "POST" });
+      const response = await fetch("/api/auto-post-ai/start", { method: "POST" });
       const result = await response.json();
       if (!result.ok) throw new Error(result.message || "Unable to start Auto Post");
       setMessage("Automation started");
@@ -312,7 +329,7 @@ export function AutoPostPanel() {
     setError("");
 
     try {
-      const response = await fetch("/api/auto-post/pause", { method: "POST" });
+      const response = await fetch("/api/auto-post-ai/pause", { method: "POST" });
       const result = await response.json();
       if (!result.ok) throw new Error(result.message || "Unable to pause Auto Post");
       setMessage("Auto Post paused");
@@ -330,7 +347,7 @@ export function AutoPostPanel() {
     setError("");
 
     try {
-      const response = await fetch("/api/auto-post/stop", { method: "POST" });
+      const response = await fetch("/api/auto-post-ai/stop", { method: "POST" });
       const result = await response.json();
       if (!result.ok) throw new Error(result.message || "Unable to stop Auto Post");
       setMessage("Auto Post stopped");
@@ -445,12 +462,32 @@ export function AutoPostPanel() {
           </div>
         </div>
 
+        {<div className="muted">โหมดนี้แยกการทำงานจากระบบออโต้ปกติ และจะใช้ AI สร้างโพสต์หลายภาพโดยเฉพาะ</div>}
+
+        {config.automationMode === "multi-image-ai" ? (
+          <label className="label">
+            รูปต่อโพสต์
+            <select
+              className="select"
+              value={config.multiImageCountMode}
+              onChange={(event) =>
+                setConfig((current) => ({ ...current, multiImageCountMode: event.target.value as MultiImageCountMode }))
+              }
+            >
+              <option value="4">โพส 4 ภาพ</option>
+              <option value="5">โพส 5 ภาพ</option>
+              <option value="6-10">โพส 6-10 ภาพ</option>
+            </select>
+          </label>
+        ) : null}
+
         <label className="label">
           Caption Mode
           <select
             className="select"
             value={config.captionStrategy}
             onChange={(event) => setConfig((current) => ({ ...current, captionStrategy: event.target.value as CaptionStrategy }))}
+            disabled={config.automationMode === "multi-image-ai"}
           >
             <option value="manual">Manual</option>
             <option value="hybrid">Manual + AI</option>
@@ -489,6 +526,14 @@ export function AutoPostPanel() {
         </label>
 
         <div className="muted">Unique image assignment per page is handled by the in-app automation engine for each run.</div>
+        {config.automationMode === "multi-image-ai" ? (
+          <div className="muted">
+            โหมดหลายภาพ AI จะสุ่มภาพที่มีธีมใกล้กันจากโฟลเดอร์, จับแกนหลักของภาพ และคิดแคปชั่นใหม่ให้เองโดยไม่ใช้ Caption Mode ปกติ
+          </div>
+        ) : null}
+        {config.automationMode === "multi-image-ai" ? (
+          <div className="muted">ระบบจะพยายามใช้ภาพให้หมดก่อน, ไม่ซ้ำในวันเดียวกัน และกันภาพเดิมซ้ำภายใน 24 ชั่วโมงเท่าที่จำนวนภาพเอื้ออำนวย</div>
+        ) : null}
         {config.captionStrategy === "ai" ? (
           <div className="muted">AI only extracts visible text from each image as-is and does not rewrite the caption.</div>
         ) : null}
@@ -560,6 +605,7 @@ export function AutoPostPanel() {
     </div>
   );
 }
+
 
 
 

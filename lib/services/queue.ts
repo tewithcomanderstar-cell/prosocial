@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
+import { AutoPostAiConfig } from "@/models/AutoPostAiConfig";
 import { CommentInbox } from "@/models/CommentInbox";
 import { Job } from "@/models/Job";
 import { MediaCache } from "@/models/MediaCache";
@@ -8,6 +9,7 @@ import { Schedule } from "@/models/Schedule";
 import { finalizeTrackedPostIfComplete, notifyCommentFailure } from "@/lib/services/comment-automation";
 import { logCommentStage } from "@/lib/services/comment-logging";
 import { updateAutoPostRecords } from "@/lib/services/automation-records";
+import { updateAutoPostAiRecords } from "@/lib/services/automation-records-ai";
 import { FacebookPublishError, publishPostToFacebook, replyToFacebookComment } from "@/lib/services/facebook";
 import { ensureValidFacebookConnection, ensureValidGoogleDriveConnection, getStoredFacebookConnection } from "@/lib/services/integration-auth";
 import { fetchDriveImageBinary } from "@/lib/services/google-drive";
@@ -107,6 +109,56 @@ type EnqueueOptions = {
   startAt?: Date;
   payloadExtras?: Record<string, unknown>;
 };
+
+function getBoundAutoPostConfigIds(job: JobExecution) {
+  return {
+    autoPostConfigId: typeof job.payload?.autoPostConfigId === "string" ? String(job.payload.autoPostConfigId) : null,
+    autoPostAiConfigId: typeof job.payload?.autoPostAiConfigId === "string" ? String(job.payload.autoPostAiConfigId) : null
+  };
+}
+
+function hasBoundAutoPostConfig(job: JobExecution) {
+  const ids = getBoundAutoPostConfigIds(job);
+  return Boolean(ids.autoPostConfigId || ids.autoPostAiConfigId);
+}
+
+function getAutoPostLogFlags(job: JobExecution) {
+  const { autoPostConfigId, autoPostAiConfigId } = getBoundAutoPostConfigIds(job);
+  if (autoPostAiConfigId) {
+    return { autoPostAi: true };
+  }
+  if (autoPostConfigId) {
+    return { autoPost: true };
+  }
+  return {};
+}
+
+async function updateBoundAutoPostState(
+  job: JobExecution,
+  configUpdates: Record<string, unknown>,
+  recordUpdates: {
+    autoPostStatus?: "idle" | "running" | "posting" | "success" | "failed" | "retrying" | "paused" | "waiting";
+    currentJobStatus?: "pending" | "processing" | "posted" | "failed";
+    lastError?: string | null;
+    message?: string;
+    pageId?: string;
+    imageUsed?: string;
+    nextRunAt?: string;
+    lastRunAt?: string;
+  }
+) {
+  const { autoPostConfigId, autoPostAiConfigId } = getBoundAutoPostConfigIds(job);
+
+  if (autoPostConfigId) {
+    await AutoPostConfig.findByIdAndUpdate(autoPostConfigId, configUpdates);
+    await updateAutoPostRecords({ configId: autoPostConfigId, ...recordUpdates });
+  }
+
+  if (autoPostAiConfigId) {
+    await AutoPostAiConfig.findByIdAndUpdate(autoPostAiConfigId, configUpdates);
+    await updateAutoPostAiRecords({ configId: autoPostAiConfigId, ...recordUpdates });
+  }
+}
 
 function normalizeHashtags(hashtags?: string[]) {
   return (hashtags ?? [])
@@ -388,7 +440,9 @@ export async function enqueuePostJobsForPost(userId: string, postId: string, opt
       targetPageIds: [page.pageId]
     });
 
-    const spacingMinutes = options.payloadExtras?.autoPostConfigId ? AUTO_POST_PAGE_SPACING_MINUTES : 0;
+    const spacingMinutes = options.payloadExtras?.autoPostConfigId || options.payloadExtras?.autoPostAiConfigId
+      ? AUTO_POST_PAGE_SPACING_MINUTES
+      : 0;
     const nextRunAt = options.startAt
       ? new Date(options.startAt.getTime() + pageIndex * spacingMinutes * 60 * 1000)
       : options.applyRandomDelay === false
@@ -502,8 +556,10 @@ async function executePostJob(job: JobExecution) {
       relatedPostId: job.postId,
       relatedScheduleId: job.scheduleId,
       metadata: {
+        ...getAutoPostLogFlags(job),
         targetPageId: job.targetPageId,
         autoPostConfigId: job.payload?.autoPostConfigId,
+        autoPostAiConfigId: job.payload?.autoPostAiConfigId,
         correlationId: job.correlationId,
         nextRetryAt: nextRetryAt.toISOString(),
         reason: rateLimit.reason
@@ -512,31 +568,33 @@ async function executePostJob(job: JobExecution) {
 
     await applyUserPublishCooldown(job.userId, nextRetryAt, rateLimit.reason ?? "Rate limited", job._id);
 
-    if (job.payload?.autoPostConfigId) {
-      await AutoPostConfig.findByIdAndUpdate(String(job.payload.autoPostConfigId), {
-        autoPostStatus: "retrying",
-        jobStatus: "pending",
-        lastStatus: "failed",
-        retryCount: (job.attempts ?? 0) + 1,
-        lastError: rateLimit.reason ?? "Rate limited",
-        nextRunAt: nextRetryAt
-      });
-      await updateAutoPostRecords({
-        configId: String(job.payload.autoPostConfigId),
-        autoPostStatus: "retrying",
-        currentJobStatus: "pending",
-        lastError: rateLimit.reason ?? "Rate limited",
-        message: rateLimit.reason ?? "Rate limited",
-        pageId: job.targetPageId,
-        imageUsed: typeof job.payload?.selectedImageId === "string" ? job.payload.selectedImageId : undefined
-      });
+    if (hasBoundAutoPostConfig(job)) {
+      await updateBoundAutoPostState(
+        job,
+        {
+          autoPostStatus: "retrying",
+          jobStatus: "pending",
+          lastStatus: "failed",
+          retryCount: (job.attempts ?? 0) + 1,
+          lastError: rateLimit.reason ?? "Rate limited",
+          nextRunAt: nextRetryAt
+        },
+        {
+          autoPostStatus: "retrying",
+          currentJobStatus: "pending",
+          lastError: rateLimit.reason ?? "Rate limited",
+          message: rateLimit.reason ?? "Rate limited",
+          pageId: job.targetPageId,
+          imageUsed: typeof job.payload?.selectedImageId === "string" ? job.payload.selectedImageId : undefined
+        }
+      );
     }
 
     return { status: "rate_limited" };
   }
 
   if (job.fingerprint) {
-    const duplicateWindowHours = job.payload?.autoPostConfigId
+    const duplicateWindowHours = hasBoundAutoPostConfig(job)
       ? safeSettings.autoPostDuplicateWindowHours
       : safeSettings.duplicateWindowHours;
     const blocked = await isDuplicatePostBlocked({
@@ -563,25 +621,32 @@ async function executePostJob(job: JobExecution) {
         relatedJobId: job._id,
         relatedPostId: job.postId,
         relatedScheduleId: job.scheduleId,
-        metadata: { targetPageId: job.targetPageId, autoPostConfigId: job.payload?.autoPostConfigId }
+        metadata: {
+          ...getAutoPostLogFlags(job),
+          targetPageId: job.targetPageId,
+          autoPostConfigId: job.payload?.autoPostConfigId,
+          autoPostAiConfigId: job.payload?.autoPostAiConfigId
+        }
       });
-      if (job.payload?.autoPostConfigId) {
-        await AutoPostConfig.findByIdAndUpdate(String(job.payload.autoPostConfigId), {
-          autoPostStatus: "failed",
-          jobStatus: "failed",
-          lastStatus: "failed",
-          retryCount: job.attempts ?? 0,
-          lastError: "Duplicate auto post was blocked by duplicate protection"
-        });
-        await updateAutoPostRecords({
-          configId: String(job.payload.autoPostConfigId),
-          autoPostStatus: "failed",
-          currentJobStatus: "failed",
-          lastError: "Duplicate auto post was blocked by duplicate protection",
-          message: "Duplicate auto post was blocked by duplicate protection",
-          pageId: job.targetPageId,
-          imageUsed: typeof job.payload?.selectedImageId === "string" ? job.payload.selectedImageId : undefined
-        });
+      if (hasBoundAutoPostConfig(job)) {
+        await updateBoundAutoPostState(
+          job,
+          {
+            autoPostStatus: "failed",
+            jobStatus: "failed",
+            lastStatus: "failed",
+            retryCount: job.attempts ?? 0,
+            lastError: "Duplicate auto post was blocked by duplicate protection"
+          },
+          {
+            autoPostStatus: "failed",
+            currentJobStatus: "failed",
+            lastError: "Duplicate auto post was blocked by duplicate protection",
+            message: "Duplicate auto post was blocked by duplicate protection",
+            pageId: job.targetPageId,
+            imageUsed: typeof job.payload?.selectedImageId === "string" ? job.payload.selectedImageId : undefined
+          }
+        );
       }
       return { status: "duplicate_blocked" };
     }
@@ -604,22 +669,24 @@ async function executePostJob(job: JobExecution) {
   const imageRefs = post.randomizeImages && post.imageUrls.length > 0 ? [randomItem(post.imageUrls)] : post.imageUrls;
   const images = await resolveImages(job.userId, imageRefs);
 
-  if (job.payload?.autoPostConfigId) {
-    await AutoPostConfig.findByIdAndUpdate(String(job.payload.autoPostConfigId), {
-      autoPostStatus: "posting",
-      jobStatus: "processing",
-      lastStatus: "pending",
-      lastError: null
-    });
-    await updateAutoPostRecords({
-      configId: String(job.payload.autoPostConfigId),
-      autoPostStatus: "posting",
-      currentJobStatus: "processing",
-      lastError: null,
-      message: "Publishing to Facebook page",
-      pageId: job.targetPageId,
-      imageUsed: typeof job.payload?.selectedImageId === "string" ? job.payload.selectedImageId : undefined
-    });
+  if (hasBoundAutoPostConfig(job)) {
+    await updateBoundAutoPostState(
+      job,
+      {
+        autoPostStatus: "posting",
+        jobStatus: "processing",
+        lastStatus: "pending",
+        lastError: null
+      },
+      {
+        autoPostStatus: "posting",
+        currentJobStatus: "processing",
+        lastError: null,
+        message: "Publishing to Facebook page",
+        pageId: job.targetPageId,
+        imageUsed: typeof job.payload?.selectedImageId === "string" ? job.payload.selectedImageId : undefined
+      }
+    );
   }
 
   const publishResult = await publishPostToFacebook({
@@ -666,33 +733,37 @@ async function executePostJob(job: JobExecution) {
     relatedPostId: String(post._id),
     relatedScheduleId: job.scheduleId,
     metadata: {
+      ...getAutoPostLogFlags(job),
       targetPageId: page.pageId,
       publishResult,
       autoPostConfigId: job.payload?.autoPostConfigId,
+      autoPostAiConfigId: job.payload?.autoPostAiConfigId,
       correlationId: job.correlationId
     }
   });
 
-  if (job.payload?.autoPostConfigId) {
-    await AutoPostConfig.findByIdAndUpdate(String(job.payload.autoPostConfigId), {
-      autoPostStatus: "waiting",
-      jobStatus: "posted",
-      lastStatus: "posted",
-      retryCount: 0,
-      lastError: null,
-      lastPostId: post._id,
-      lastRunAt: new Date()
-    });
-    await updateAutoPostRecords({
-      configId: String(job.payload.autoPostConfigId),
-      autoPostStatus: "waiting",
-      currentJobStatus: "posted",
-      lastError: null,
-      message: "Post published successfully",
-      pageId: page.pageId,
-      imageUsed: typeof job.payload?.selectedImageId === "string" ? job.payload.selectedImageId : undefined,
-      lastRunAt: new Date().toISOString()
-    });
+  if (hasBoundAutoPostConfig(job)) {
+    await updateBoundAutoPostState(
+      job,
+      {
+        autoPostStatus: "waiting",
+        jobStatus: "posted",
+        lastStatus: "posted",
+        retryCount: 0,
+        lastError: null,
+        lastPostId: post._id,
+        lastRunAt: new Date()
+      },
+      {
+        autoPostStatus: "waiting",
+        currentJobStatus: "posted",
+        lastError: null,
+        message: "Post published successfully",
+        pageId: page.pageId,
+        imageUsed: typeof job.payload?.selectedImageId === "string" ? job.payload.selectedImageId : undefined,
+        lastRunAt: new Date().toISOString()
+      }
+    );
   }
 
   return { status: "success" };
@@ -888,6 +959,7 @@ export async function processQueuedJobs(limit = 10, jobType?: JobType) {
         relatedPostId: job.type === "comment-reply" ? undefined : job.postId,
         relatedScheduleId: job.scheduleId,
         metadata: {
+          ...getAutoPostLogFlags(job),
           targetPageId: job.targetPageId,
           correlationId: job.correlationId,
           attempt: job.attempts + 1
@@ -956,10 +1028,12 @@ export async function processQueuedJobs(limit = 10, jobType?: JobType) {
             ? `[PUBLISHER] post ${job.postId} failed and will retry (${attempts}/${job.maxAttempts}): ${failure.failureReason}`
             : `[PUBLISHER] post ${job.postId} failed after ${attempts} attempts: ${failure.failureReason}`,
           metadata: {
+            ...getAutoPostLogFlags(job),
             targetPageId: job.targetPageId,
             attempts,
             maxAttempts: job.maxAttempts,
             autoPostConfigId: job.payload?.autoPostConfigId,
+            autoPostAiConfigId: job.payload?.autoPostAiConfigId,
             correlationId: job.correlationId,
             errorCode: failure.errorCode,
             nextRetryAt: nextRetryAt?.toISOString()
@@ -971,27 +1045,29 @@ export async function processQueuedJobs(limit = 10, jobType?: JobType) {
         });
       }
 
-      if (job.type !== "comment-reply" && job.payload?.autoPostConfigId) {
-        await AutoPostConfig.findByIdAndUpdate(String(job.payload.autoPostConfigId), {
-          autoPostStatus: shouldRetry ? "retrying" : "failed",
-          jobStatus: "failed",
-          lastStatus: shouldRetry ? "pending" : "failed",
-          retryCount: attempts,
-          lastError: failure.failureReason,
-          nextRunAt: nextRetryAt ?? undefined
-        });
-        await updateAutoPostRecords({
-          configId: String(job.payload.autoPostConfigId),
-          autoPostStatus: shouldRetry ? "retrying" : "failed",
-          currentJobStatus: shouldRetry ? "pending" : "failed",
-          lastError: failure.failureReason,
-          message: shouldRetry
-            ? `Publish failed and will retry (${attempts}/${job.maxAttempts})`
-            : `Publish failed after ${attempts} attempts`,
-          pageId: job.targetPageId,
-          imageUsed: typeof job.payload?.selectedImageId === "string" ? job.payload.selectedImageId : undefined
-        });
-      }
+        if (job.type !== "comment-reply" && hasBoundAutoPostConfig(job)) {
+          await updateBoundAutoPostState(
+            job,
+            {
+              autoPostStatus: shouldRetry ? "retrying" : "failed",
+              jobStatus: "failed",
+              lastStatus: shouldRetry ? "pending" : "failed",
+              retryCount: attempts,
+              lastError: failure.failureReason,
+              nextRunAt: nextRetryAt ?? undefined
+            },
+            {
+              autoPostStatus: shouldRetry ? "retrying" : "failed",
+              currentJobStatus: shouldRetry ? "pending" : "failed",
+              lastError: failure.failureReason,
+              message: shouldRetry
+                ? `Publish failed and will retry (${attempts}/${job.maxAttempts})`
+                : `Publish failed after ${attempts} attempts`,
+              pageId: job.targetPageId,
+              imageUsed: typeof job.payload?.selectedImageId === "string" ? job.payload.selectedImageId : undefined
+            }
+          );
+        }
 
       processed.push({ jobId: job._id, status: shouldRetry ? "retrying" : "failed" });
     }

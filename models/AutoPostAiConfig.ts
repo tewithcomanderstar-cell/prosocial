@@ -1,6 +1,6 @@
-﻿import { Schema, model, models } from "mongoose";
+import { Schema, model, models } from "mongoose";
 
-const autoPostConfigSchema = new Schema(
+const autoPostAiConfigSchema = new Schema(
   {
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true, unique: true, index: true },
     enabled: { type: Boolean, default: false },
@@ -20,6 +20,16 @@ const autoPostConfigSchema = new Schema(
       type: String,
       enum: ["manual", "ai", "hybrid"],
       default: "hybrid"
+    },
+    automationMode: {
+      type: String,
+      enum: ["standard", "multi-image-ai"],
+      default: "standard"
+    },
+    multiImageCountMode: {
+      type: String,
+      enum: ["4", "5", "6-10"],
+      default: "4"
     },
     captions: { type: [String], default: [] },
     hashtags: { type: [String], default: [] },
@@ -56,6 +66,15 @@ const autoPostConfigSchema = new Schema(
     usedImageIds: { type: [String], default: [] },
     dailyImageUsageDate: { type: String, default: null },
     dailyUsedImageIds: { type: [String], default: [] },
+    recentImageUsage: {
+      type: [
+        {
+          imageId: { type: String, required: true },
+          usedAt: { type: Date, required: true }
+        }
+      ],
+      default: []
+    },
     lastWorkflowId: { type: Schema.Types.ObjectId, ref: "Workflow" },
     lastWorkflowRunId: { type: Schema.Types.ObjectId, ref: "WorkflowRun" },
     lastContentItemId: { type: Schema.Types.ObjectId, ref: "ContentItem" }
@@ -63,5 +82,5 @@ const autoPostConfigSchema = new Schema(
   { timestamps: true }
 );
 
-export const AutoPostConfig =
-  models.AutoPostConfig || model("AutoPostConfig", autoPostConfigSchema);
+export const AutoPostAiConfig =
+  models.AutoPostAiConfig || model("AutoPostAiConfig", autoPostAiConfigSchema);
