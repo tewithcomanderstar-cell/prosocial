@@ -216,6 +216,33 @@ function randomizeOrder<T>(items: T[]) {
   return copy;
 }
 
+function getRotatingMultiImageStyle() {
+  const styles = [
+    {
+      name: "soft-inspiration",
+      description:
+        "โทนละมุน น่ารัก ชวนหยุดอ่าน เหมือนเพื่อนมาแชร์ไอเดียดีๆ ให้กัน เน้นคำชวนเซฟ ชวนดูทีละรูป"
+    },
+    {
+      name: "playful-social",
+      description:
+        "โทนสนุก ขี้เล่น อ่านแล้วไหลลื่นแบบโพสต์ที่ชวนคอมเมนต์เลข ชวนเลือกแบบที่ชอบ และชวนแท็กเพื่อน"
+    },
+    {
+      name: "premium-curation",
+      description:
+        "โทนเรียบหรู ดูคัดมาอย่างตั้งใจ เน้นว่าทุกภาพมีฟีลต่างกัน อ่านแล้วรู้สึกว่าโพสต์นี้มีคุณค่าและน่าเซฟเก็บไว้"
+    },
+    {
+      name: "viral-stop-scroll",
+      description:
+        "โทน hook แรงขึ้นเล็กน้อย ชวนหยุดเลื่อน ฟีลคอนเทนต์ที่ทำให้คนอยากอ่านจนจบและแชร์ต่อ แต่ยังต้องดูเป็นธรรมชาติไม่ขายเกินไป"
+    }
+  ];
+
+  return randomItem(styles);
+}
+
 function normalizeCycleUsedImageIds(images: DriveImage[], usedImageIds: string[] = []) {
   if (!usedImageIds.length) {
     return [];
@@ -558,6 +585,7 @@ async function buildCaption(config: LeanAutoPostConfig, image: DriveImage, drive
 async function buildMultiImageCaption(config: LeanAutoPostConfig, images: DriveImage[], driveAccessToken: string) {
   const sampleImages = images.slice(0, Math.min(images.length, 4));
   const sourceChunks: string[] = [];
+  const rotatingStyle = getRotatingMultiImageStyle();
 
   for (const [index, image] of sampleImages.entries()) {
     let creativeText = "";
@@ -593,6 +621,7 @@ async function buildMultiImageCaption(config: LeanAutoPostConfig, images: DriveI
 - ชวนหยุดดู ชวนอ่านต่อ ชวนเซฟ ชวนคอมเมนต์
 - อ่านลื่นแบบเพจคอนเทนต์สวยๆ
 - ใช้อีโมจิพอดีๆ ได้ แต่ไม่เยอะเกิน
+- เป้าหมายคือเพิ่ม time spent บนโพสต์ ทำให้คนอยากอ่านจนจบ ดูครบทุกภาพ กดไลก์ และแชร์ต่อ
 
 โครงสร้างที่ต้องการทุกโพสต์:
 1. เปิดด้วย hook แบบชวนหยุดอ่านทันที
@@ -613,7 +642,22 @@ async function buildMultiImageCaption(config: LeanAutoPostConfig, images: DriveI
 - ห้ามเขียนเหมือนโน้ตหลังบ้านหรือบรีฟงาน
 - ห้ามถามกลับเพื่อขอข้อมูลเพิ่ม
 - ต้องอิงจากรายละเอียดในภาพจริงเท่านั้น
-- ถ้ารายละเอียดบางรูปไม่ชัด ให้สรุปจากธีมที่เห็น โดยยังต้องเขียนให้อ่านเหมือนโพสต์จริง`;
+- ถ้ารายละเอียดบางรูปไม่ชัด ให้สรุปจากธีมที่เห็น โดยยังต้องเขียนให้อ่านเหมือนโพสต์จริง
+
+สไตล์ที่ต้องใช้ในโพสต์นี้:
+- style key: ${rotatingStyle.name}
+- style direction: ${rotatingStyle.description}
+
+แนว CTA ที่อยากได้:
+- ชวนคนคอมเมนต์ว่าแต่ละคนชอบแบบไหน
+- ชวนเซฟไว้เป็นเรฟหรือไอเดีย
+- ชวนแชร์ให้เพื่อนช่วยเลือกหรือแชร์ต่อ
+
+สิ่งที่ต้องระวัง:
+- แม้สไตล์จะเปลี่ยนไปในแต่ละโพสต์ แต่โครงสร้างหลักต้องเหมือนเดิมเสมอ
+- ห้ามใช้คำเปิดซ้ำแบบเดิมทุกโพสต์
+- ให้เปลี่ยน hook, จังหวะภาษา, และอารมณ์การเล่าไปเรื่อยๆ
+- แต่ยังต้องเป็นคอนเทนต์ Facebook ที่อ่านง่าย ชวนมีส่วนร่วม และพร้อมโพสต์จริง`;
   const customPrompt = [builtInPrompt, config.aiPrompt?.trim() || ""].filter(Boolean).join("\n\n");
 
   try {
