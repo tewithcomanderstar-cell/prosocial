@@ -297,6 +297,33 @@ function getMultiImageTargetCount(mode: "4" | "5" | "6-10" = "4", availableCount
   return availableCount >= 4 ? 4 : 0;
 }
 
+function getMinimumMultiImageCount(mode: "4" | "5" | "6-10" = "4") {
+  if (mode === "5") return 5;
+  if (mode === "6-10") return 6;
+  return 4;
+}
+
+function resolveMultiImageTargetCountForPage(
+  mode: "4" | "5" | "6-10" = "4",
+  availableCount: number,
+  remainingPageCount: number
+) {
+  const minimumForCurrentPage = getMinimumMultiImageCount(mode);
+  const reserveForOtherPages = Math.max(0, remainingPageCount - 1) * minimumForCurrentPage;
+  const maximumForCurrentPage = availableCount - reserveForOtherPages;
+
+  if (maximumForCurrentPage < minimumForCurrentPage) {
+    return 0;
+  }
+
+  if (mode === "6-10") {
+    const upperBound = Math.min(10, maximumForCurrentPage);
+    return Math.floor(Math.random() * (upperBound - 6 + 1)) + 6;
+  }
+
+  return maximumForCurrentPage >= minimumForCurrentPage ? minimumForCurrentPage : 0;
+}
+
 function selectSimilarImageGroup(availableImages: DriveImage[], count: number) {
   if (availableImages.length < count) {
     throw new Error(`Not enough eligible images to build a ${count}-image post right now.`);
@@ -686,41 +713,33 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
   let nextDailyUsedImageIds = config.dailyImageUsageDate === dayKey ? [...(config.dailyUsedImageIds ?? [])] : [];
   let nextRecentImageUsage = pruneRecentImageUsage(config.recentImageUsage ?? [], triggeredAt);
   let nextUsedImageIds = normalizeCycleUsedImageIds(images, config.usedImageIds ?? []);
-  let sharedMultiImageSelection: DriveImage[] | null = null;
-  let sharedMultiImageCaption: string | null = null;
-
   for (let index = 0; index < eligiblePageIds.length; index += 1) {
     const pageId = eligiblePageIds[index];
     let selectedImages: DriveImage[] = [];
 
     if (automationMode === "multi-image-ai") {
-      if (!sharedMultiImageSelection) {
-        const { availableImages, nextUsedImageIds: rotatedUsedImageIds } = getAvailableImagesForCycle(
-          images,
-          dayKey,
-          dayKey,
-          nextDailyUsedImageIds,
-          nextRecentImageUsage,
-          nextUsedImageIds
+      const { availableImages, nextUsedImageIds: rotatedUsedImageIds } = getAvailableImagesForCycle(
+        images,
+        dayKey,
+        dayKey,
+        nextDailyUsedImageIds,
+        nextRecentImageUsage,
+        nextUsedImageIds
+      );
+      const remainingPageCount = eligiblePageIds.length - index;
+      const count = resolveMultiImageTargetCountForPage(
+        config.multiImageCountMode ?? "4",
+        availableImages.length,
+        remainingPageCount
+      );
+      if (!count) {
+        throw new Error(
+          `Not enough eligible images to build unique multi-image sets for all selected pages. Available right now: ${availableImages.length}, pages remaining: ${remainingPageCount}, required per page: ${config.multiImageCountMode === "5" ? 5 : config.multiImageCountMode === "6-10" ? "6-10" : 4}.`
         );
-        const count = getMultiImageTargetCount(config.multiImageCountMode ?? "4", availableImages.length);
-        if (!count) {
-          throw new Error(
-            `Not enough eligible images to build the selected multi-image post size. Available right now: ${availableImages.length}, required: ${config.multiImageCountMode === "5" ? 5 : config.multiImageCountMode === "6-10" ? "6-10" : 4}.`
-          );
-        }
-
-        sharedMultiImageSelection = selectSimilarImageGroup(availableImages, count);
-        sharedMultiImageCaption = await buildMultiImageCaption(config, sharedMultiImageSelection, driveConnection.accessToken);
-        nextUsedImageIds = [...rotatedUsedImageIds, ...sharedMultiImageSelection.map((image) => image.id)];
-        nextDailyUsedImageIds = [...nextDailyUsedImageIds, ...sharedMultiImageSelection.map((image) => image.id)];
-        nextRecentImageUsage = [
-          ...nextRecentImageUsage,
-          ...sharedMultiImageSelection.map((image) => ({ imageId: image.id, usedAt: triggeredAt }))
-        ];
       }
 
-      selectedImages = sharedMultiImageSelection;
+      selectedImages = selectSimilarImageGroup(availableImages, count);
+      nextUsedImageIds = [...rotatedUsedImageIds, ...selectedImages.map((image) => image.id)];
     } else {
       const plan = buildDailyImageSelectionPlan(
         images,
@@ -740,19 +759,17 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
     }
 
     const selectedImageIds = selectedImages.map((image) => image.id);
-    if (automationMode !== "multi-image-ai") {
-      nextDailyUsedImageIds = [...nextDailyUsedImageIds, ...selectedImageIds];
-      nextRecentImageUsage = [
-        ...nextRecentImageUsage,
-        ...selectedImageIds.map((imageId) => ({ imageId, usedAt: triggeredAt }))
-      ];
-    }
+    nextDailyUsedImageIds = [...nextDailyUsedImageIds, ...selectedImageIds];
+    nextRecentImageUsage = [
+      ...nextRecentImageUsage,
+      ...selectedImageIds.map((imageId) => ({ imageId, usedAt: triggeredAt }))
+    ];
     selectedImageIdsForRun.push(...selectedImageIds);
 
     const primaryImage = selectedImages[0];
     const caption =
       automationMode === "multi-image-ai"
-        ? sharedMultiImageCaption ?? await buildMultiImageCaption(config, selectedImages, driveConnection.accessToken)
+        ? await buildMultiImageCaption(config, selectedImages, driveConnection.accessToken)
         : await buildCaption(config, primaryImage, driveConnection.accessToken);
     const normalizedHashtags = normalizeHashtags(config.hashtags);
     const startAt = new Date(batchStartAt.getTime() + index * AUTO_POST_BATCH_PAGE_SPACING_MINUTES * 60 * 1000);
