@@ -237,7 +237,7 @@ function normalizeImageClusterKey(name: string) {
   const base = stripNumericSuffix(stripFileExtension(name).toLowerCase());
   return base
     .replace(/\s+/g, " ")
-    .replace(/[^a-z0-9à¸-à¹™ ]+/g, " ")
+    .replace(/[^\p{L}\p{N} ]+/gu, " ")
     .trim();
 }
 
@@ -605,7 +605,7 @@ async function buildMultiImageCaption(config: LeanAutoPostConfig, images: DriveI
   }
 
   return appendHashtags(
-    `à¸£à¸§à¸¡à¸ à¸²à¸žà¹€à¸”à¹ˆà¸™à¸ˆà¸²à¸ ${config.folderName || "à¸„à¸¥à¸±à¸‡à¸£à¸¹à¸›"} à¸Šà¸¸à¸”à¸™à¸µà¹‰à¹„à¸§à¹‰à¹ƒà¸«à¹‰à¹à¸¥à¹‰à¸§ à¸¥à¸­à¸‡à¸”à¸¹à¸—à¸µà¸¥à¸°à¸ à¸²à¸žà¹à¸¥à¹‰à¸§à¸ˆà¸°à¹€à¸«à¹‡à¸™à¸˜à¸µà¸¡à¸«à¸¥à¸±à¸à¸Šà¸±à¸”à¸‚à¸¶à¹‰à¸™à¹à¸šà¸šà¸„à¸£à¸šà¸à¸§à¹ˆà¸²à¹‚à¸žà¸ªà¸•à¹Œà¹€à¸”à¸µà¹ˆà¸¢à¸§`,
+    `รวมภาพเด่นจาก ${config.folderName || "คลังรูป"} ชุดนี้ไว้ให้แล้ว ลองดูทีละภาพแล้วจะเห็นธีมหลักชัดขึ้นแบบครบกว่าการดูโพสต์เดี่ยว`,
     config.hashtags
   );
 }
@@ -686,26 +686,41 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
   let nextDailyUsedImageIds = config.dailyImageUsageDate === dayKey ? [...(config.dailyUsedImageIds ?? [])] : [];
   let nextRecentImageUsage = pruneRecentImageUsage(config.recentImageUsage ?? [], triggeredAt);
   let nextUsedImageIds = normalizeCycleUsedImageIds(images, config.usedImageIds ?? []);
+  let sharedMultiImageSelection: DriveImage[] | null = null;
+  let sharedMultiImageCaption: string | null = null;
 
   for (let index = 0; index < eligiblePageIds.length; index += 1) {
     const pageId = eligiblePageIds[index];
     let selectedImages: DriveImage[] = [];
 
     if (automationMode === "multi-image-ai") {
-      const { availableImages, nextUsedImageIds: rotatedUsedImageIds } = getAvailableImagesForCycle(
-        images,
-        dayKey,
-        dayKey,
-        nextDailyUsedImageIds,
-        nextRecentImageUsage,
-        nextUsedImageIds
-      );
-      const count = getMultiImageTargetCount(config.multiImageCountMode ?? "4", availableImages.length);
-      if (!count) {
-        throw new Error(`Not enough eligible images to build the selected multi-image post size for page ${pageId}.`);
+      if (!sharedMultiImageSelection) {
+        const { availableImages, nextUsedImageIds: rotatedUsedImageIds } = getAvailableImagesForCycle(
+          images,
+          dayKey,
+          dayKey,
+          nextDailyUsedImageIds,
+          nextRecentImageUsage,
+          nextUsedImageIds
+        );
+        const count = getMultiImageTargetCount(config.multiImageCountMode ?? "4", availableImages.length);
+        if (!count) {
+          throw new Error(
+            `Not enough eligible images to build the selected multi-image post size. Available right now: ${availableImages.length}, required: ${config.multiImageCountMode === "5" ? 5 : config.multiImageCountMode === "6-10" ? "6-10" : 4}.`
+          );
+        }
+
+        sharedMultiImageSelection = selectSimilarImageGroup(availableImages, count);
+        sharedMultiImageCaption = await buildMultiImageCaption(config, sharedMultiImageSelection, driveConnection.accessToken);
+        nextUsedImageIds = [...rotatedUsedImageIds, ...sharedMultiImageSelection.map((image) => image.id)];
+        nextDailyUsedImageIds = [...nextDailyUsedImageIds, ...sharedMultiImageSelection.map((image) => image.id)];
+        nextRecentImageUsage = [
+          ...nextRecentImageUsage,
+          ...sharedMultiImageSelection.map((image) => ({ imageId: image.id, usedAt: triggeredAt }))
+        ];
       }
-      selectedImages = selectSimilarImageGroup(availableImages, count);
-      nextUsedImageIds = [...rotatedUsedImageIds, ...selectedImages.map((image) => image.id)];
+
+      selectedImages = sharedMultiImageSelection;
     } else {
       const plan = buildDailyImageSelectionPlan(
         images,
@@ -725,17 +740,19 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
     }
 
     const selectedImageIds = selectedImages.map((image) => image.id);
-    nextDailyUsedImageIds = [...nextDailyUsedImageIds, ...selectedImageIds];
-    nextRecentImageUsage = [
-      ...nextRecentImageUsage,
-      ...selectedImageIds.map((imageId) => ({ imageId, usedAt: triggeredAt }))
-    ];
+    if (automationMode !== "multi-image-ai") {
+      nextDailyUsedImageIds = [...nextDailyUsedImageIds, ...selectedImageIds];
+      nextRecentImageUsage = [
+        ...nextRecentImageUsage,
+        ...selectedImageIds.map((imageId) => ({ imageId, usedAt: triggeredAt }))
+      ];
+    }
     selectedImageIdsForRun.push(...selectedImageIds);
 
     const primaryImage = selectedImages[0];
     const caption =
       automationMode === "multi-image-ai"
-        ? await buildMultiImageCaption(config, selectedImages, driveConnection.accessToken)
+        ? sharedMultiImageCaption ?? await buildMultiImageCaption(config, selectedImages, driveConnection.accessToken)
         : await buildCaption(config, primaryImage, driveConnection.accessToken);
     const normalizedHashtags = normalizeHashtags(config.hashtags);
     const startAt = new Date(batchStartAt.getTime() + index * AUTO_POST_BATCH_PAGE_SPACING_MINUTES * 60 * 1000);
