@@ -216,6 +216,15 @@ function randomizeOrder<T>(items: T[]) {
   return copy;
 }
 
+function normalizeCycleUsedImageIds(images: DriveImage[], usedImageIds: string[] = []) {
+  if (!usedImageIds.length) {
+    return [];
+  }
+
+  const validIds = new Set(images.map((image) => image.id));
+  return usedImageIds.filter((imageId) => validIds.has(imageId));
+}
+
 function stripNumericSuffix(value: string) {
   return value
     .replace(/[\s_-]*\(\d+\)$/g, "")
@@ -247,19 +256,32 @@ function getAvailableImagesForCycle(
   currentDayKey: string,
   persistedDayKey?: string | null,
   dailyUsedImageIds: string[] = [],
-  recentImageUsage: Array<{ imageId: string; usedAt: Date | string }> = []
+  recentImageUsage: Array<{ imageId: string; usedAt: Date | string }> = [],
+  usedImageIds: string[] = []
 ) {
   const activeDailyUsedImageIds = persistedDayKey === currentDayKey ? dailyUsedImageIds : [];
   const prunedRecentUsage = pruneRecentImageUsage(recentImageUsage);
-  const blockedIds = new Set<string>([
+  const cycleUsedImageIds = normalizeCycleUsedImageIds(images, usedImageIds);
+  const permanentlyBlockedIds = new Set<string>([
     ...activeDailyUsedImageIds,
     ...prunedRecentUsage.map((entry) => entry.imageId)
   ]);
 
+  let availableImages = randomizeOrder(
+    images.filter((image) => !permanentlyBlockedIds.has(image.id) && !cycleUsedImageIds.includes(image.id))
+  );
+  let nextUsedImageIds = cycleUsedImageIds;
+
+  if (!availableImages.length) {
+    availableImages = randomizeOrder(images.filter((image) => !permanentlyBlockedIds.has(image.id)));
+    nextUsedImageIds = [];
+  }
+
   return {
-    availableImages: randomizeOrder(images.filter((image) => !blockedIds.has(image.id))),
+    availableImages,
     activeDailyUsedImageIds,
-    prunedRecentUsage
+    prunedRecentUsage,
+    nextUsedImageIds
   };
 }
 
@@ -314,24 +336,27 @@ function buildDailyImageSelectionPlan(
   currentDayKey: string,
   persistedDayKey?: string | null,
   dailyUsedImageIds: string[] = [],
-  recentImageUsage: Array<{ imageId: string; usedAt: Date | string }> = []
+  recentImageUsage: Array<{ imageId: string; usedAt: Date | string }> = [],
+  usedImageIds: string[] = []
 ) {
   if (!images.length || pageCount <= 0) {
     return {
       chosenImages: [] as DriveImage[],
       nextDailyUsedImageIds: persistedDayKey === currentDayKey ? dailyUsedImageIds : [],
       activeDayKey: currentDayKey,
-      nextRecentImageUsage: pruneRecentImageUsage(recentImageUsage)
+      nextRecentImageUsage: pruneRecentImageUsage(recentImageUsage),
+      nextUsedImageIds: normalizeCycleUsedImageIds(images, usedImageIds)
     };
   }
 
   const activeDayKey = currentDayKey;
-  const { availableImages, activeDailyUsedImageIds, prunedRecentUsage } = getAvailableImagesForCycle(
+  const { availableImages, activeDailyUsedImageIds, prunedRecentUsage, nextUsedImageIds } = getAvailableImagesForCycle(
     images,
     currentDayKey,
     persistedDayKey,
     dailyUsedImageIds,
-    recentImageUsage
+    recentImageUsage,
+    usedImageIds
   );
 
   if (availableImages.length < pageCount) {
@@ -348,7 +373,8 @@ function buildDailyImageSelectionPlan(
     nextRecentImageUsage: [
       ...prunedRecentUsage,
       ...chosenImages.map((image) => ({ imageId: image.id, usedAt: new Date() }))
-    ]
+    ],
+    nextUsedImageIds: [...nextUsedImageIds, ...chosenImages.map((image) => image.id)]
   };
 }
 
@@ -659,24 +685,27 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
   const selectedImageIdsForRun: string[] = [];
   let nextDailyUsedImageIds = config.dailyImageUsageDate === dayKey ? [...(config.dailyUsedImageIds ?? [])] : [];
   let nextRecentImageUsage = pruneRecentImageUsage(config.recentImageUsage ?? [], triggeredAt);
+  let nextUsedImageIds = normalizeCycleUsedImageIds(images, config.usedImageIds ?? []);
 
   for (let index = 0; index < eligiblePageIds.length; index += 1) {
     const pageId = eligiblePageIds[index];
     let selectedImages: DriveImage[] = [];
 
     if (automationMode === "multi-image-ai") {
-      const { availableImages } = getAvailableImagesForCycle(
+      const { availableImages, nextUsedImageIds: rotatedUsedImageIds } = getAvailableImagesForCycle(
         images,
         dayKey,
         dayKey,
         nextDailyUsedImageIds,
-        nextRecentImageUsage
+        nextRecentImageUsage,
+        nextUsedImageIds
       );
       const count = getMultiImageTargetCount(config.multiImageCountMode ?? "4", availableImages.length);
       if (!count) {
         throw new Error(`Not enough eligible images to build the selected multi-image post size for page ${pageId}.`);
       }
       selectedImages = selectSimilarImageGroup(availableImages, count);
+      nextUsedImageIds = [...rotatedUsedImageIds, ...selectedImages.map((image) => image.id)];
     } else {
       const plan = buildDailyImageSelectionPlan(
         images,
@@ -684,9 +713,11 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
         dayKey,
         dayKey,
         nextDailyUsedImageIds,
-        nextRecentImageUsage
+        nextRecentImageUsage,
+        nextUsedImageIds
       );
       selectedImages = plan.chosenImages;
+      nextUsedImageIds = plan.nextUsedImageIds;
     }
 
     if (!selectedImages.length) {
@@ -756,7 +787,7 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
     retryCount: 0,
     lastPostId,
     lastSelectedImageId,
-    usedImageIds: [],
+    usedImageIds: nextUsedImageIds,
     dailyImageUsageDate: dayKey,
     dailyUsedImageIds: nextDailyUsedImageIds,
     recentImageUsage: nextRecentImageUsage,

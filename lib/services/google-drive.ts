@@ -61,37 +61,59 @@ export async function fetchDriveFolders(accessToken: string, parentId = "root") 
 }
 
 export async function fetchImagesFromFolder(accessToken: string, folderId: string) {
-  const url = new URL("https://www.googleapis.com/drive/v3/files");
   const rootQuery = folderId === "root"
     ? "'root' in parents and mimeType contains 'image/' and trashed = false"
     : `'${folderId}' in parents and mimeType contains 'image/' and trashed = false`;
+  const files: Array<{
+    id: string;
+    name: string;
+    mimeType?: string;
+    thumbnailLink?: string;
+    webContentLink?: string;
+    webViewLink?: string;
+  }> = [];
 
-  url.searchParams.set("q", rootQuery);
-  url.searchParams.set("fields", "files(id,name,mimeType,thumbnailLink,webContentLink,webViewLink)");
-  url.searchParams.set("pageSize", "100");
-  url.searchParams.set("orderBy", "name_natural");
+  let nextPageToken: string | undefined;
 
-  const response = await fetchWithRetry(url.toString(), {
-    headers: {
-      Authorization: `Bearer ${accessToken}`
-    },
-    cache: "no-store"
-  });
+  do {
+    const url = new URL("https://www.googleapis.com/drive/v3/files");
+    url.searchParams.set("q", rootQuery);
+    url.searchParams.set("fields", "nextPageToken,files(id,name,mimeType,thumbnailLink,webContentLink,webViewLink)");
+    url.searchParams.set("pageSize", "1000");
+    url.searchParams.set("orderBy", "createdTime desc,name_natural");
 
-  if (!response.ok) {
-    throw new Error("Failed to fetch Google Drive images");
-  }
+    if (nextPageToken) {
+      url.searchParams.set("pageToken", nextPageToken);
+    }
 
-  return response.json() as Promise<{
-    files: Array<{
-      id: string;
-      name: string;
-      mimeType?: string;
-      thumbnailLink?: string;
-      webContentLink?: string;
-      webViewLink?: string;
-    }>;
-  }>;
+    const response = await fetchWithRetry(url.toString(), {
+      headers: {
+        Authorization: `Bearer ${accessToken}`
+      },
+      cache: "no-store"
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to fetch Google Drive images");
+    }
+
+    const payload = (await response.json()) as {
+      nextPageToken?: string;
+      files?: Array<{
+        id: string;
+        name: string;
+        mimeType?: string;
+        thumbnailLink?: string;
+        webContentLink?: string;
+        webViewLink?: string;
+      }>;
+    };
+
+    files.push(...(payload.files ?? []));
+    nextPageToken = payload.nextPageToken;
+  } while (nextPageToken);
+
+  return { files };
 }
 
 export async function fetchDriveImageBinary(accessToken: string, fileId: string) {

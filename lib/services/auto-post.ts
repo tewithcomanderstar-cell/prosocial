@@ -208,6 +208,56 @@ function randomizeOrder<T>(items: T[]) {
   return copy;
 }
 
+function normalizeCycleUsedImageIds(images: DriveImage[], usedImageIds: string[] = []) {
+  if (!usedImageIds.length) {
+    return [];
+  }
+
+  const validIds = new Set(images.map((image) => image.id));
+  return usedImageIds.filter((imageId) => validIds.has(imageId));
+}
+
+function pickImagesForCycle(
+  images: DriveImage[],
+  pageCount: number,
+  dailyUsedImageIds: string[] = [],
+  usedImageIds: string[] = []
+) {
+  if (!images.length || pageCount <= 0) {
+    return {
+      chosenImages: [] as DriveImage[],
+      nextUsedImageIds: normalizeCycleUsedImageIds(images, usedImageIds)
+    };
+  }
+
+  const normalizedUsedImageIds = normalizeCycleUsedImageIds(images, usedImageIds);
+  const dailyBlockedIds = new Set(dailyUsedImageIds);
+  const cycleBlockedIds = new Set(normalizedUsedImageIds);
+
+  let prioritizedPool = randomizeOrder(
+    images.filter((image) => !dailyBlockedIds.has(image.id) && !cycleBlockedIds.has(image.id))
+  );
+
+  let nextUsedImageIds = normalizedUsedImageIds;
+
+  if (prioritizedPool.length < pageCount) {
+    prioritizedPool = randomizeOrder(images.filter((image) => !dailyBlockedIds.has(image.id)));
+    nextUsedImageIds = [];
+  }
+
+  if (prioritizedPool.length < pageCount) {
+    throw new Error(
+      `Not enough unused images left for today. Available: ${prioritizedPool.length}, required: ${pageCount}. Add more images or wait until tomorrow.`
+    );
+  }
+
+  const chosenImages = prioritizedPool.slice(0, pageCount);
+  return {
+    chosenImages,
+    nextUsedImageIds: [...nextUsedImageIds, ...chosenImages.map((image) => image.id)]
+  };
+}
+
 function getBangkokDayKey(date = new Date()) {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Bangkok",
@@ -222,31 +272,32 @@ function buildDailyImageSelectionPlan(
   pageCount: number,
   currentDayKey: string,
   persistedDayKey?: string | null,
-  dailyUsedImageIds: string[] = []
+  dailyUsedImageIds: string[] = [],
+  usedImageIds: string[] = []
 ) {
   if (!images.length || pageCount <= 0) {
     return {
       chosenImages: [] as DriveImage[],
       nextDailyUsedImageIds: persistedDayKey === currentDayKey ? dailyUsedImageIds : [],
-      activeDayKey: currentDayKey
+      activeDayKey: currentDayKey,
+      nextUsedImageIds: normalizeCycleUsedImageIds(images, usedImageIds)
     };
   }
 
   const activeDayKey = persistedDayKey === currentDayKey ? currentDayKey : currentDayKey;
   const activeDailyUsedImageIds = persistedDayKey === currentDayKey ? dailyUsedImageIds : [];
-  const availableImages = randomizeOrder(images.filter((image) => !activeDailyUsedImageIds.includes(image.id)));
+  const { chosenImages, nextUsedImageIds } = pickImagesForCycle(
+    images,
+    pageCount,
+    activeDailyUsedImageIds,
+    usedImageIds
+  );
 
-  if (availableImages.length < pageCount) {
-    throw new Error(
-      `Not enough unused images left for today. Available: ${availableImages.length}, required: ${pageCount}. Add more images or wait until tomorrow.`
-    );
-  }
-
-  const chosenImages = availableImages.slice(0, pageCount);
   return {
     chosenImages,
     nextDailyUsedImageIds: [...activeDailyUsedImageIds, ...chosenImages.map((image) => image.id)],
-    activeDayKey
+    activeDayKey,
+    nextUsedImageIds
   };
 }
 
@@ -454,12 +505,13 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
   let lastPostId: unknown = null;
   let lastSelectedImageId: string | null = null;
   const dayKey = getBangkokDayKey(triggeredAt);
-  const { chosenImages, nextDailyUsedImageIds, activeDayKey } = buildDailyImageSelectionPlan(
+  const { chosenImages, nextDailyUsedImageIds, activeDayKey, nextUsedImageIds } = buildDailyImageSelectionPlan(
     images,
     eligiblePageIds.length,
     dayKey,
     config.dailyImageUsageDate ?? null,
-    config.dailyUsedImageIds ?? []
+    config.dailyUsedImageIds ?? [],
+    config.usedImageIds ?? []
   );
   const batchDelayMinutes = options.immediate ? 0 : getRandomDelayMinutes(config.minRandomDelayMinutes ?? 0, config.maxRandomDelayMinutes ?? 0);
   const batchRequestedStartAt = new Date(Date.now() + batchDelayMinutes * 60 * 1000);
@@ -522,7 +574,7 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
     retryCount: 0,
     lastPostId,
     lastSelectedImageId,
-    usedImageIds: [],
+    usedImageIds: nextUsedImageIds,
     dailyImageUsageDate: activeDayKey,
     dailyUsedImageIds: nextDailyUsedImageIds,
     lastWorkflowId: records.workflowId,
