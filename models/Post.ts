@@ -5,6 +5,7 @@ const postSchema = new Schema(
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     title: { type: String, required: true },
     content: { type: String, required: true },
+    pinnedComment: { type: String, default: "" },
     hashtags: { type: [String], default: [] },
     imageUrls: { type: [String], default: [] },
     targetPageIds: { type: [String], default: [] },

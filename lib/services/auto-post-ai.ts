@@ -555,6 +555,21 @@ function formatMultiImageCaption(caption: string, mode: "balanced" | "short" = "
   return outputLines.join("\n");
 }
 
+function formatPinnedComment(comment: string) {
+  const normalized = comment.replace(/\r\n/g, "\n").trim();
+  if (!normalized) {
+    return normalized;
+  }
+
+  return normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 4)
+    .map((line) => shortenSentence(line, 80))
+    .join("\n");
+}
+
 function normalizeHashtags(hashtags?: string[]) {
   return (hashtags ?? [])
     .map((hashtag) => hashtag.trim())
@@ -651,7 +666,7 @@ async function buildCaption(config: LeanAutoPostConfig, image: DriveImage, drive
   return appendHashtags(`Fresh update from ${config.folderName || "your Google Drive"}`, config.hashtags);
 }
 
-async function buildMultiImageCaption(config: LeanAutoPostConfig, images: DriveImage[], driveAccessToken: string) {
+async function buildMultiImagePackage(config: LeanAutoPostConfig, images: DriveImage[], driveAccessToken: string) {
   const sampleImages = images.slice(0, Math.min(images.length, 4));
   const sourceChunks: string[] = [];
   const rotatingStyle = getRotatingMultiImageStyle();
@@ -681,60 +696,71 @@ async function buildMultiImageCaption(config: LeanAutoPostConfig, images: DriveI
     }
   }
 
-  const keyword = `${config.folderName || "Google Drive"} photo set`;
+  const keyword = `${config.folderName || "Google Drive"} nail idea set`;
   const builtInPrompt =
-    `เขียนแคปชั่น Facebook ภาษาไทยสำหรับโพสต์หลายภาพ ให้เป็นโพสต์สำเร็จรูปพร้อมใช้จริง
+    `คุณคือผู้เชี่ยวชาญด้านการสร้างคอนเทนต์โซเชียลมีเดียสายไวรัล (Facebook/Instagram) ที่เน้นเพิ่ม Like, Comment, Share และ Time Spent
 
-สไตล์ที่ต้องการ:
-  - น่ารัก ละมุน เป็นกันเอง
-  - อ่านสบาย โล่งตา ไม่รก
-  - คำต้องกระชับและชัด
-  - ใช้อีโมจิพอดีๆ ได้ แต่ไม่เยอะเกิน
-  - เป้าหมายคือให้คนหยุดอ่าน ดูครบทุกภาพ กดไลก์ และแชร์ต่อ
-  - ให้น้ำหนักกับความอ่านง่ายมากกว่าความยาว
+หน้าที่ของคุณ:
+เขียนแคปชันสำหรับโพสต์ "ไอเดียเล็บ" ให้คนหยุดอ่าน อ่านต่อ และอยากมีส่วนร่วม
 
-โครงสร้างที่ต้องการทุกโพสต์:
-  1. เปิดด้วย hook สั้นๆ ไม่เกิน 1 บรรทัด
-  2. เกริ่นสั้นๆ ว่าโพสต์นี้รวมอะไร ไม่เกิน 2 บรรทัด
-  3. มีประโยคชวนให้ดูทีละรูปแบบสั้นๆ
-  4. ไล่เป็น:
-  แบบ 1 :
-  แบบ 2 :
-  แบบ 3 :
-  แบบ 4 :
-  ถ้ามีมากกว่า 4 รูปให้เขียนต่อจนครบ
-  โดยแต่ละแบบให้สรุปแค่ 1 บรรทัดสั้นๆ
-  5. ปิดท้ายด้วย CTA สั้นๆ 1-2 บรรทัด
+อินพุต:
+- คอนเทนต์เกี่ยวกับ "ไอเดียเล็บหลายแบบ"
+- สไตล์การเล่าของโพสต์นี้ให้ยึดแนว ${rotatingStyle.name}: ${rotatingStyle.description}
 
-กติกาสำคัญ:
-  - ห้ามพูดถึงชื่อไฟล์ภาพ
-  - ห้ามพูดถึงการวิเคราะห์ภาพ
-- ห้ามพูดถึงคำว่า OCR, source, prompt, ภาพนี้น่าจะ, รูปนี้อาจจะ
-  - ห้ามเขียนเหมือนโน้ตหลังบ้านหรือบรีฟงาน
-  - ห้ามถามกลับเพื่อขอข้อมูลเพิ่ม
-  - ต้องอิงจากรายละเอียดในภาพจริงเท่านั้น
-  - ถ้ารายละเอียดบางรูปไม่ชัด ให้สรุปจากธีมที่เห็น โดยยังต้องเขียนให้อ่านเหมือนโพสต์จริง
-  - ห้ามเขียนยาวจนเป็นบล็อกข้อความใหญ่
-  - ห้ามอธิบายแต่ละรูปเกินความจำเป็น
-  - ห้ามใช้ประโยคเวิ่นหรือซ้ำความหมายเดิมหลายครั้ง
-  - ความยาวรวมของ caption ควรอยู่ประมาณ ${config.captionLengthMode === "short" ? "5-7" : "7-11"} บรรทัดเท่านั้น
+เอาต์พุต:
+เขียนโพสต์โดยใช้โครงสร้างนี้เท่านั้น:
 
-สไตล์ที่ต้องใช้ในโพสต์นี้:
-  - style key: ${rotatingStyle.name}
-  - style direction: ${rotatingStyle.description}
+1. Hook เปิด (1-2 บรรทัด)
+- ต้องหยุดนิ้วทันที
+- ใช้ curiosity เช่น "เล็บ 4 แบบนี้ บอกตัวตนคุณได้"
+- หรือ "คนส่วนใหญ่เลือกผิด"
 
-แนว CTA ที่อยากได้:
-- ชวนคนคอมเมนต์ว่าแต่ละคนชอบแบบไหน
-- ชวนเซฟไว้เป็นเรฟหรือไอเดีย
-- ชวนแชร์ให้เพื่อนช่วยเลือกหรือแชร์ต่อ
+2. คำสั่งให้มีส่วนร่วม (1 บรรทัด)
+- เช่น "ลองเลือกแบบที่ชอบที่สุดก่อน"
+
+3. อธิบายแต่ละแบบ (${sampleImages.length} ข้อ)
+- แต่ละข้อ:
+  - มี emoji
+  - อธิบาย "สไตล์ + ความรู้สึก + ตัวตน"
+  - ภาษาธรรมชาติ น่ารัก อ่านง่าย
+  - สั้น กระชับ 1 บรรทัดต่อข้อ
+
+4. Interactive CTA (2-3 บรรทัด)
+- ชวนคอมเมนต์ เช่น "เมนต์เลข 1-${sampleImages.length}"
+- มี element เล่นเกม เช่น "เดี๋ยวทายนิสัยให้"
+- ชวนเซฟ + แชร์
+
+ข้อกำหนด:
+- โทนภาษาเป็นกันเอง น่ารัก ไม่ขายของตรง ๆ
+- ไม่เป็นทางการ
+- ต้องทำให้คนรู้สึกว่า "เกี่ยวกับตัวเอง"
+- ห้ามเขียนเหมือนบทความ
+- ห้ามพูดถึงชื่อไฟล์ภาพ
+- ห้ามพูดถึงการวิเคราะห์ภาพ
+- ห้ามพูดถึง OCR, source, prompt, ไฟล์, หรือข้อความหลังบ้าน
+- ห้ามถามกลับเพื่อขอข้อมูลเพิ่ม
+- ต้องอิงจากรายละเอียดในภาพจริงเท่านั้น
+- ถ้ารายละเอียดบางรูปไม่ชัด ให้สรุปจากธีมที่เห็น แต่ยังต้องเขียนเหมือนโพสต์จริง
+- ความยาวรวมของ caption ต้องอยู่ประมาณ ${config.captionLengthMode === "short" ? "8-9" : "8-12"} บรรทัด
+- ห้ามใช้ hashtag ในเนื้อโพสต์
+- ห้ามเวิ่นหรืออธิบายซ้ำ
+
+Optional:
+- เพิ่ม curiosity เช่น "เฉลยอยู่ในคอมเมนต์"
+- ใช้คำที่กระตุ้นอารมณ์ เช่น "แอบ", "จริง ๆ", "ส่วนใหญ่"
 
 สิ่งที่ต้องระวัง:
-  - แม้สไตล์จะเปลี่ยนไปในแต่ละโพสต์ แต่โครงสร้างหลักต้องเหมือนเดิมเสมอ
-  - ห้ามใช้คำเปิดซ้ำแบบเดิมทุกโพสต์
-  - ให้เปลี่ยน hook, จังหวะภาษา, และอารมณ์การเล่าไปเรื่อยๆ
-  - แต่ยังต้องเป็นคอนเทนต์ Facebook ที่อ่านง่าย ชวนมีส่วนร่วม และพร้อมโพสต์จริง
-  - ให้ความสำคัญกับการอ่านสบายบนมือถือเป็นอันดับแรก`;
+- แม้สไตล์จะเปลี่ยนไปในแต่ละโพสต์ แต่โครงสร้างหลักต้องเหมือนเดิมเสมอ
+- ห้ามใช้คำเปิดซ้ำแบบเดิมทุกโพสต์
+- ต้องอ่านสบายบนมือถือและดูโล่งตา`;
   const customPrompt = [builtInPrompt, config.aiPrompt?.trim() || ""].filter(Boolean).join("\n\n");
+  const fallbackCaption = appendHashtags(
+    formatMultiImageCaption(
+      `เล็บ ${sampleImages.length} แบบนี้ แต่ละแบบให้ฟีลไม่เหมือนกันเลย\nลองเลือกแบบที่ชอบที่สุดก่อน\n1. ละมุนหวาน ดูน่ารักและอบอุ่น\n2. เนี้ยบขึ้นอีกนิด ฟีลคนมีสไตล์แบบพอดี\n3. ขี้เล่น สดใส และมีเสน่ห์แบบเป็นธรรมชาติ\n4. ดูมั่นใจ มีคาแรกเตอร์ และน่ามองมาก\nเมนต์เลขที่ชอบ เดี๋ยวทายนิสัยให้\nเซฟไว้เป็นเรฟ แล้วแชร์ให้เพื่อนช่วยเลือกได้เลย`,
+      config.captionLengthMode ?? "balanced"
+    ),
+    config.hashtags
+  );
 
   try {
     const variants = await generateFacebookContent(keyword, {
@@ -745,24 +771,59 @@ async function buildMultiImageCaption(config: LeanAutoPostConfig, images: DriveI
     });
     const chosen = variants?.length ? randomItem(variants) : null;
     if (chosen) {
-      return appendHashtags(
+      const caption = appendHashtags(
         formatMultiImageCaption(
           [chosen.caption, chosen.hashtags.join(" ")].filter(Boolean).join("\n\n"),
           config.captionLengthMode ?? "balanced"
         ),
         config.hashtags
       );
+      return {
+        caption,
+        pinnedComment: await buildMultiImagePinnedComment(config, caption)
+      };
     }
   } catch {
     // Fall back below.
   }
 
-  return appendHashtags(
-    formatMultiImageCaption(
-      `รวมไอเดียจาก ${config.folderName || "คลังรูป"} ชุดนี้ไว้ให้แล้ว\nลองดูทีละภาพ แล้วเลือกแบบที่ชอบได้เลย`,
-      config.captionLengthMode ?? "balanced"
-    ),
-    config.hashtags
+  return {
+    caption: fallbackCaption,
+    pinnedComment: await buildMultiImagePinnedComment(config, fallbackCaption)
+  };
+}
+
+async function buildMultiImagePinnedComment(config: LeanAutoPostConfig, caption: string) {
+  const pinnedCommentPrompt = `เขียน "คอมเมนต์ปักหมุด" สำหรับโพสต์ไอเดียเล็บด้านล่าง
+
+เงื่อนไข:
+- เป็นการเฉลยนิสัยของแต่ละข้อ 1-4
+- ภาษาสั้น กระชับ อ่านง่าย
+- ทำให้คนอยากเลื่อนมาอ่าน
+- มีความรู้สึกเหมือนรู้จักตัวตนคนอ่าน
+- ความยาวไม่เกิน 4 บรรทัด
+- ห้ามใช้ hashtag
+
+โพสต์ต้นทาง:
+${caption}`;
+
+  try {
+    const variants = await generateFacebookContent("pinned comment reveal", {
+      userId: config.userId,
+      customPrompt: pinnedCommentPrompt,
+      sourceText: caption,
+      sourceLabel: "caption for pinned comment"
+    });
+    const chosen = variants?.length ? randomItem(variants) : null;
+    if (chosen?.caption) {
+      return formatPinnedComment(chosen.caption);
+    }
+  } catch {
+    // Fall through to the default pinned comment.
+  }
+
+  return formatPinnedComment(
+    "ใครเลือกข้อไหนมาอ่านตรงนี้\n1 อบอุ่นละมุน 2 เนี้ยบมีเสน่ห์ 3 สดใสขี้เล่น 4 มั่นใจมีคาแรกเตอร์\nตรงไหม เมนต์บอกหน่อย"
   );
 }
 
@@ -896,10 +957,12 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
     selectedImageIdsForRun.push(...selectedImageIds);
 
     const primaryImage = selectedImages[0];
-    const caption =
+    const multiImagePackage =
       automationMode === "multi-image-ai"
-        ? await buildMultiImageCaption(config, selectedImages, driveConnection.accessToken)
-        : await buildCaption(config, primaryImage, driveConnection.accessToken);
+        ? await buildMultiImagePackage(config, selectedImages, driveConnection.accessToken)
+        : null;
+    const caption = multiImagePackage?.caption ?? (await buildCaption(config, primaryImage, driveConnection.accessToken));
+    const pinnedComment = multiImagePackage?.pinnedComment ?? "";
     const normalizedHashtags = normalizeHashtags(config.hashtags);
     const startAt = new Date(batchStartAt.getTime() + index * AUTO_POST_BATCH_PAGE_SPACING_MINUTES * 60 * 1000);
 
@@ -907,6 +970,7 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
       userId: config.userId,
       title: `Auto Post ${pageId} ${triggeredAt.toISOString()}`,
       content: caption,
+      pinnedComment,
       hashtags: normalizedHashtags,
       imageUrls: selectedImageIds.map((imageId) => `drive:${imageId}`),
       targetPageIds: [pageId],
