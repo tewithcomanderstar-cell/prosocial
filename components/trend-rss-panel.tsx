@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
@@ -66,6 +66,18 @@ function formatDateTime(value?: string | null) {
   return new Date(value).toLocaleString("th-TH");
 }
 
+function hotLevelLabel(value: string) {
+  switch (value) {
+    case "surging":
+      return "แรงมาก";
+    case "hot":
+      return "ร้อน";
+    case "warm":
+    default:
+      return "เริ่มมา";
+  }
+}
+
 export function TrendRssPanel() {
   const [config, setConfig] = useState<TrendConfig>(defaultConfig);
   const [connectedPages, setConnectedPages] = useState<FacebookPage[]>([]);
@@ -110,7 +122,7 @@ export function TrendRssPanel() {
       if (rssJson.ok) setRssSources(rssJson.data.sources ?? []);
       if (clustersJson.ok) setClusters(clustersJson.data.clusters ?? []);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "?????????????????????");
+      setError(loadError instanceof Error ? loadError.message : "โหลดโหมดข่าวไม่สำเร็จ");
     } finally {
       setLoading(false);
     }
@@ -133,10 +145,10 @@ export function TrendRssPanel() {
     });
     const result = await response.json();
     if (!result.ok) {
-      setError(result.message || "?????????????????????????");
+      setError(result.message || "บันทึกการตั้งค่าไม่สำเร็จ");
       return;
     }
-    setMessage(result.message || "????????????????????");
+    setMessage(result.message || "บันทึกการตั้งค่าแล้ว");
     await loadAll();
   }
 
@@ -157,10 +169,10 @@ export function TrendRssPanel() {
     });
     const result = await response.json();
     if (!result.ok) {
-      setError(result.message || "???????????????????????");
+      setError(result.message || "เพิ่มเพจต้นทางไม่สำเร็จ");
       return;
     }
-    setMessage(result.message || "??????????????????");
+    setMessage(result.message || "เพิ่มเพจต้นทางแล้ว");
     await loadAll();
   }
 
@@ -181,7 +193,7 @@ export function TrendRssPanel() {
     });
     const result = await response.json();
     if (!result.ok) {
-      setError(result.message || "????? RSS source ?????????");
+      setError(result.message || "เพิ่ม RSS source ไม่สำเร็จ");
       return;
     }
     setNewSource({
@@ -191,7 +203,7 @@ export function TrendRssPanel() {
       trustScore: 70,
       language: "th"
     });
-    setMessage(result.message || "????? RSS source ????");
+    setMessage(result.message || "เพิ่ม RSS source แล้ว");
     await loadAll();
   }
 
@@ -208,18 +220,18 @@ export function TrendRssPanel() {
     try {
       const response = await fetch("/api/trend-rss/run", { method: "POST" });
       const result = await response.json();
-      if (!result.ok) throw new Error(result.message || "????????????????????");
-      setMessage(result.message || "??? pipeline ????");
+      if (!result.ok) throw new Error(result.message || "รันโหมดข่าวไม่สำเร็จ");
+      setMessage(result.message || "รัน pipeline แล้ว");
       await loadAll();
     } catch (runError) {
-      setError(runError instanceof Error ? runError.message : "????????????????????");
+      setError(runError instanceof Error ? runError.message : "รันโหมดข่าวไม่สำเร็จ");
     } finally {
       setRunning(false);
     }
   }
 
   if (loading) {
-    return <div className="muted">??????????????????????...</div>;
+    return <div className="muted">กำลังโหลดโหมดโพสต์ข่าว...</div>;
   }
 
   return (
@@ -228,10 +240,10 @@ export function TrendRssPanel() {
         <div className="split">
           <div className="stack compact-stack">
             <div className="kicker">Config</div>
-            <h3>???????? RSS</h3>
+            <h3>โหมดข่าว RSS</h3>
           </div>
           <button className="button button-secondary" type="button" onClick={runNow} disabled={running}>
-            {running ? "????????..." : "??????????????"}
+            {running ? "กำลังรัน..." : "สแกนข่าวตอนนี้"}
           </button>
         </div>
 
@@ -244,7 +256,7 @@ export function TrendRssPanel() {
             checked={config.enabled}
             onChange={(event) => setConfig((current) => ({ ...current, enabled: event.target.checked }))}
           />
-          <span>???????????????????????</span>
+          <span>เปิดใช้งานโหมดโพสต์ข่าว</span>
         </label>
 
         <label className="checkbox-row">
@@ -253,12 +265,12 @@ export function TrendRssPanel() {
             checked={config.autoRunEnabled}
             onChange={(event) => setConfig((current) => ({ ...current, autoRunEnabled: event.target.checked }))}
           />
-          <span>?????????????????</span>
+          <span>สแกนข่าวอัตโนมัติ</span>
         </label>
 
         <div className="grid cols-2">
           <label className="label">
-            ???
+            ทุก
             <select
               className="select"
               value={config.intervalMinutes}
@@ -266,15 +278,15 @@ export function TrendRssPanel() {
                 setConfig((current) => ({ ...current, intervalMinutes: Number(event.target.value) as TrendConfig["intervalMinutes"] }))
               }
             >
-              <option value={15}>15 ????</option>
-              <option value={30}>30 ????</option>
-              <option value={60}>1 ???????</option>
-              <option value={120}>2 ???????</option>
+              <option value={15}>15 นาที</option>
+              <option value={30}>30 นาที</option>
+              <option value={60}>1 ชั่วโมง</option>
+              <option value={120}>2 ชั่วโมง</option>
             </select>
           </label>
 
           <label className="label">
-            ????????????
+            เป้าหมายหลัก
             <select
               className="select"
               value={config.strategyGoal}
@@ -282,10 +294,10 @@ export function TrendRssPanel() {
                 setConfig((current) => ({ ...current, strategyGoal: event.target.value as TrendConfig["strategyGoal"] }))
               }
             >
-              <option value="maximize_time_spend">?????????????</option>
-              <option value="maximize_engagement">????? engagement</option>
-              <option value="maximize_shares">????????????</option>
-              <option value="maximize_trust">????????????????????</option>
+              <option value="maximize_time_spend">เพิ่มเวลาอ่าน</option>
+              <option value="maximize_engagement">เพิ่ม engagement</option>
+              <option value="maximize_shares">เพิ่มการแชร์</option>
+              <option value="maximize_trust">เพิ่มความน่าเชื่อถือ</option>
             </select>
           </label>
         </div>
@@ -296,13 +308,13 @@ export function TrendRssPanel() {
             checked={config.safeDraftMode}
             onChange={(event) => setConfig((current) => ({ ...current, safeDraftMode: event.target.checked }))}
           />
-          <span>???????????: ????? draft / needs review ???????????????</span>
+          <span>โหมดปลอดภัย: สร้าง draft / needs review เป็นค่าเริ่มต้น</span>
         </label>
 
         <div className="stack compact-stack">
           <div className="split compact-row">
-            <strong>???????????????? draft</strong>
-            <span className="muted">{config.destinationPageIds.length} ???</span>
+            <strong>เพจปลายทางสำหรับ draft</strong>
+            <span className="muted">{config.destinationPageIds.length} เพจ</span>
           </div>
           <div className="chip-grid">
             {connectedPages.map((page) => {
@@ -330,26 +342,26 @@ export function TrendRssPanel() {
 
         <div className="grid cols-3">
           <div className="card">
-            <span className="muted">?????</span>
+            <span className="muted">สถานะ</span>
             <strong>{config.status ?? "idle"}</strong>
           </div>
           <div className="card">
-            <span className="muted">?????????</span>
+            <span className="muted">รอบล่าสุด</span>
             <strong>{formatDateTime(config.lastRunAt)}</strong>
           </div>
           <div className="card">
-            <span className="muted">????????</span>
+            <span className="muted">รอบถัดไป</span>
             <strong>{formatDateTime(config.nextRunAt)}</strong>
           </div>
         </div>
 
-        <button className="button" type="submit">??????????????</button>
+        <button className="button" type="submit">บันทึกโหมดข่าว</button>
       </form>
 
       <section className="card stack">
         <div className="stack compact-stack">
           <div className="kicker">Facebook Trend Sources</div>
-          <h3>??????????????????</h3>
+          <h3>เพจต้นทางที่ติดตาม</h3>
         </div>
         <div className="chip-grid">
           {connectedPages.map((page) => (
@@ -377,21 +389,21 @@ export function TrendRssPanel() {
                 </span>
               </div>
               <button className="button button-secondary" type="button" onClick={() => removeTrackedPage(page._id)}>
-                ??
+                ลบ
               </button>
             </div>
-          )) : <div className="muted">???????????????????????????</div>}
+          )) : <div className="muted">ยังไม่ได้เลือกเพจต้นทางข่าว</div>}
         </div>
       </section>
 
       <section className="card stack">
         <div className="stack compact-stack">
           <div className="kicker">RSS Registry</div>
-          <h3>????? RSS</h3>
+          <h3>แหล่ง RSS</h3>
         </div>
         <form className="grid cols-2" onSubmit={addRssSource}>
           <label className="label">
-            ?????????????
+            ชื่อแหล่งข่าว
             <input className="input" value={newSource.sourceName} onChange={(event) => setNewSource((current) => ({ ...current, sourceName: event.target.value }))} />
           </label>
           <label className="label">
@@ -399,7 +411,7 @@ export function TrendRssPanel() {
             <input className="input" value={newSource.rssUrl} onChange={(event) => setNewSource((current) => ({ ...current, rssUrl: event.target.value }))} />
           </label>
           <label className="label">
-            ????
+            หมวด
             <input className="input" value={newSource.category} onChange={(event) => setNewSource((current) => ({ ...current, category: event.target.value }))} />
           </label>
           <label className="label">
@@ -407,15 +419,15 @@ export function TrendRssPanel() {
             <input className="input" type="number" min={0} max={100} value={newSource.trustScore} onChange={(event) => setNewSource((current) => ({ ...current, trustScore: Number(event.target.value) || 0 }))} />
           </label>
           <label className="label">
-            ????
+            ภาษา
             <select className="select" value={newSource.language} onChange={(event) => setNewSource((current) => ({ ...current, language: event.target.value as "th" | "en" }))}>
-              <option value="th">???</option>
-              <option value="en">??????</option>
+              <option value="th">ไทย</option>
+              <option value="en">อังกฤษ</option>
             </select>
           </label>
           <div className="label">
             <span> </span>
-            <button className="button" type="submit">????? RSS source</button>
+            <button className="button" type="submit">เพิ่ม RSS source</button>
           </div>
         </form>
         <div className="stack compact-stack">
@@ -427,24 +439,24 @@ export function TrendRssPanel() {
                 <span className="muted">trust {source.trustScore} / {source.language}</span>
               </div>
               <button className="button button-secondary" type="button" onClick={() => removeRssSource(source._id)}>
-                ??
+                ลบ
               </button>
             </div>
-          )) : <div className="muted">???????? RSS source</div>}
+          )) : <div className="muted">ยังไม่มี RSS source</div>}
         </div>
       </section>
 
       <section className="card stack">
         <div className="stack compact-stack">
           <div className="kicker">Topic Clusters</div>
-          <h3>????????????????????</h3>
+          <h3>คลัสเตอร์กระแสล่าสุด</h3>
         </div>
         <div className="stack compact-stack">
           {clusters.length ? clusters.map((cluster) => (
             <article key={cluster._id} className="card stack compact-stack">
               <div className="split compact-row">
                 <strong>{cluster.label}</strong>
-                <span className="badge badge-neutral">{cluster.hotLevel}</span>
+                <span className="badge badge-neutral">{hotLevelLabel(cluster.hotLevel)}</span>
               </div>
               <div className="muted">{cluster.summary}</div>
               <div className="muted">
@@ -452,7 +464,7 @@ export function TrendRssPanel() {
               </div>
               <div className="muted">{cluster.relatedEntities.join(", ")}</div>
             </article>
-          )) : <div className="muted">????????????????????? ????? “??????????????” ????</div>}
+          )) : <div className="muted">ยังไม่มีคลัสเตอร์ข่าว ให้กด “สแกนข่าวตอนนี้” ก่อน</div>}
         </div>
       </section>
     </div>

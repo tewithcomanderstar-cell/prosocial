@@ -1,4 +1,4 @@
-import { z } from "zod";
+﻿import { z } from "zod";
 import { jsonOk, parseBody } from "@/lib/api";
 import { handleRoleError, requireRole } from "@/lib/services/permissions";
 import { TrendRssNewsConfig } from "@/models/TrendRssNewsConfig";
@@ -56,7 +56,7 @@ export async function POST(request: Request) {
       { upsert: true, new: true }
     ).lean();
 
-    return jsonOk({ config }, "????????????????????????????");
+    return jsonOk({ config }, "ตั้งค่าโหมดข่าวเรียบร้อยแล้ว");
   } catch (error) {
     return handleRoleError(error);
   }
