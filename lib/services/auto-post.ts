@@ -64,6 +64,42 @@ type QueueAutoPostsResult = {
 
 const AUTO_POST_BATCH_PAGE_SPACING_MINUTES = Number(process.env.AUTO_POST_PAGE_SPACING_MINUTES ?? "10");
 const BANGKOK_UTC_OFFSET_HOURS = 7;
+const AUTO_POST_QUOTE_EXPANSION_PROMPT = `คุณคือผู้เชี่ยวชาญด้านการเขียนคอนเทนต์โซเชียลมีเดีย (Facebook/IG) ที่เน้นเพิ่ม Time Spend, Engagement (Like/Comment/Share) และความรู้สึกของผู้อ่าน
+
+หน้าที่ของคุณคือ:
+แปลง “คำคมสั้น” ให้กลายเป็น “โพสต์คุณภาพ” ที่ทำให้คนหยุดอ่าน อ่านต่อ และอยากมีส่วนร่วม
+
+อินพุต:
+- คำคมสั้น 1 ประโยค
+
+เอาต์พุต:
+เขียนแคปชันใหม่ โดยต้องมีโครงสร้างดังนี้:
+
+1. Hook เปิด (1–2 บรรทัด)
+- ต้องดึงอารมณ์/ความสงสัย
+- ทำให้คนอยากอ่านต่อทันที
+
+2. ขยายความ (2–4 บรรทัด)
+- แปลงคำคมให้มีมุมคิดลึกขึ้น
+- ใช้ภาษาธรรมชาติ อ่านง่าย ไม่ทางการ
+- อาจมีการเปรียบเทียบหรือ insight
+
+3. เชื่อมกับชีวิตจริง (1–3 บรรทัด)
+- ทำให้ผู้อ่านรู้สึกว่า “เกี่ยวกับตัวเอง”
+- ใช้สถานการณ์ที่คนทั่วไปเจอ
+
+4. คำถามปลายเปิด (1–2 บรรทัด)
+- กระตุ้นให้คอมเมนต์
+- เช่น “คุณล่ะ…กำลังเลือกอะไรอยู่?”
+
+ข้อกำหนดเพิ่มเติม:
+- ใช้โทนภาษาธรรมชาติ นุ่ม ๆ เป็นกันเอง
+- หลีกเลี่ยงภาษาทางการหรือแข็งเกินไป
+- ไม่ยาวเกิน 8–12 บรรทัด
+- ไม่ใช้ hashtag
+- ต้องมีอารมณ์และชวนคิด
+
+ให้ใช้ข้อความที่ดึงมาจากภาพเป็นแกนกลางของโพสต์เท่านั้น และแปลงให้เป็นโพสต์พร้อมใช้จริง`;
 
 function parseClockToMinutes(value?: string | null) {
   if (!value) return null;
@@ -365,6 +401,41 @@ function appendHashtags(caption: string, hashtags?: string[]) {
   return trimmedCaption ? `${trimmedCaption}\n\n${hashtagBlock}` : hashtagBlock;
 }
 
+async function expandExtractedTextToCaption(
+  config: LeanAutoPostConfig,
+  keyword: string,
+  extractedText: string
+) {
+  const trimmedExtractedText = extractedText.trim();
+  if (!trimmedExtractedText) {
+    return "";
+  }
+
+  const customPrompt = [AUTO_POST_QUOTE_EXPANSION_PROMPT, config.aiPrompt?.trim() || ""]
+    .filter(Boolean)
+    .join("\n\n");
+
+  try {
+    const variants = await generateFacebookContent(keyword, {
+      persona: {
+        audience: "general audience",
+        contentStyle: "social post",
+        tone: "gentle and thoughtful",
+        pageName: "Auto Post"
+      },
+      userId: config.userId,
+      customPrompt,
+      sourceText: `ข้อความจากภาพ:\n${trimmedExtractedText}`,
+      sourceLabel: "extracted quote from image"
+    });
+
+    const chosen = variants?.length ? randomItem(variants) : null;
+    return chosen?.caption?.trim() || "";
+  } catch {
+    return "";
+  }
+}
+
 async function buildCaption(config: LeanAutoPostConfig, image: DriveImage, driveAccessToken: string) {
   const manualCaption = config.captions.length > 0 ? randomItem(config.captions) : "";
   const strategy = config.captionStrategy ?? "hybrid";
@@ -379,12 +450,14 @@ async function buildCaption(config: LeanAutoPostConfig, image: DriveImage, drive
       const imageFile = await fetchDriveImageBinary(driveAccessToken, image.id);
       const primaryText = await extractPrimaryCreativeTextFromImage(imageFile.bytes, imageFile.mimeType);
       if (primaryText) {
-        return appendHashtags(primaryText, config.hashtags);
+        const expandedCaption = await expandExtractedTextToCaption(config, keyword, primaryText);
+        return appendHashtags(expandedCaption || primaryText, config.hashtags);
       }
 
       const extractedText = await extractExactTextFromImage(imageFile.bytes, imageFile.mimeType);
       if (extractedText) {
-        return appendHashtags(extractedText, config.hashtags);
+        const expandedCaption = await expandExtractedTextToCaption(config, keyword, extractedText);
+        return appendHashtags(expandedCaption || extractedText, config.hashtags);
       }
     } catch {
       // Fall through to the explicit failure below.
@@ -395,14 +468,21 @@ async function buildCaption(config: LeanAutoPostConfig, image: DriveImage, drive
   let extractedText = "";
   try {
     const imageFile = await fetchDriveImageBinary(driveAccessToken, image.id);
-    extractedText = await extractExactTextFromImage(imageFile.bytes, imageFile.mimeType);
+    extractedText =
+      (await extractPrimaryCreativeTextFromImage(imageFile.bytes, imageFile.mimeType)) ||
+      (await extractExactTextFromImage(imageFile.bytes, imageFile.mimeType));
   } catch {
     // Best-effort only for prompt grounding.
   }
 
+  const expandedExtractedCaption = extractedText
+    ? await expandExtractedTextToCaption(config, keyword, extractedText)
+    : "";
+
   const sourceParts = [
     manualCaption ? `Manual caption draft:\n${manualCaption}` : "",
     extractedText ? `Text found in image:\n${extractedText}` : "",
+    expandedExtractedCaption ? `Expanded caption direction from extracted text:\n${expandedExtractedCaption}` : "",
     image.name ? `Image file name:\n${stripFileExtension(image.name)}` : "",
     config.folderName ? `Google Drive folder:\n${config.folderName}` : ""
   ].filter(Boolean);
@@ -434,6 +514,10 @@ async function buildCaption(config: LeanAutoPostConfig, image: DriveImage, drive
 
   if (manualCaption) {
     return appendHashtags(manualCaption, config.hashtags);
+  }
+
+  if (expandedExtractedCaption) {
+    return appendHashtags(expandedExtractedCaption, config.hashtags);
   }
 
   if (extractedText) {
