@@ -24,6 +24,11 @@ type OptimizationInput = {
   goal?: string;
 };
 
+type MultiImagePersonalityReply = {
+  optionKey: string;
+  replyText: string;
+};
+
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
@@ -138,6 +143,42 @@ export async function generateOptimizationSuggestions(input: OptimizationInput) 
     suggestedPostingWindows: string[];
     abTestIdeas: string[];
   };
+}
+
+export async function generateMultiImagePersonalityReplies(input: {
+  imageSummaries: string[];
+  caption: string;
+}): Promise<MultiImagePersonalityReply[]> {
+  const fallback = input.imageSummaries.map((summary, index) => ({
+    optionKey: String(index + 1),
+    replyText: `ถ้าเลือกข้อ ${index + 1} แปลว่าคุณเป็นคนมีสไตล์ของตัวเอง ชอบฟีล ${summary.toLowerCase()} และมักดึงดูดคนรอบตัวแบบไม่ต้องพยายามมาก`
+  }));
+
+  if (!process.env.OPENAI_API_KEY) {
+    return fallback;
+  }
+
+  try {
+    const result = await client.responses.create({
+      model: getContentModel(),
+      input: [
+        {
+          role: "system",
+          content:
+            "You write Thai auto-reply text for Facebook comments. Return strict JSON with a replies array. Each item must have optionKey and replyText. replyText must be 1-2 sentences, warm, playful, personality-reading style, and matched to the specific nail idea summary. No hashtags. No markdown."
+        },
+        {
+          role: "user",
+          content: JSON.stringify(input)
+        }
+      ]
+    });
+
+    const parsed = JSON.parse(extractJson(result.output_text)) as { replies?: MultiImagePersonalityReply[] };
+    return parsed.replies?.length ? parsed.replies : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 export async function classifyCaptionIntent(caption: string) {

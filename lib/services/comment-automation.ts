@@ -4,9 +4,11 @@ import { createNotification, logAction, logAndNotifyError } from "@/lib/services
 import { logCommentStage } from "@/lib/services/comment-logging";
 import { fetchCommentsForFacebookPost, fetchRecentFacebookPostsWithComments } from "@/lib/services/facebook";
 import { getStoredFacebookConnection } from "@/lib/services/integration-auth";
+import { AutoPostAiConfig } from "@/models/AutoPostAiConfig";
 import { Job } from "@/models/Job";
 import { CommentInbox } from "@/models/CommentInbox";
 import { FacebookConnection } from "@/models/FacebookConnection";
+import { Post } from "@/models/Post";
 import { PostingSettings } from "@/models/PostingSettings";
 
 const COMMENT_REPLY_BASE_DELAY_SECONDS = Number(process.env.COMMENT_REPLY_BASE_DELAY_SECONDS ?? "0");
@@ -15,11 +17,11 @@ const COMMENT_REPLY_SPACING_SECONDS = Number(process.env.COMMENT_REPLY_SPACING_S
 type ReplyDecision =
   | {
       action: "reply";
-      trigger: "auto-comment-pool";
-      ruleId: "auto-comment-pool";
-      ruleType: "auto-comment-pool";
+      trigger: "auto-comment-pool" | "multi-image-ai-option";
+      ruleId: "auto-comment-pool" | "multi-image-ai-option";
+      ruleType: "auto-comment-pool" | "multi-image-ai-option";
       replyText: string;
-      matchMode: "fallback";
+      matchMode: "fallback" | "exact";
     }
   | {
       action: "skip";
@@ -70,6 +72,13 @@ type AutoCommentSettings = {
   lastSyncedAt: Date | null;
   pageIds: string[];
   replies: string[];
+};
+
+type MultiImageAiAutoCommentSettings = {
+  enabled: boolean;
+  intervalMinutes: 15 | 30 | 60;
+  lastSyncedAt: Date | null;
+  pageIds: string[];
 };
 
 type LeanFacebookConnection = {
@@ -128,6 +137,25 @@ async function getAutoCommentSettings(userId: string) {
   } satisfies AutoCommentSettings;
 }
 
+async function getMultiImageAiAutoCommentSettings(userId: string) {
+  const config = await AutoPostAiConfig.findOne({ userId }).lean<{
+    autoCommentEnabled?: boolean;
+    autoCommentIntervalMinutes?: 15 | 30 | 60;
+    autoCommentLastSyncedAt?: Date | string | null;
+    targetPageIds?: string[];
+  } | null>();
+
+  return {
+    enabled: Boolean(config?.autoCommentEnabled),
+    intervalMinutes:
+      config?.autoCommentIntervalMinutes === 30 || config?.autoCommentIntervalMinutes === 60
+        ? config.autoCommentIntervalMinutes
+        : 15,
+    lastSyncedAt: config?.autoCommentLastSyncedAt ? new Date(config.autoCommentLastSyncedAt) : null,
+    pageIds: (config?.targetPageIds ?? []).filter(Boolean)
+  } satisfies MultiImageAiAutoCommentSettings;
+}
+
 async function findUserIdByPageId(pageId: string) {
   const connection = await FacebookConnection.findOne({ "pages.pageId": pageId }).lean<{ userId: string } | null>();
   return connection?.userId ? String(connection.userId) : null;
@@ -143,7 +171,14 @@ async function listTrackedAutoCommentUsers() {
     .select({ userId: 1 })
     .lean<Array<{ userId: string }>>();
 
-  return settings.map((item) => String(item.userId));
+  const aiConfigs = await AutoPostAiConfig.find({
+    autoCommentEnabled: true,
+    targetPageIds: { $exists: true, $ne: [] }
+  })
+    .select({ userId: 1 })
+    .lean<Array<{ userId: string }>>();
+
+  return Array.from(new Set([...settings.map((item) => String(item.userId)), ...aiConfigs.map((item) => String(item.userId))]));
 }
 
 function isAutoCommentSyncDue(settings: AutoCommentSettings) {
@@ -180,6 +215,51 @@ async function computeCommentReplyRunAt(userId: string, pageId: string) {
   }
 
   return new Date(latestRunAt.getTime() + COMMENT_REPLY_SPACING_SECONDS * 1000);
+}
+
+function parseSelectedOption(message: string) {
+  const normalized = normalizeText(message).replace(/[^\d]/g, "");
+  if (!normalized) {
+    return null;
+  }
+
+  const option = Number(normalized);
+  if (!Number.isInteger(option) || option <= 0 || option > 10) {
+    return null;
+  }
+
+  return String(option);
+}
+
+async function pickMultiImageAutoReply(userId: string, pageId: string, postId: string | undefined, message: string): Promise<ReplyDecision | null> {
+  const optionKey = parseSelectedOption(message);
+  if (!optionKey || !postId) {
+    return null;
+  }
+
+  const post = await Post.findOne({
+    userId,
+    externalPostId: postId,
+    targetPageIds: pageId,
+    autoCommentEnabled: true,
+    autoCommentMode: "multi-image-ai"
+  }).lean<{
+    autoCommentOptionReplies?: Array<{ optionKey: string; replyText: string }>;
+  } | null>();
+
+  const matchedReply = post?.autoCommentOptionReplies?.find((item) => item.optionKey === optionKey && item.replyText?.trim());
+  if (!matchedReply) {
+    return null;
+  }
+
+  return {
+    action: "reply",
+    trigger: "multi-image-ai-option",
+    ruleId: "multi-image-ai-option",
+    ruleType: "multi-image-ai-option",
+    replyText: matchedReply.replyText.trim(),
+    matchMode: "exact"
+  };
 }
 
 async function pickAutoReply(userId: string, pageId: string): Promise<ReplyDecision> {
@@ -256,14 +336,20 @@ export async function ingestCommentAndMaybeQueue(params: IngestParams) {
   const autoCommentSettings = await getAutoCommentSettings(params.userId);
   const autoReplyEnabled = params.autoQueue !== false && autoCommentSettings.enabled;
   const manualReplyText = params.replyText?.trim();
-  const replyDecision = manualReplyText ? null : await pickAutoReply(params.userId, params.pageId);
+  const scopedReplyDecision = manualReplyText
+    ? null
+    : await pickMultiImageAutoReply(params.userId, params.pageId, params.postId, params.message);
+  const replyDecision =
+    manualReplyText || scopedReplyDecision
+      ? scopedReplyDecision
+      : await pickAutoReply(params.userId, params.pageId);
 
   const effectiveReplyText = manualReplyText || (replyDecision?.action === "reply" ? replyDecision.replyText : "");
   const shouldQueue = Boolean(
     params.externalCommentId &&
       effectiveReplyText &&
-      autoReplyEnabled &&
-      autoCommentSettings.pageIds.includes(params.pageId)
+      params.autoQueue !== false &&
+      (scopedReplyDecision?.action === "reply" || (autoReplyEnabled && autoCommentSettings.pageIds.includes(params.pageId)))
   );
 
   const externalKey =
@@ -304,7 +390,7 @@ export async function ingestCommentAndMaybeQueue(params: IngestParams) {
         matchedTrigger: replyDecision?.action === "reply" ? replyDecision.trigger : undefined,
         matchedRuleId: replyDecision?.action === "reply" ? replyDecision.ruleId : undefined,
         matchedRuleType: replyDecision?.action === "reply" ? replyDecision.ruleType : undefined,
-        autoReplyEnabled,
+        autoReplyEnabled: Boolean(autoReplyEnabled || scopedReplyDecision?.action === "reply"),
         queuedAt: shouldQueue && !existing?.replyExternalId ? new Date() : undefined,
         replyError: null,
         receivedAt: existing ? undefined : new Date()
@@ -336,7 +422,10 @@ export async function ingestCommentAndMaybeQueue(params: IngestParams) {
       externalCommentId: externalKey,
       correlationId,
       stage: "rule_matched",
-      message: "Selected a random reply from the auto reply library",
+      message:
+        replyDecision.trigger === "multi-image-ai-option"
+          ? "Selected a numbered personality reply from the multi-image AI post"
+          : "Selected a random reply from the auto reply library",
       metadata: {
         pageId: params.pageId,
         ruleId: replyDecision.ruleId,
@@ -476,6 +565,23 @@ export async function finalizeTrackedPostIfComplete(userId: string, postId: stri
   return result.modifiedCount > 0;
 }
 
+async function listPublishedMultiImageAiPosts(userId: string, pageIds: string[]) {
+  return Post.find({
+    userId,
+    status: "published",
+    autoCommentEnabled: true,
+    autoCommentMode: "multi-image-ai",
+    externalPostId: { $exists: true, $ne: null },
+    targetPageIds: { $in: pageIds }
+  })
+    .sort({ lastPublishedAt: -1 })
+    .limit(30)
+    .lean<Array<{
+      targetPageIds: string[];
+      externalPostId: string;
+    }>>();
+}
+
 export async function syncTrackedAutoCommentPosts(userId?: string, options: { force?: boolean } = {}) {
   await connectDb();
 
@@ -487,8 +593,24 @@ export async function syncTrackedAutoCommentPosts(userId?: string, options: { fo
 
   for (const currentUserId of userIds) {
     const settings = await getAutoCommentSettings(currentUserId);
-    const shouldSync = options.force ? settings.enabled : settings.enabled && isAutoCommentSyncDue(settings);
-    if (!shouldSync || settings.pageIds.length === 0 || settings.replies.length === 0) {
+    const aiSettings = await getMultiImageAiAutoCommentSettings(currentUserId);
+    const shouldSyncNormal =
+      options.force ? settings.enabled : settings.enabled && isAutoCommentSyncDue(settings) && settings.replies.length > 0;
+    const shouldSyncAi =
+      options.force
+        ? aiSettings.enabled
+        : aiSettings.enabled &&
+          (!aiSettings.lastSyncedAt ||
+            Date.now() - aiSettings.lastSyncedAt.getTime() >= aiSettings.intervalMinutes * 60 * 1000);
+
+    const effectivePageIds = Array.from(
+      new Set([
+        ...(shouldSyncNormal ? settings.pageIds : []),
+        ...(shouldSyncAi ? aiSettings.pageIds : [])
+      ])
+    );
+
+    if (!effectivePageIds.length) {
       continue;
     }
 
@@ -507,7 +629,7 @@ export async function syncTrackedAutoCommentPosts(userId?: string, options: { fo
 
     const posts: TrackedPostSyncSummary[] = [];
 
-    for (const pageId of settings.pageIds) {
+    for (const pageId of effectivePageIds) {
       const page = connection.pages.find((item) => item.pageId === pageId);
       if (!page) {
         posts.push({
@@ -523,20 +645,36 @@ export async function syncTrackedAutoCommentPosts(userId?: string, options: { fo
       }
 
       try {
-        const recentPosts = await fetchRecentFacebookPostsWithComments({
-          pageId,
-          pageAccessToken: page.pageAccessToken,
-          limit: 20
-        });
+        const trackedPostIds = new Set<string>();
+
+        if (shouldSyncAi && aiSettings.pageIds.includes(pageId)) {
+          const aiPosts = await listPublishedMultiImageAiPosts(currentUserId, [pageId]);
+          for (const aiPost of aiPosts) {
+            if (aiPost.targetPageIds.includes(pageId) && aiPost.externalPostId) {
+              trackedPostIds.add(aiPost.externalPostId);
+            }
+          }
+        }
+
+        if (shouldSyncNormal && settings.pageIds.includes(pageId) && settings.replies.length > 0 && trackedPostIds.size === 0) {
+          const recentPosts = await fetchRecentFacebookPostsWithComments({
+            pageId,
+            pageAccessToken: page.pageAccessToken,
+            limit: 20
+          });
+          for (const recentPost of recentPosts) {
+            trackedPostIds.add(recentPost.postId);
+          }
+        }
 
         let scannedPosts = 0;
         let fetchedComments = 0;
         let queuedReplies = 0;
 
-        for (const recentPost of recentPosts) {
+        for (const trackedPostId of trackedPostIds) {
           scannedPosts += 1;
           const comments = await fetchCommentsForFacebookPost({
-            postId: recentPost.postId,
+            postId: trackedPostId,
             pageAccessToken: page.pageAccessToken,
             limit: 100
           });
@@ -553,14 +691,14 @@ export async function syncTrackedAutoCommentPosts(userId?: string, options: { fo
               authorName: comment.authorName,
               message: comment.message,
               senderId: comment.senderId,
-              postId: recentPost.postId,
+              postId: trackedPostId,
               parentCommentId: comment.parentCommentId,
               externalCommentId: comment.externalCommentId,
               autoQueue: true,
               rawPayload: {
                 source: "page-comment-scan",
                 pageId,
-                postId: recentPost.postId,
+                postId: trackedPostId,
                 syncedAt: new Date().toISOString(),
                 createdAt: comment.createdAt
               }
@@ -605,10 +743,19 @@ export async function syncTrackedAutoCommentPosts(userId?: string, options: { fo
     }
 
     summaries.push({ userId: currentUserId, posts });
-    await PostingSettings.updateOne(
-      { userId: currentUserId },
-      { $set: { autoCommentLastSyncedAt: new Date() } }
-    );
+    const now = new Date();
+    if (shouldSyncNormal) {
+      await PostingSettings.updateOne(
+        { userId: currentUserId },
+        { $set: { autoCommentLastSyncedAt: now } }
+      );
+    }
+    if (shouldSyncAi) {
+      await AutoPostAiConfig.updateOne(
+        { userId: currentUserId },
+        { $set: { autoCommentLastSyncedAt: now } }
+      );
+    }
   }
 
   return {

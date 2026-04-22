@@ -53,6 +53,14 @@ type LeanPost = {
   _id: string;
   userId: string;
   content: string;
+  pinnedComment?: string;
+  externalPostId?: string;
+  autoCommentEnabled?: boolean;
+  autoCommentMode?: "standard" | "multi-image-ai";
+  autoCommentOptionReplies?: Array<{
+    optionKey: string;
+    replyText: string;
+  }>;
   hashtags: string[];
   imageUrls: string[];
   targetPageIds: string[];
@@ -756,6 +764,7 @@ async function executePostJob(job: JobExecution) {
 
   await Post.findByIdAndUpdate(post._id, {
     status: "published",
+    externalPostId: typeof publishResult?.id === "string" ? publishResult.id : undefined,
     lastPublishedAt: new Date(),
     $inc: { successCount: 1 }
   });

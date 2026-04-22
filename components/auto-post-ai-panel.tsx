@@ -23,6 +23,8 @@ type AutoPostConfig = {
   aiPrompt: string;
   postingWindowStart: string;
   postingWindowEnd: string;
+  autoCommentEnabled: boolean;
+  autoCommentIntervalMinutes: 15 | 30 | 60;
   language: "th" | "en";
   autoPostStatus?: AutoPostStatus;
   jobStatus?: "pending" | "processing" | "posted" | "failed";
@@ -73,6 +75,8 @@ const defaults: AutoPostConfig = {
   aiPrompt: DEFAULT_MULTI_IMAGE_AI_PROMPT,
   postingWindowStart: "06:00",
   postingWindowEnd: "00:00",
+  autoCommentEnabled: false,
+  autoCommentIntervalMinutes: 15,
   language: "th",
   autoPostStatus: "paused",
   jobStatus: "pending",
@@ -503,6 +507,38 @@ export function AutoPostAiPanel() {
           </div>
         ) : null}
 
+        {config.automationMode === "multi-image-ai" ? (
+          <div className="grid cols-2 auto-post-grid auto-post-grid-minimal">
+            <label className="auto-post-toggle">
+              <span>{config.autoCommentEnabled ? "เปิด Auto Comment" : "ปิด Auto Comment"}</span>
+              <input
+                type="checkbox"
+                checked={config.autoCommentEnabled}
+                onChange={(event) => setConfig((current) => ({ ...current, autoCommentEnabled: event.target.checked }))}
+              />
+            </label>
+
+            <label className="label">
+              รอบดึงคอมเมนต์
+              <select
+                className="select"
+                value={config.autoCommentIntervalMinutes}
+                onChange={(event) =>
+                  setConfig((current) => ({
+                    ...current,
+                    autoCommentIntervalMinutes: Number(event.target.value) as 15 | 30 | 60
+                  }))
+                }
+                disabled={!config.autoCommentEnabled}
+              >
+                <option value="15">ทุก 15 นาที</option>
+                <option value="30">ทุก 30 นาที</option>
+                <option value="60">ทุก 1 ชั่วโมง</option>
+              </select>
+            </label>
+          </div>
+        ) : null}
+
         <label className="label">
           Caption Mode
           <select
@@ -558,6 +594,11 @@ export function AutoPostAiPanel() {
             {config.captionLengthMode === "short"
               ? "โหมดสั้นพิเศษจะบีบให้แคปชั่นเหลือประมาณ 5-7 บรรทัด และตัดคำอธิบายให้กระชับที่สุด"
               : "โหมดปกติอ่านสบายจะคงโครงสร้างเดิม แต่จัดให้อ่านง่ายขึ้นและไม่แน่นเกินไป"}
+          </div>
+        ) : null}
+        {config.automationMode === "multi-image-ai" && config.autoCommentEnabled ? (
+          <div className="muted">
+            Auto Comment ของโหมดนี้จะตามดูคอมเมนต์ในโพสต์ที่ระบบโพสต์ให้เอง และถ้าลูกเพจพิมพ์เลข 1-4 ระบบจะทายนิสัยตามแบบเล็บของโพสต์นั้นโดยตรง
           </div>
         ) : null}
         {config.automationMode === "multi-image-ai" ? (

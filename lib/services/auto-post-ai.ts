@@ -1,5 +1,10 @@
 ﻿import { createAutoPostAiRecords } from "@/lib/services/automation-records-ai";
-import { extractExactTextFromImage, extractPrimaryCreativeTextFromImage, generateFacebookContent } from "@/lib/services/ai";
+import {
+  extractExactTextFromImage,
+  extractPrimaryCreativeTextFromImage,
+  generateFacebookContent,
+  generateMultiImagePersonalityReplies
+} from "@/lib/services/ai";
 import { fetchDriveImageBinary, fetchImagesFromFolder } from "@/lib/services/google-drive";
 import { ensureValidFacebookConnection, ensureValidGoogleDriveConnection } from "@/lib/services/integration-auth";
 import { logAction, logAndNotifyError } from "@/lib/services/logging";
@@ -33,6 +38,9 @@ type LeanAutoPostConfig = {
   aiPrompt?: string;
   postingWindowStart?: string;
   postingWindowEnd?: string;
+  autoCommentEnabled?: boolean;
+  autoCommentIntervalMinutes?: 15 | 30 | 60;
+  autoCommentLastSyncedAt?: Date | null;
   language?: "th" | "en";
   nextRunAt: Date;
   lastRunAt?: Date;
@@ -69,6 +77,12 @@ type QueueAutoPostsResult = {
   workflowId: string;
   workflowRunId: string;
   contentItemId: string;
+};
+
+type MultiImagePackage = {
+  caption: string;
+  pinnedComment: string;
+  optionReplies: Array<{ optionKey: string; replyText: string }>;
 };
 
 const AUTO_POST_BATCH_PAGE_SPACING_MINUTES = Number(process.env.AUTO_POST_PAGE_SPACING_MINUTES ?? "10");
@@ -720,7 +734,33 @@ async function buildCaption(config: LeanAutoPostConfig, image: DriveImage, drive
   return appendHashtags(`Fresh update from ${config.folderName || "your Google Drive"}`, config.hashtags);
 }
 
-async function buildMultiImagePackage(config: LeanAutoPostConfig, images: DriveImage[], driveAccessToken: string) {
+function buildPinnedCommentFromOptionReplies(optionReplies: Array<{ optionKey: string; replyText: string }>) {
+  if (!optionReplies.length) {
+    return formatPinnedComment(
+      "ใครเลือกข้อไหนมาอ่านตรงนี้\n1 อบอุ่นละมุน 2 เนี้ยบมีเสน่ห์ 3 สดใสขี้เล่น 4 มั่นใจมีคาแรกเตอร์\nตรงไหม เมนต์บอกหน่อย"
+    );
+  }
+
+  const lines = [
+    "ใครเลือกข้อไหนมาอ่านตรงนี้",
+    ...optionReplies.map((item) => `${item.optionKey}. ${shortenSentence(item.replyText, 46)}`)
+  ];
+
+  return formatPinnedComment(lines.join("\n"));
+}
+
+async function buildMultiImageOptionReplies(sourceChunks: string[], images: DriveImage[], caption: string) {
+  const imageSummaries = images.map((image, index) =>
+    deriveImageSummary(sourceChunks[index] ?? "", summarizeImageStyleLabel(image.name), index)
+  );
+
+  return generateMultiImagePersonalityReplies({
+    imageSummaries,
+    caption
+  });
+}
+
+async function buildMultiImagePackage(config: LeanAutoPostConfig, images: DriveImage[], driveAccessToken: string): Promise<MultiImagePackage> {
   const sampleImages = images.slice(0, Math.min(images.length, 4));
   const sourceChunks: string[] = [];
   const rotatingStyle = getRotatingMultiImageStyle();
@@ -835,53 +875,23 @@ Optional:
         ),
         config.hashtags
       );
+      const optionReplies = await buildMultiImageOptionReplies(sourceChunks, sampleImages, caption);
       return {
         caption,
-        pinnedComment: await buildMultiImagePinnedComment(config, caption)
+        pinnedComment: buildPinnedCommentFromOptionReplies(optionReplies),
+        optionReplies
       };
     }
   } catch {
     // Fall back below.
   }
 
+  const optionReplies = await buildMultiImageOptionReplies(sourceChunks, sampleImages, fallbackCaption);
   return {
     caption: fallbackCaption,
-    pinnedComment: await buildMultiImagePinnedComment(config, fallbackCaption)
+    pinnedComment: buildPinnedCommentFromOptionReplies(optionReplies),
+    optionReplies
   };
-}
-
-async function buildMultiImagePinnedComment(config: LeanAutoPostConfig, caption: string) {
-  const pinnedCommentPrompt = `เขียน "คอมเมนต์ปักหมุด" สำหรับโพสต์ไอเดียเล็บด้านล่าง
-
-เงื่อนไข:
-- เป็นการเฉลยนิสัยของแต่ละข้อ 1-4
-- ภาษาสั้น กระชับ อ่านง่าย
-- ทำให้คนอยากเลื่อนมาอ่าน
-- มีความรู้สึกเหมือนรู้จักตัวตนคนอ่าน
-- ความยาวไม่เกิน 4 บรรทัด
-- ห้ามใช้ hashtag
-
-โพสต์ต้นทาง:
-${caption}`;
-
-  try {
-    const variants = await generateFacebookContent("pinned comment reveal", {
-      userId: config.userId,
-      customPrompt: pinnedCommentPrompt,
-      sourceText: caption,
-      sourceLabel: "caption for pinned comment"
-    });
-    const chosen = variants?.length ? randomItem(variants) : null;
-    if (chosen?.caption) {
-      return formatPinnedComment(chosen.caption);
-    }
-  } catch {
-    // Fall through to the default pinned comment.
-  }
-
-  return formatPinnedComment(
-    "ใครเลือกข้อไหนมาอ่านตรงนี้\n1 อบอุ่นละมุน 2 เนี้ยบมีเสน่ห์ 3 สดใสขี้เล่น 4 มั่นใจมีคาแรกเตอร์\nตรงไหม เมนต์บอกหน่อย"
-  );
 }
 
 async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: QueueAutoPostsOptions): Promise<QueueAutoPostsResult> {
@@ -1020,6 +1030,7 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
         : null;
     const caption = multiImagePackage?.caption ?? (await buildCaption(config, primaryImage, driveConnection.accessToken));
     const pinnedComment = multiImagePackage?.pinnedComment ?? "";
+    const autoCommentOptionReplies = multiImagePackage?.optionReplies ?? [];
     const normalizedHashtags = normalizeHashtags(config.hashtags);
     const startAt = new Date(batchStartAt.getTime() + index * AUTO_POST_BATCH_PAGE_SPACING_MINUTES * 60 * 1000);
 
@@ -1028,6 +1039,9 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
       title: `Auto Post ${pageId} ${triggeredAt.toISOString()}`,
       content: caption,
       pinnedComment,
+      autoCommentEnabled: Boolean(config.autoCommentEnabled && automationMode === "multi-image-ai"),
+      autoCommentMode: automationMode === "multi-image-ai" ? "multi-image-ai" : "standard",
+      autoCommentOptionReplies,
       hashtags: normalizedHashtags,
       imageUrls: selectedImageIds.map((imageId) => `drive:${imageId}`),
       targetPageIds: [pageId],

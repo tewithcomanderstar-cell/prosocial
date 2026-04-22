@@ -61,6 +61,8 @@ const schema = z.object({
   aiPrompt: z.string().default(DEFAULT_MULTI_IMAGE_AI_PROMPT),
   postingWindowStart: z.string().regex(/^\d{2}:\d{2}$/).default("06:00"),
   postingWindowEnd: z.string().regex(/^\d{2}:\d{2}$/).default("00:00"),
+  autoCommentEnabled: z.boolean().default(false),
+  autoCommentIntervalMinutes: z.union([z.literal(15), z.literal(30), z.literal(60)]).default(15),
   language: z.enum(["th", "en"]).default("th")
 });
 
@@ -81,7 +83,9 @@ export async function GET() {
           automationMode: "multi-image-ai",
           multiImageCountMode: "4",
           captionLengthMode: "balanced",
-          aiPrompt: DEFAULT_MULTI_IMAGE_AI_PROMPT
+          aiPrompt: DEFAULT_MULTI_IMAGE_AI_PROMPT,
+          autoCommentEnabled: false,
+          autoCommentIntervalMinutes: 15
         }
       },
       { upsert: true, new: true }
@@ -140,7 +144,9 @@ export async function POST(request: Request) {
         lastError: payload.enabled ? sanitizeLegacyMessage(current?.lastError ?? null) : null,
         retryCount: payload.enabled ? current?.retryCount ?? 0 : 0,
         postingWindowStart: payload.postingWindowStart,
-        postingWindowEnd: payload.postingWindowEnd
+        postingWindowEnd: payload.postingWindowEnd,
+        autoCommentEnabled: payload.autoCommentEnabled,
+        autoCommentIntervalMinutes: payload.autoCommentIntervalMinutes
       },
       { upsert: true, new: true }
     ).lean();
@@ -158,6 +164,8 @@ export async function POST(request: Request) {
         multiImageCountMode: payload.multiImageCountMode,
         captionLengthMode: payload.captionLengthMode,
         captionStrategy: payload.captionStrategy,
+        autoCommentEnabled: payload.autoCommentEnabled,
+        autoCommentIntervalMinutes: payload.autoCommentIntervalMinutes,
         hashtagCount: (payload.hashtags ?? []).length,
         postingWindowStart: payload.postingWindowStart,
         postingWindowEnd: payload.postingWindowEnd,

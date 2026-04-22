@@ -6,6 +6,22 @@ const postSchema = new Schema(
     title: { type: String, required: true },
     content: { type: String, required: true },
     pinnedComment: { type: String, default: "" },
+    externalPostId: { type: String, index: true, sparse: true },
+    autoCommentEnabled: { type: Boolean, default: false },
+    autoCommentMode: {
+      type: String,
+      enum: ["standard", "multi-image-ai"],
+      default: "standard"
+    },
+    autoCommentOptionReplies: {
+      type: [
+        {
+          optionKey: { type: String, required: true },
+          replyText: { type: String, required: true }
+        }
+      ],
+      default: []
+    },
     hashtags: { type: [String], default: [] },
     imageUrls: { type: [String], default: [] },
     targetPageIds: { type: [String], default: [] },

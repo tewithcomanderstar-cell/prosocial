@@ -87,6 +87,13 @@ const autoPostAiConfigSchema = new Schema(
     aiPrompt: { type: String, default: DEFAULT_MULTI_IMAGE_AI_PROMPT },
     postingWindowStart: { type: String, default: "06:00" },
     postingWindowEnd: { type: String, default: "00:00" },
+    autoCommentEnabled: { type: Boolean, default: false },
+    autoCommentIntervalMinutes: {
+      type: Number,
+      enum: [15, 30, 60],
+      default: 15
+    },
+    autoCommentLastSyncedAt: { type: Date, default: null },
     language: {
       type: String,
       enum: ["th", "en"],
