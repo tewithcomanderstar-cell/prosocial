@@ -5,7 +5,6 @@ const rssSourceSchema = new Schema(
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     sourceName: { type: String, required: true },
     rssUrl: { type: String, required: true },
-    category: { type: String, default: "" },
     trustScore: { type: Number, default: 50 },
     language: { type: String, enum: ["th", "en"], default: "th" },
     active: { type: Boolean, default: true }

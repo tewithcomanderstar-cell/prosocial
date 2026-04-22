@@ -5,7 +5,6 @@ import { TrendTrackedPage } from "@/models/TrendTrackedPage";
 
 const patchSchema = z.object({
   pageName: z.string().min(1).optional(),
-  category: z.string().optional(),
   priorityWeight: z.coerce.number().min(0).max(10).optional(),
   trustWeight: z.coerce.number().min(0).max(10).optional(),
   active: z.boolean().optional()

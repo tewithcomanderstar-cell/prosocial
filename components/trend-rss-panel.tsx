@@ -2,7 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
-type FacebookPage = { pageId: string; name: string; category?: string };
+type FacebookPage = { pageId: string; name: string };
 type TrendConfig = {
   enabled: boolean;
   autoRunEnabled: boolean;
@@ -27,7 +27,6 @@ type TrackedPage = {
   _id: string;
   pageId: string;
   pageName: string;
-  category?: string;
   priorityWeight: number;
   trustWeight: number;
   active: boolean;
@@ -37,7 +36,6 @@ type NewsSource = {
   _id: string;
   sourceName: string;
   rssUrl: string;
-  category?: string;
   trustScore: number;
   language: "th" | "en";
   active: boolean;
@@ -97,13 +95,11 @@ export function TrendRssPanel() {
   const [running, setRunning] = useState(false);
   const [newTrackedPage, setNewTrackedPage] = useState({
     pageId: "",
-    pageName: "",
-    category: ""
+    pageName: ""
   });
   const [newSource, setNewSource] = useState({
     sourceName: "",
     rssUrl: "",
-    category: "",
     trustScore: 70,
     language: "th" as "th" | "en"
   });
@@ -164,7 +160,7 @@ export function TrendRssPanel() {
     await loadAll();
   }
 
-  async function addTrackedPage(payload: { pageId: string; pageName: string; category?: string }) {
+  async function addTrackedPage(payload: { pageId: string; pageName: string }) {
     setMessage("");
     setError("");
     const response = await fetch("/api/trend-rss/pages", {
@@ -173,7 +169,6 @@ export function TrendRssPanel() {
       body: JSON.stringify({
         pageId: payload.pageId.trim(),
         pageName: payload.pageName.trim(),
-        category: payload.category?.trim() ?? "",
         priorityWeight: 1,
         trustWeight: 1,
         active: true
@@ -185,7 +180,7 @@ export function TrendRssPanel() {
       return;
     }
     setMessage(result.message || "เพิ่มเพจต้นทางแล้ว");
-    setNewTrackedPage({ pageId: "", pageName: "", category: "" });
+    setNewTrackedPage({ pageId: "", pageName: "" });
     await loadAll();
   }
 
@@ -221,7 +216,6 @@ export function TrendRssPanel() {
     setNewSource({
       sourceName: "",
       rssUrl: "",
-      category: "",
       trustScore: 70,
       language: "th"
     });
@@ -242,7 +236,9 @@ export function TrendRssPanel() {
     try {
       const response = await fetch("/api/trend-rss/run", { method: "POST" });
       const result = await response.json();
-      if (!result.ok) throw new Error(result.message || "สแกนกระแสข่าวไม่สำเร็จ");
+      if (!result.ok) {
+        throw new Error(result.message || "สแกนกระแสข่าวไม่สำเร็จ");
+      }
       setMessage(result.message || "ระบบสแกนกระแสข่าวแล้ว");
       await loadAll();
     } catch (runError) {
@@ -434,7 +430,7 @@ export function TrendRssPanel() {
           <div className="kicker">Trend Source Pages</div>
           <h3>เพจข่าวต้นทางที่ใช้จับกระแส</h3>
           <div className="muted">
-            กรอก Page ID และชื่อเพจข่าวที่อยากให้ระบบตาม เช่น เพจข่าวใหญ่ที่มักปล่อยประเด็นไว คุณสามารถใช้ชิปด้านล่างเป็นทางลัดกับเพจที่เชื่อมไว้ในบัญชีนี้ได้ด้วย
+            กรอก Page ID และชื่อเพจข่าวที่อยากให้ระบบตาม เช่น เพจข่าวใหญ่ที่มักปล่อยประเด็นไว คุณยังใช้ชิปจากเพจที่เชื่อมไว้เป็นทางลัดได้เหมือนเดิม
           </div>
         </div>
 
@@ -457,15 +453,6 @@ export function TrendRssPanel() {
               onChange={(event) => setNewTrackedPage((current) => ({ ...current, pageName: event.target.value }))}
             />
           </label>
-          <label className="label">
-            หมวด
-            <input
-              className="input"
-              placeholder="ข่าวทั่วไป / อาชญากรรม / บันเทิง"
-              value={newTrackedPage.category}
-              onChange={(event) => setNewTrackedPage((current) => ({ ...current, category: event.target.value }))}
-            />
-          </label>
           <div className="label">
             <span> </span>
             <button className="button" type="submit">เพิ่มเพจต้นทาง</button>
@@ -485,8 +472,7 @@ export function TrendRssPanel() {
                     ? removeTrackedPage(trackedPages.find((item) => item.pageId === page.pageId)?._id ?? "")
                     : addTrackedPage({
                         pageId: page.pageId,
-                        pageName: page.name,
-                        category: page.category ?? ""
+                        pageName: page.name
                       })
                 }
               >
@@ -504,7 +490,7 @@ export function TrendRssPanel() {
                   <strong>{page.pageName}</strong>
                   <span className="muted">Page ID: {page.pageId}</span>
                   <span className="muted">
-                    หมวด {page.category || "-"} • weight {page.priorityWeight} • trust {page.trustWeight}
+                    weight {page.priorityWeight} • trust {page.trustWeight}
                   </span>
                 </div>
                 <button className="button button-secondary" type="button" onClick={() => removeTrackedPage(page._id)}>
@@ -523,7 +509,7 @@ export function TrendRssPanel() {
           <div className="kicker">News Sites</div>
           <h3>เว็บข่าวที่ใช้ยืนยันข้อเท็จจริง</h3>
           <div className="muted">
-            ระบบจะไม่เขียนจากโพสต์เพจอย่างเดียว แต่จะเอาประเด็นไปหาเว็บข่าวที่คุณใส่ไว้ เพื่อแตกประเด็นและสรุปใหม่เป็นแบบของเรา
+            ใส่ลิงก์เว็บข่าวหรือ feed ของสำนักข่าวที่อยากให้ระบบใช้เทียบข้อเท็จจริงได้เลย ถ้าใส่โดเมนธรรมดา ระบบจะเติม `https://` ให้เอง
           </div>
         </div>
 
@@ -537,19 +523,12 @@ export function TrendRssPanel() {
             />
           </label>
           <label className="label">
-            RSS URL / feed URL
+            ลิงก์เว็บข่าว / feed
             <input
               className="input"
+              placeholder="เช่น thairath.co.th หรือ https://example.com/feed"
               value={newSource.rssUrl}
               onChange={(event) => setNewSource((current) => ({ ...current, rssUrl: event.target.value }))}
-            />
-          </label>
-          <label className="label">
-            หมวด
-            <input
-              className="input"
-              value={newSource.category}
-              onChange={(event) => setNewSource((current) => ({ ...current, category: event.target.value }))}
             />
           </label>
           <label className="label">
@@ -592,7 +571,7 @@ export function TrendRssPanel() {
                   <strong>{source.sourceName}</strong>
                   <span className="muted">{source.rssUrl}</span>
                   <span className="muted">
-                    trust {source.trustScore} • {source.language} • {source.category || "ทั่วไป"}
+                    trust {source.trustScore} • {source.language}
                   </span>
                 </div>
                 <button className="button button-secondary" type="button" onClick={() => removeNewsSource(source._id)}>
@@ -611,7 +590,7 @@ export function TrendRssPanel() {
           <div className="kicker">Trend Radar</div>
           <h3>ประเด็นที่กำลังมาแรง</h3>
           <div className="muted">
-            ระบบจะประเมินจากความเร็วของยอด reaction, comment, share แล้วจับเป็นกลุ่มหัวข้อ เพื่อคัดว่าประเด็นไหนกำลังจะไวรัล
+            ระบบจะดูความเร็วของยอด reaction, comment และ share จากเพจต้นทาง เพื่อจับว่าข่าวไหนกำลังขึ้นแรงและควรนำมาต่อยอด
           </div>
         </div>
         <div className="stack compact-stack">

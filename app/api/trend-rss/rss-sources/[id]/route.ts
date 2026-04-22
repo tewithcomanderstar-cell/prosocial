@@ -3,10 +3,18 @@ import { jsonError, jsonOk, parseBody } from "@/lib/api";
 import { handleRoleError, requireRole } from "@/lib/services/permissions";
 import { RssSource } from "@/models/RssSource";
 
+function normalizeSourceUrl(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return trimmed;
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  return `https://${trimmed}`;
+}
+
 const patchSchema = z.object({
   sourceName: z.string().min(1).optional(),
-  rssUrl: z.string().url().optional(),
-  category: z.string().optional(),
+  rssUrl: z.string().min(1).transform(normalizeSourceUrl).optional(),
   trustScore: z.coerce.number().min(0).max(100).optional(),
   language: z.enum(["th", "en"]).optional(),
   active: z.boolean().optional()

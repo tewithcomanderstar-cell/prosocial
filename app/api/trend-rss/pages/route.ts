@@ -6,7 +6,6 @@ import { TrendTrackedPage } from "@/models/TrendTrackedPage";
 const schema = z.object({
   pageId: z.string().min(1),
   pageName: z.string().min(1),
-  category: z.string().optional().default(""),
   priorityWeight: z.coerce.number().min(0).max(10).default(1),
   trustWeight: z.coerce.number().min(0).max(10).default(1),
   active: z.boolean().default(true)
