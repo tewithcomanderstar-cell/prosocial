@@ -31,7 +31,7 @@ export async function POST(request: Request) {
       { userId, ...payload },
       { upsert: true, new: true }
     ).lean();
-    return jsonOk({ page }, "???????????????????????????????");
+    return jsonOk({ page }, "เพิ่มเพจต้นทางสำหรับจับกระแสแล้ว");
   } catch (error) {
     return handleRoleError(error);
   }

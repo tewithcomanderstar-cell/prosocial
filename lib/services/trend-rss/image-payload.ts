@@ -6,7 +6,7 @@ export function buildTrendImagePayload(input: {
   content: TrendContentPackage;
 }): TrendImagePayload {
   const overlay = input.content.imageOverlayVariants[0] ?? {
-    headlineText: input.content.headlineVariants[0] ?? "????????????",
+    headlineText: input.content.headlineVariants[0] ?? "จับกระแสข่าวล่าสุด",
     subheadlineText: "",
     highlightWords: []
   };

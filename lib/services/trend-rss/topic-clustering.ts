@@ -2,7 +2,21 @@ import { TrendFacebookPost } from "@/models/TrendFacebookPost";
 import { TrendFacebookPostSnapshot } from "@/models/TrendFacebookPostSnapshot";
 import { TrendTopicCluster } from "@/models/TrendTopicCluster";
 
-const STOPWORDS = new Set(["???", "???", "???", "??", "???", "???", "????", "????", "???", "????", "the", "for", "with", "this", "that"]);
+const STOPWORDS = new Set([
+  "และ",
+  "ของ",
+  "ที่",
+  "แล้ว",
+  "จาก",
+  "โดย",
+  "หรือ",
+  "กับ",
+  "the",
+  "for",
+  "with",
+  "this",
+  "that"
+]);
 
 function tokenize(text: string) {
   return (text.toLowerCase().match(/[\p{L}\p{N}]{2,}/gu) ?? []).filter((token) => !STOPWORDS.has(token));
@@ -67,13 +81,15 @@ export async function clusterTrendTopics(userId: string) {
     }
 
     const emotionType =
-      message.includes("????") || message.includes("???????")
+      /ด่วน|ระทึก|ช็อก|เสียชีวิต|เตือน/i.test(message)
         ? "alarm"
-        : message.includes("?????????") || message.includes("????????")
+        : /ช่วยเหลือ|ชีวิต|ครอบครัว|เด็ก|ชาวบ้าน/i.test(message)
           ? "human_interest"
-          : message.includes("????") || message.includes("???")
+          : /โต้เดือด|ปะทะ|ดราม่า|ฟาดกลับ|วิจารณ์/i.test(message)
             ? "conflict"
-            : "neutral";
+            : /ยิ้ม|ดีใจ|ช่วยได้|สำเร็จ/i.test(message)
+              ? "hope"
+              : "neutral";
 
     clusters.set(key, {
       label: tokens.slice(0, 2).join(" / "),

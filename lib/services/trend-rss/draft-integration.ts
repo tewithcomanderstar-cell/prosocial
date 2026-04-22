@@ -1,4 +1,6 @@
 import { ContentItem } from "@/models/ContentItem";
+import { Post } from "@/models/Post";
+import { enqueuePostJobsForPost } from "@/lib/services/queue";
 import type { FactSheet, TrendImagePayload, TrendReviewScores } from "@/lib/services/trend-rss/types";
 
 export async function createTrendRssDraft(input: {
@@ -40,4 +42,42 @@ export async function createTrendRssDraft(input: {
     destinationIds: input.destinationPageIds,
     approvalRequired: true
   });
+}
+
+export async function createTrendRssAutoPost(input: {
+  userId: string;
+  destinationPageIds: string[];
+  headline: string;
+  caption: string;
+  body: string;
+  imageUrls: string[];
+  sourceTraceabilityMetadata: Record<string, unknown>;
+}) {
+  const content = [input.caption, input.body].filter(Boolean).join("\n\n").trim();
+  const post = await Post.create({
+    userId: input.userId,
+    title: input.headline,
+    content,
+    hashtags: [],
+    imageUrls: input.imageUrls,
+    targetPageIds: input.destinationPageIds,
+    randomizeImages: false,
+    randomizeCaption: false,
+    postingMode: "broadcast",
+    variants: [{ caption: content, hashtags: [] }],
+    status: "draft"
+  });
+
+  const queuedJobs = await enqueuePostJobsForPost(input.userId, String(post._id), {
+    applyRandomDelay: false,
+    payloadExtras: {
+      trendRssNewsMode: true,
+      sourceTraceabilityMetadata: input.sourceTraceabilityMetadata
+    }
+  });
+
+  return {
+    post,
+    queuedJobs
+  };
 }

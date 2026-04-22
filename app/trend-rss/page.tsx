@@ -6,9 +6,9 @@ export default function TrendRssPage() {
   return (
     <div className="stack page-stack">
       <SectionCard
-        title="โหมดโพสต์ข่าว RSS"
+        title="โหมดจับกระแสข่าว"
         icon="planner"
-        tooltip="จับกระแสจากเพจที่ติดตาม จับคู่ RSS และสร้าง draft ข่าวเข้า pipeline เดิมของระบบ"
+        tooltip="จับกระแสจาก Page ID ข่าวต้นทาง ไปหาเว็บข่าวที่เลือกเพื่อสรุปใหม่ แล้วส่งต่อเข้า draft หรือโพสต์อัตโนมัติ"
       >
         <Suspense fallback={<div className="muted">Loading...</div>}>
           <TrendRssPanel />

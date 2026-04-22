@@ -19,9 +19,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const payload = parseBody(patchSchema, await request.json());
     const source = await RssSource.findOneAndUpdate({ _id: id, userId }, payload, { new: true }).lean();
     if (!source) {
-      return jsonError("????? RSS source", 404);
+      return jsonError("ไม่พบเว็บข่าวที่ต้องการแก้ไข", 404);
     }
-    return jsonOk({ source }, "?????? RSS source ????");
+    return jsonOk({ source }, "อัปเดตเว็บข่าวเรียบร้อยแล้ว");
   } catch (error) {
     return handleRoleError(error);
   }
@@ -32,7 +32,7 @@ export async function DELETE(_request: Request, context: { params: Promise<{ id:
     const { userId } = await requireRole(["admin", "editor"]);
     const { id } = await context.params;
     await RssSource.findOneAndDelete({ _id: id, userId });
-    return jsonOk({ deleted: true }, "?? RSS source ????");
+    return jsonOk({ deleted: true }, "ลบเว็บข่าวเรียบร้อยแล้ว");
   } catch (error) {
     return handleRoleError(error);
   }

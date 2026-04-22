@@ -424,8 +424,8 @@ export async function generateTrendContentPackage(input: {
     imageOverlayVariants: [
       {
         headlineText: `จับตา ${input.topicLabel}`,
-        subheadlineText: "สรุปจากแหล่งข่าวที่จับคู่ได้",
-        highlightWords: input.factSheet.who.slice(0, 3)
+        subheadlineText: "เล่าใหม่แบบเข้าใจง่ายจากข่าวที่ตรวจสอบแล้ว",
+        highlightWords: [...input.factSheet.who.slice(0, 2), ...input.factSheet.what.slice(0, 2)].slice(0, 4)
       }
     ]
   };
@@ -441,7 +441,7 @@ export async function generateTrendContentPackage(input: {
         {
           role: "system",
           content:
-            "You write Thai Facebook content for Prosocial System. Generate strict JSON with headlineVariants (3-5), captionVariants (2-3), bodyDraft (string), imageOverlayVariants (2-3 objects with headlineText, subheadlineText, highlightWords). All outputs must be fact-grounded, emotionally engaging but trustworthy, and suitable for Facebook draft/review flow."
+            "You write Thai Facebook news content for Prosocial System. Generate strict JSON with headlineVariants (3-5), captionVariants (2-3), bodyDraft (string), imageOverlayVariants (2-3 objects with headlineText, subheadlineText, highlightWords). The content must be fact-grounded, emotionally engaging but trustworthy, suitable for Facebook posting, and written as our own retelling of the news. Headlines should feel strong and clickable without inventing facts. Image overlays should feel like a compelling Thai news poster, ideally highlighting the key person/entity in the story and a sharp hook."
         },
         {
           role: "user",

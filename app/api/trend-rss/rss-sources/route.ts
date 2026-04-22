@@ -31,7 +31,7 @@ export async function POST(request: Request) {
       { userId, ...payload },
       { upsert: true, new: true }
     ).lean();
-    return jsonOk({ source }, "????? RSS source ????");
+    return jsonOk({ source }, "เพิ่มเว็บข่าวสำหรับยืนยันประเด็นแล้ว");
   } catch (error) {
     return handleRoleError(error);
   }

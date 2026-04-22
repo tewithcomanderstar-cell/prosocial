@@ -18,9 +18,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const payload = parseBody(patchSchema, await request.json());
     const page = await TrendTrackedPage.findOneAndUpdate({ _id: id, userId }, payload, { new: true }).lean();
     if (!page) {
-      return jsonError("??????????????????", 404);
+      return jsonError("ไม่พบเพจต้นทางที่ต้องการแก้ไข", 404);
     }
-    return jsonOk({ page }, "???????????????????????");
+    return jsonOk({ page }, "อัปเดตเพจต้นทางเรียบร้อยแล้ว");
   } catch (error) {
     return handleRoleError(error);
   }
@@ -31,7 +31,7 @@ export async function DELETE(_request: Request, context: { params: Promise<{ id:
     const { userId } = await requireRole(["admin", "editor"]);
     const { id } = await context.params;
     await TrendTrackedPage.findOneAndDelete({ _id: id, userId });
-    return jsonOk({ deleted: true }, "???????????????????");
+    return jsonOk({ deleted: true }, "ลบเพจต้นทางเรียบร้อยแล้ว");
   } catch (error) {
     return handleRoleError(error);
   }
