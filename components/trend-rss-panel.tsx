@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
@@ -51,6 +51,24 @@ type ClusterItem = {
   relatedEntities: string[];
   resolution?: {
     confidenceScore?: number;
+    resolutionNotes?: string;
+    primaryArticle?: {
+      title?: string;
+      url?: string;
+      summary?: string;
+      publishedAt?: string | null;
+    } | null;
+  } | null;
+  preview?: {
+    draftId: string;
+    status: string;
+    title: string;
+    selectedHeadline?: string;
+    selectedCaption?: string;
+    generatedBody?: string;
+    imageHeadline?: string;
+    imageSubheadline?: string;
+    sourceImages?: string[];
   } | null;
 };
 
@@ -81,6 +99,13 @@ function hotLevelLabel(value: string) {
     default:
       return "เริ่มขึ้น";
   }
+}
+
+function trimPreview(text?: string, max = 220) {
+  if (!text) return "-";
+  const cleaned = text.trim();
+  if (cleaned.length <= max) return cleaned;
+  return `${cleaned.slice(0, max - 3)}...`;
 }
 
 export function TrendRssPanel() {
@@ -489,9 +514,7 @@ export function TrendRssPanel() {
                 <div className="stack compact-stack">
                   <strong>{page.pageName}</strong>
                   <span className="muted">Page ID: {page.pageId}</span>
-                  <span className="muted">
-                    weight {page.priorityWeight} • trust {page.trustWeight}
-                  </span>
+                  <span className="muted">weight {page.priorityWeight} • trust {page.trustWeight}</span>
                 </div>
                 <button className="button button-secondary" type="button" onClick={() => removeTrackedPage(page._id)}>
                   ลบ
@@ -509,7 +532,7 @@ export function TrendRssPanel() {
           <div className="kicker">News Sites</div>
           <h3>เว็บข่าวที่ใช้ยืนยันข้อเท็จจริง</h3>
           <div className="muted">
-            ใส่ลิงก์เว็บข่าวหรือ feed ของสำนักข่าวที่อยากให้ระบบใช้เทียบข้อเท็จจริงได้เลย ถ้าใส่โดเมนธรรมดา ระบบจะเติม `https://` ให้เอง
+            ใส่ลิงก์เว็บข่าวหรือ feed ของสำนักข่าวที่อยากให้ระบบใช้เทียบข้อเท็จจริงได้เลย ถ้าใส่โดเมนธรรมดา ระบบจะเติม https:// ให้เอง
           </div>
         </div>
 
@@ -570,9 +593,7 @@ export function TrendRssPanel() {
                 <div className="stack compact-stack">
                   <strong>{source.sourceName}</strong>
                   <span className="muted">{source.rssUrl}</span>
-                  <span className="muted">
-                    trust {source.trustScore} • {source.language}
-                  </span>
+                  <span className="muted">trust {source.trustScore} • {source.language}</span>
                 </div>
                 <button className="button button-secondary" type="button" onClick={() => removeNewsSource(source._id)}>
                   ลบ
@@ -606,6 +627,70 @@ export function TrendRssPanel() {
                   score {cluster.trendScore} • สถานะ {cluster.status} • ความมั่นใจข่าว {cluster.resolution?.confidenceScore ?? "-"}
                 </div>
                 <div className="muted">{cluster.relatedEntities.join(", ")}</div>
+                {cluster.resolution?.primaryArticle ? (
+                  <div className="card stack compact-stack">
+                    <strong>ข่าวที่ระบบจับมาอ้างอิง</strong>
+                    <div>{cluster.resolution.primaryArticle.title || "-"}</div>
+                    <div className="muted">{trimPreview(cluster.resolution.primaryArticle.summary, 180)}</div>
+                    {cluster.resolution.primaryArticle.url ? (
+                      <a
+                        className="muted"
+                        href={cluster.resolution.primaryArticle.url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        เปิดข่าวต้นทาง
+                      </a>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="card muted">ยังจับคู่เว็บข่าวที่ตรงกับประเด็นนี้ไม่ได้</div>
+                )}
+                {cluster.preview ? (
+                  <div className="card stack compact-stack">
+                    <strong>พรีวิวคอนเทนต์ก่อนโพสต์</strong>
+                    <div className="muted">สถานะงาน: {cluster.preview.status}</div>
+                    <div>
+                      <strong>พาดหัวที่ระบบเลือก:</strong> {cluster.preview.selectedHeadline || cluster.preview.title}
+                    </div>
+                    <div>
+                      <strong>แคปชั่น:</strong> {trimPreview(cluster.preview.selectedCaption, 260)}
+                    </div>
+                    {cluster.preview.generatedBody ? (
+                      <div>
+                        <strong>สรุป/เนื้อข่าว:</strong> {trimPreview(cluster.preview.generatedBody, 260)}
+                      </div>
+                    ) : null}
+                    {(cluster.preview.imageHeadline || cluster.preview.imageSubheadline) ? (
+                      <div>
+                        <strong>ข้อความบนภาพ:</strong> {cluster.preview.imageHeadline || "-"}
+                        {cluster.preview.imageSubheadline ? ` / ${cluster.preview.imageSubheadline}` : ""}
+                      </div>
+                    ) : null}
+                    {cluster.preview.sourceImages?.length ? (
+                      <div className="grid cols-2">
+                        {cluster.preview.sourceImages.map((imageUrl, index) => (
+                          <img
+                            key={`${cluster._id}-preview-${index + 1}`}
+                            src={imageUrl}
+                            alt={`ภาพข่าว ${index + 1}`}
+                            style={{
+                              width: "100%",
+                              aspectRatio: "16 / 9",
+                              objectFit: "cover",
+                              borderRadius: "16px",
+                              border: "1px solid rgba(125, 148, 191, 0.18)"
+                            }}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="muted">ยังไม่มีภาพตัวอย่างที่ผูกกับประเด็นนี้</div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="card muted">ตอนนี้ระบบยังไม่ได้สร้าง draft/preview สำหรับประเด็นนี้</div>
+                )}
               </article>
             ))
           ) : (

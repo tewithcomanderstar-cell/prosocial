@@ -196,12 +196,16 @@ export async function runTrendRssPipeline(input: {
         reviewStatus:
           review.decision === "approved_for_draft" && !config.safeDraftMode ? "draft" : "needs_review",
         sourceTraceabilityMetadata: {
+          clusterId: String(cluster._id),
+          clusterLabel: cluster.label,
           facebookPostIds: sourcePosts,
           articleIds: [
             String(resolved.primaryArticle._id),
             ...resolved.supportingArticles.map((article) => String(article._id))
           ],
-          urls: [resolved.primaryArticle.url, ...resolved.supportingArticles.map((article) => article.url)]
+          urls: [resolved.primaryArticle.url, ...resolved.supportingArticles.map((article) => article.url)],
+          primaryArticleTitle: resolved.primaryArticle.title,
+          primaryArticleUrl: resolved.primaryArticle.url
         }
       });
 
