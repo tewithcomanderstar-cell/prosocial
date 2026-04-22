@@ -33,6 +33,11 @@ const autoPostAiConfigSchema = new Schema(
       enum: ["4", "5", "6-10"],
       default: "4"
     },
+    captionLengthMode: {
+      type: String,
+      enum: ["balanced", "short"],
+      default: "balanced"
+    },
     captions: { type: [String], default: [] },
     hashtags: { type: [String], default: [] },
     aiPrompt: { type: String, default: DEFAULT_MULTI_IMAGE_AI_PROMPT },

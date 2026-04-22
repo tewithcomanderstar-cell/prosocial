@@ -27,6 +27,7 @@ type LeanAutoPostConfig = {
   captionStrategy: "manual" | "ai" | "hybrid";
   automationMode?: "standard" | "multi-image-ai";
   multiImageCountMode?: "4" | "5" | "6-10";
+  captionLengthMode?: "balanced" | "short";
   captions: string[];
   hashtags?: string[];
   aiPrompt?: string;
@@ -486,6 +487,74 @@ function summarizeImageStyleLabel(name: string) {
     .trim();
 }
 
+function shortenSentence(value: string, maxLength: number) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  const shortened = normalized.slice(0, maxLength).trim();
+  return `${shortened.replace(/[,.!?;:]+$/g, "").trim()}...`;
+}
+
+function formatMultiImageCaption(caption: string, mode: "balanced" | "short" = "balanced") {
+  const normalizedCaption = caption.replace(/\r\n/g, "\n").trim();
+  if (!normalizedCaption) {
+    return normalizedCaption;
+  }
+
+  const lines = normalizedCaption
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (!lines.length) {
+    return normalizedCaption;
+  }
+
+  const modelLabel = /^แบบ\s*\d+\s*:/;
+  const hashtagLines = lines.filter((line) => line.startsWith("#"));
+  const contentLines = lines.filter((line) => !line.startsWith("#"));
+
+  const maxHookLength = mode === "short" ? 42 : 60;
+  const maxDetailLength = mode === "short" ? 52 : 78;
+  const maxCtaLines = mode === "short" ? 1 : 2;
+  const maxNonModelLines = mode === "short" ? 3 : 4;
+
+  const formattedContent: string[] = [];
+  const introLines = contentLines.filter((line) => !modelLabel.test(line));
+  const modelLines = contentLines.filter((line) => modelLabel.test(line));
+
+  if (introLines[0]) {
+    formattedContent.push(shortenSentence(introLines[0], maxHookLength));
+  }
+
+  const secondaryIntro = introLines.slice(1, maxNonModelLines).map((line, index, array) => {
+    const isLast = index >= array.length - maxCtaLines;
+    return shortenSentence(line, isLast ? maxDetailLength : maxHookLength + 12);
+  });
+  formattedContent.push(...secondaryIntro);
+
+  const formattedModels = modelLines.map((line) => {
+    const [label, ...rest] = line.split(":");
+    const detail = shortenSentence(rest.join(":").trim(), maxDetailLength);
+    return detail ? `${label.trim()} : ${detail}` : label.trim();
+  });
+
+  const limitedModels = mode === "short" ? formattedModels.slice(0, 4) : formattedModels;
+  formattedContent.push(...limitedModels);
+
+  const trimmedContent = formattedContent.filter(Boolean);
+  const maxLines = mode === "short" ? 7 : 11;
+  const outputLines = trimmedContent.slice(0, maxLines);
+
+  if (hashtagLines.length) {
+    outputLines.push(hashtagLines.join(" "));
+  }
+
+  return outputLines.join("\n");
+}
+
 function normalizeHashtags(hashtags?: string[]) {
   return (hashtags ?? [])
     .map((hashtag) => hashtag.trim())
@@ -648,7 +717,7 @@ async function buildMultiImageCaption(config: LeanAutoPostConfig, images: DriveI
   - ห้ามเขียนยาวจนเป็นบล็อกข้อความใหญ่
   - ห้ามอธิบายแต่ละรูปเกินความจำเป็น
   - ห้ามใช้ประโยคเวิ่นหรือซ้ำความหมายเดิมหลายครั้ง
-  - ความยาวรวมของ caption ควรอยู่ประมาณ 7-11 บรรทัดเท่านั้น
+  - ความยาวรวมของ caption ควรอยู่ประมาณ ${config.captionLengthMode === "short" ? "5-7" : "7-11"} บรรทัดเท่านั้น
 
 สไตล์ที่ต้องใช้ในโพสต์นี้:
   - style key: ${rotatingStyle.name}
@@ -676,14 +745,23 @@ async function buildMultiImageCaption(config: LeanAutoPostConfig, images: DriveI
     });
     const chosen = variants?.length ? randomItem(variants) : null;
     if (chosen) {
-      return appendHashtags([chosen.caption, chosen.hashtags.join(" ")].filter(Boolean).join("\n\n"), config.hashtags);
+      return appendHashtags(
+        formatMultiImageCaption(
+          [chosen.caption, chosen.hashtags.join(" ")].filter(Boolean).join("\n\n"),
+          config.captionLengthMode ?? "balanced"
+        ),
+        config.hashtags
+      );
     }
   } catch {
     // Fall back below.
   }
 
   return appendHashtags(
-    `รวมไอเดียจาก ${config.folderName || "คลังรูป"} ชุดนี้ไว้ให้แล้ว\nลองดูทีละภาพ แล้วเลือกแบบที่ชอบได้เลย`,
+    formatMultiImageCaption(
+      `รวมไอเดียจาก ${config.folderName || "คลังรูป"} ชุดนี้ไว้ให้แล้ว\nลองดูทีละภาพ แล้วเลือกแบบที่ชอบได้เลย`,
+      config.captionLengthMode ?? "balanced"
+    ),
     config.hashtags
   );
 }

@@ -55,6 +55,7 @@ const schema = z.object({
   intervalMinutes: intervalSchema.default(60),
   captionStrategy: z.enum(["manual", "ai", "hybrid"]).default("hybrid"),
   multiImageCountMode: z.enum(["4", "5", "6-10"]).default("4"),
+  captionLengthMode: z.enum(["balanced", "short"]).default("balanced"),
   captions: z.array(z.string()).default([]),
   hashtags: z.array(z.string()).default([]),
   aiPrompt: z.string().default(DEFAULT_MULTI_IMAGE_AI_PROMPT),
@@ -79,6 +80,7 @@ export async function GET() {
           intervalMinutes: 60,
           automationMode: "multi-image-ai",
           multiImageCountMode: "4",
+          captionLengthMode: "balanced",
           aiPrompt: DEFAULT_MULTI_IMAGE_AI_PROMPT
         }
       },
@@ -154,6 +156,7 @@ export async function POST(request: Request) {
         targetPageCount: (payload.targetPageIds ?? []).length,
         intervalMinutes: payload.intervalMinutes,
         multiImageCountMode: payload.multiImageCountMode,
+        captionLengthMode: payload.captionLengthMode,
         captionStrategy: payload.captionStrategy,
         hashtagCount: (payload.hashtags ?? []).length,
         postingWindowStart: payload.postingWindowStart,

@@ -6,6 +6,7 @@ type AutoPostStatus = "idle" | "running" | "posting" | "success" | "failed" | "r
 type CaptionStrategy = "manual" | "ai" | "hybrid";
 type AutomationMode = "standard" | "multi-image-ai";
 type MultiImageCountMode = "4" | "5" | "6-10";
+type CaptionLengthMode = "balanced" | "short";
 
 type AutoPostConfig = {
   enabled: boolean;
@@ -16,6 +17,7 @@ type AutoPostConfig = {
   captionStrategy: CaptionStrategy;
   automationMode: AutomationMode;
   multiImageCountMode: MultiImageCountMode;
+  captionLengthMode: CaptionLengthMode;
   captions: string[];
   hashtags: string[];
   aiPrompt: string;
@@ -65,6 +67,7 @@ const defaults: AutoPostConfig = {
   captionStrategy: "hybrid",
   automationMode: "multi-image-ai",
   multiImageCountMode: "4",
+  captionLengthMode: "balanced",
   captions: [],
   hashtags: [],
   aiPrompt: DEFAULT_MULTI_IMAGE_AI_PROMPT,
@@ -468,20 +471,36 @@ export function AutoPostAiPanel() {
         {<div className="muted">โหมดนี้แยกการทำงานจากระบบออโต้ปกติ และจะใช้ AI สร้างโพสต์หลายภาพโดยเฉพาะ</div>}
 
         {config.automationMode === "multi-image-ai" ? (
-          <label className="label">
-            รูปต่อโพสต์
-            <select
-              className="select"
-              value={config.multiImageCountMode}
-              onChange={(event) =>
-                setConfig((current) => ({ ...current, multiImageCountMode: event.target.value as MultiImageCountMode }))
-              }
-            >
-              <option value="4">โพส 4 ภาพ</option>
-              <option value="5">โพส 5 ภาพ</option>
-              <option value="6-10">โพส 6-10 ภาพ</option>
-            </select>
-          </label>
+          <div className="grid cols-2 auto-post-grid auto-post-grid-minimal">
+            <label className="label">
+              รูปต่อโพสต์
+              <select
+                className="select"
+                value={config.multiImageCountMode}
+                onChange={(event) =>
+                  setConfig((current) => ({ ...current, multiImageCountMode: event.target.value as MultiImageCountMode }))
+                }
+              >
+                <option value="4">โพส 4 ภาพ</option>
+                <option value="5">โพส 5 ภาพ</option>
+                <option value="6-10">โพส 6-10 ภาพ</option>
+              </select>
+            </label>
+
+            <label className="label">
+              ความยาวแคปชั่น
+              <select
+                className="select"
+                value={config.captionLengthMode}
+                onChange={(event) =>
+                  setConfig((current) => ({ ...current, captionLengthMode: event.target.value as CaptionLengthMode }))
+                }
+              >
+                <option value="balanced">ปกติอ่านสบาย</option>
+                <option value="short">โหมดสั้นพิเศษ</option>
+              </select>
+            </label>
+          </div>
         ) : null}
 
         <label className="label">
@@ -532,6 +551,13 @@ export function AutoPostAiPanel() {
         {config.automationMode === "multi-image-ai" ? (
           <div className="muted">
             โหมดหลายภาพ AI จะสุ่มภาพที่มีธีมใกล้กันจากโฟลเดอร์, จับแกนหลักของภาพ และคิดแคปชั่นใหม่ให้เองโดยไม่ใช้ Caption Mode ปกติ
+          </div>
+        ) : null}
+        {config.automationMode === "multi-image-ai" ? (
+          <div className="muted">
+            {config.captionLengthMode === "short"
+              ? "โหมดสั้นพิเศษจะบีบให้แคปชั่นเหลือประมาณ 5-7 บรรทัด และตัดคำอธิบายให้กระชับที่สุด"
+              : "โหมดปกติอ่านสบายจะคงโครงสร้างเดิม แต่จัดให้อ่านง่ายขึ้นและไม่แน่นเกินไป"}
           </div>
         ) : null}
         {config.automationMode === "multi-image-ai" ? (
