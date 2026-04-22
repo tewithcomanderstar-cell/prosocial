@@ -219,3 +219,247 @@ export async function extractPrimaryCreativeTextFromImage(imageBytes: ArrayBuffe
 
   return normalizeExtractedText(result.output_text);
 }
+
+type TrendFactSheet = {
+  who: string[];
+  what: string[];
+  where: string[];
+  when: string[];
+  whyItMatters: string[];
+  quotes: string[];
+  sensitivePoints: string[];
+  uncertaintyFlags: string[];
+  sourceReferences: Array<{ title: string; url: string }>;
+};
+
+type TrendStrategyChoice = {
+  chosenStrategy: "emotional_story" | "breaking_explain" | "drama_timeline" | "human_interest_longform";
+  chosenGoal: "maximize_shares" | "maximize_time_spend" | "maximize_engagement" | "maximize_trust";
+  rationale: string;
+};
+
+type TrendContentPackageResult = {
+  headlineVariants: string[];
+  captionVariants: string[];
+  bodyDraft: string;
+  imageOverlayVariants: Array<{
+    headlineText: string;
+    subheadlineText: string;
+    highlightWords: string[];
+  }>;
+};
+
+type TrendReviewResult = {
+  factConsistencyScore: number;
+  readabilityScore: number;
+  emotionalScore: number;
+  shareabilityScore: number;
+  estimatedTimeSpendScore: number;
+  trustScore: number;
+  riskScore: number;
+  flags: string[];
+  decision: "approved_for_draft" | "needs_review" | "rejected";
+};
+
+export async function generateTrendFactSheet(input: {
+  articleTitle: string;
+  articleUrl: string;
+  articleSummary?: string;
+  fullContent?: string;
+}): Promise<TrendFactSheet> {
+  const fallback: TrendFactSheet = {
+    who: [],
+    what: [input.articleTitle],
+    where: [],
+    when: [],
+    whyItMatters: [input.articleSummary?.trim() || "เป็นประเด็นที่ควรตรวจสอบก่อนเผยแพร่จริง"],
+    quotes: [],
+    sensitivePoints: [],
+    uncertaintyFlags: ["ควรตรวจสอบข้อเท็จจริงและรายละเอียดเพิ่มเติมจากแหล่งข่าวต้นทาง"],
+    sourceReferences: [{ title: input.articleTitle, url: input.articleUrl }]
+  };
+
+  if (!process.env.OPENAI_API_KEY) {
+    return fallback;
+  }
+
+  try {
+    const result = await client.responses.create({
+      model: getContentModel(),
+      input: [
+        {
+          role: "system",
+          content:
+            "You are a fact extraction analyst for Thai Facebook news drafting. Return strict JSON with keys who, what, where, when, whyItMatters, quotes, sensitivePoints, uncertaintyFlags, sourceReferences. Extract only supported facts. If something is unclear, put it in uncertaintyFlags."
+        },
+        {
+          role: "user",
+          content: `Article title: ${input.articleTitle}\nArticle URL: ${input.articleUrl}\nSummary: ${input.articleSummary ?? ""}\nFull content: ${input.fullContent ?? ""}`
+        }
+      ]
+    });
+
+    const parsed = JSON.parse(extractJson(result.output_text)) as TrendFactSheet;
+    return {
+      ...fallback,
+      ...parsed,
+      sourceReferences: parsed.sourceReferences?.length
+        ? parsed.sourceReferences
+        : [{ title: input.articleTitle, url: input.articleUrl }]
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+export async function generateTrendStrategy(input: {
+  label: string;
+  summary: string;
+  emotionType: string;
+  hotLevel: string;
+  factSheet: TrendFactSheet;
+  preferredGoal: "maximize_shares" | "maximize_time_spend" | "maximize_engagement" | "maximize_trust";
+}): Promise<TrendStrategyChoice> {
+  const fallback: TrendStrategyChoice = {
+    chosenStrategy:
+      input.emotionType === "human_interest"
+        ? "human_interest_longform"
+        : input.hotLevel === "surging"
+          ? "breaking_explain"
+          : "drama_timeline",
+    chosenGoal: input.preferredGoal,
+    rationale: "เลือกตามอารมณ์ของประเด็น ความร้อนแรงของเทรนด์ และ goal เริ่มต้นที่ตั้งไว้"
+  };
+
+  if (!process.env.OPENAI_API_KEY) {
+    return fallback;
+  }
+
+  try {
+    const result = await client.responses.create({
+      model: getLightweightModel(),
+      input: [
+        {
+          role: "system",
+          content:
+            "You are a Facebook editorial strategist. Choose one strategy from emotional_story, breaking_explain, drama_timeline, human_interest_longform and one goal from maximize_shares, maximize_time_spend, maximize_engagement, maximize_trust. Return strict JSON with chosenStrategy, chosenGoal, rationale."
+        },
+        {
+          role: "user",
+          content: JSON.stringify(input)
+        }
+      ]
+    });
+
+    return JSON.parse(extractJson(result.output_text)) as TrendStrategyChoice;
+  } catch {
+    return fallback;
+  }
+}
+
+export async function generateTrendContentPackage(input: {
+  topicLabel: string;
+  topicSummary: string;
+  factSheet: TrendFactSheet;
+  strategy: TrendStrategyChoice;
+}): Promise<TrendContentPackageResult> {
+  const fallback: TrendContentPackageResult = {
+    headlineVariants: [
+      `จับตา ${input.topicLabel}`,
+      `สรุปประเด็น ${input.topicLabel}`,
+      `เกิดอะไรขึ้นกับ ${input.topicLabel}`
+    ],
+    captionVariants: [
+      `ประเด็นนี้กำลังถูกพูดถึงมากขึ้นเรื่อยๆ\n\n${input.topicSummary}\n\nคุณมองเรื่องนี้อย่างไรบ้าง?`,
+      `สรุปสั้นๆ ของประเด็น ${input.topicLabel}\n\n${input.factSheet.whyItMatters[0] ?? input.topicSummary}\n\nคิดเห็นยังไงกับเรื่องนี้ คอมเมนต์ได้เลย`
+    ],
+    bodyDraft: [
+      input.factSheet.what[0] ?? input.topicSummary,
+      input.factSheet.whyItMatters[0] ?? "",
+      input.factSheet.uncertaintyFlags[0] ?? ""
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+    imageOverlayVariants: [
+      {
+        headlineText: `จับตา ${input.topicLabel}`,
+        subheadlineText: "สรุปจากแหล่งข่าวที่จับคู่ได้",
+        highlightWords: input.factSheet.who.slice(0, 3)
+      }
+    ]
+  };
+
+  if (!process.env.OPENAI_API_KEY) {
+    return fallback;
+  }
+
+  try {
+    const result = await client.responses.create({
+      model: getContentModel(),
+      input: [
+        {
+          role: "system",
+          content:
+            "You write Thai Facebook content for Prosocial System. Generate strict JSON with headlineVariants (3-5), captionVariants (2-3), bodyDraft (string), imageOverlayVariants (2-3 objects with headlineText, subheadlineText, highlightWords). All outputs must be fact-grounded, emotionally engaging but trustworthy, and suitable for Facebook draft/review flow."
+        },
+        {
+          role: "user",
+          content: JSON.stringify(input)
+        }
+      ]
+    });
+
+    const parsed = JSON.parse(extractJson(result.output_text)) as TrendContentPackageResult;
+    return {
+      headlineVariants: parsed.headlineVariants?.length ? parsed.headlineVariants : fallback.headlineVariants,
+      captionVariants: parsed.captionVariants?.length ? parsed.captionVariants : fallback.captionVariants,
+      bodyDraft: parsed.bodyDraft?.trim() ? parsed.bodyDraft : fallback.bodyDraft,
+      imageOverlayVariants: parsed.imageOverlayVariants?.length ? parsed.imageOverlayVariants : fallback.imageOverlayVariants
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+export async function reviewTrendContentPackage(input: {
+  factSheet: TrendFactSheet;
+  strategy: TrendStrategyChoice;
+  content: TrendContentPackageResult;
+}): Promise<TrendReviewResult> {
+  const fallback: TrendReviewResult = {
+    factConsistencyScore: 0.82,
+    readabilityScore: 0.78,
+    emotionalScore: 0.74,
+    shareabilityScore: 0.72,
+    estimatedTimeSpendScore: 0.76,
+    trustScore: 0.8,
+    riskScore: 0.28,
+    flags: [],
+    decision: "needs_review"
+  };
+
+  if (!process.env.OPENAI_API_KEY) {
+    return fallback;
+  }
+
+  try {
+    const result = await client.responses.create({
+      model: getLightweightModel(),
+      input: [
+        {
+          role: "system",
+          content:
+            "You are a strict reviewer for social news content. Return strict JSON with factConsistencyScore, readabilityScore, emotionalScore, shareabilityScore, estimatedTimeSpendScore, trustScore, riskScore, flags, and decision. decision must be approved_for_draft, needs_review, or rejected."
+        },
+        {
+          role: "user",
+          content: JSON.stringify(input)
+        }
+      ]
+    });
+
+    return JSON.parse(extractJson(result.output_text)) as TrendReviewResult;
+  } catch {
+    return fallback;
+  }
+}

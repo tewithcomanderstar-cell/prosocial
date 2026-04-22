@@ -6,6 +6,7 @@ const contentItemSchema = new Schema(
     createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     title: { type: String, required: true },
     bodyText: { type: String, default: "" },
+    mode: { type: String, default: "standard", index: true },
     status: {
       type: String,
       enum: ["draft", "pending_review", "approved", "scheduled", "publishing", "published", "failed", "archived"],
@@ -13,6 +14,11 @@ const contentItemSchema = new Schema(
       index: true
     },
     platformPayloadJson: { type: Schema.Types.Mixed, default: {} },
+    sourceTraceJson: { type: Schema.Types.Mixed, default: {} },
+    factSheetJson: { type: Schema.Types.Mixed, default: {} },
+    reviewScoresJson: { type: Schema.Types.Mixed, default: {} },
+    imagePayloadJson: { type: Schema.Types.Mixed, default: {} },
+    generationMetaJson: { type: Schema.Types.Mixed, default: {} },
     destinationIds: { type: [String], default: [] },
     mediaAssetIds: { type: [String], default: [] },
     approvalRequired: { type: Boolean, default: false },
