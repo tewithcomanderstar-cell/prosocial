@@ -570,6 +570,60 @@ function formatPinnedComment(comment: string) {
     .join("\n");
 }
 
+function deriveImageSummary(sourceChunk: string, fallbackName: string, index: number) {
+  const cleaned = sourceChunk
+    .replace(/ภาพที่\s*\d+\s*:\s*/g, "")
+    .replace(/ธีมหลักที่เห็นคือ\s*/g, "")
+    .replace(/ข้อความสำคัญบนภาพคือ\s*/g, "")
+    .replace(/ฟีลโดยรวมใกล้เคียงกับ\s*/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const summary = cleaned || fallbackName || `ไอเดียเล็บแบบที่ ${index + 1}`;
+  return shortenSentence(summary, 54);
+}
+
+function buildRequiredModelLines(sourceChunks: string[], images: DriveImage[]) {
+  return images.map((image, index) => {
+    const summary = deriveImageSummary(sourceChunks[index] ?? "", summarizeImageStyleLabel(image.name), index);
+    return `แบบ ${index + 1} : ${summary}`;
+  });
+}
+
+function ensureCompleteMultiImageCaption(caption: string, requiredModelLines: string[], mode: "balanced" | "short" = "balanced") {
+  const normalized = caption.replace(/\r\n/g, "\n").trim();
+  if (!normalized) {
+    return formatMultiImageCaption(requiredModelLines.join("\n"), mode);
+  }
+
+  const lines = normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const modelLinePattern = /^แบบ\s*\d+\s*:/;
+  const existingModelIndices = new Set(
+    lines
+      .map((line) => {
+        const match = /^แบบ\s*(\d+)\s*:/.exec(line);
+        return match ? Number(match[1]) : null;
+      })
+      .filter((value): value is number => value !== null)
+  );
+
+  if (requiredModelLines.every((_, index) => existingModelIndices.has(index + 1))) {
+    return formatMultiImageCaption(normalized, mode);
+  }
+
+  const nonModelLines = lines.filter((line) => !modelLinePattern.test(line));
+  const completedLines = [
+    ...nonModelLines.slice(0, Math.max(2, nonModelLines.length)),
+    ...requiredModelLines
+  ];
+
+  return formatMultiImageCaption(completedLines.join("\n"), mode);
+}
+
 function normalizeHashtags(hashtags?: string[]) {
   return (hashtags ?? [])
     .map((hashtag) => hashtag.trim())
@@ -696,6 +750,7 @@ async function buildMultiImagePackage(config: LeanAutoPostConfig, images: DriveI
     }
   }
 
+  const requiredModelLines = buildRequiredModelLines(sourceChunks, sampleImages);
   const keyword = `${config.folderName || "Google Drive"} nail idea set`;
   const builtInPrompt =
     `คุณคือผู้เชี่ยวชาญด้านการสร้างคอนเทนต์โซเชียลมีเดียสายไวรัล (Facebook/Instagram) ที่เน้นเพิ่ม Like, Comment, Share และ Time Spent
@@ -755,8 +810,9 @@ Optional:
 - ต้องอ่านสบายบนมือถือและดูโล่งตา`;
   const customPrompt = [builtInPrompt, config.aiPrompt?.trim() || ""].filter(Boolean).join("\n\n");
   const fallbackCaption = appendHashtags(
-    formatMultiImageCaption(
-      `เล็บ ${sampleImages.length} แบบนี้ แต่ละแบบให้ฟีลไม่เหมือนกันเลย\nลองเลือกแบบที่ชอบที่สุดก่อน\n1. ละมุนหวาน ดูน่ารักและอบอุ่น\n2. เนี้ยบขึ้นอีกนิด ฟีลคนมีสไตล์แบบพอดี\n3. ขี้เล่น สดใส และมีเสน่ห์แบบเป็นธรรมชาติ\n4. ดูมั่นใจ มีคาแรกเตอร์ และน่ามองมาก\nเมนต์เลขที่ชอบ เดี๋ยวทายนิสัยให้\nเซฟไว้เป็นเรฟ แล้วแชร์ให้เพื่อนช่วยเลือกได้เลย`,
+    ensureCompleteMultiImageCaption(
+      `เล็บ ${sampleImages.length} แบบนี้ แต่ละแบบให้ฟีลไม่เหมือนกันเลย\nลองเลือกแบบที่ชอบที่สุดก่อน\nเมนต์เลขที่ชอบ เดี๋ยวทายนิสัยให้\nเซฟไว้เป็นเรฟ แล้วแชร์ให้เพื่อนช่วยเลือกได้เลย`,
+      requiredModelLines,
       config.captionLengthMode ?? "balanced"
     ),
     config.hashtags
@@ -772,8 +828,9 @@ Optional:
     const chosen = variants?.length ? randomItem(variants) : null;
     if (chosen) {
       const caption = appendHashtags(
-        formatMultiImageCaption(
+        ensureCompleteMultiImageCaption(
           [chosen.caption, chosen.hashtags.join(" ")].filter(Boolean).join("\n\n"),
+          requiredModelLines,
           config.captionLengthMode ?? "balanced"
         ),
         config.hashtags

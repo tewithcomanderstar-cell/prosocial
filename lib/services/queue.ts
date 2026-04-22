@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import sharp from "sharp";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
 import { AutoPostAiConfig } from "@/models/AutoPostAiConfig";
 import { CommentInbox } from "@/models/CommentInbox";
@@ -109,6 +110,47 @@ type EnqueueOptions = {
   startAt?: Date;
   payloadExtras?: Record<string, unknown>;
 };
+
+async function addSequenceBadgeToImage(image: ResolvedImage, sequence: number): Promise<ResolvedImage> {
+  if (image.kind !== "binary") {
+    return image;
+  }
+
+  const inputBuffer = Buffer.from(image.bytes);
+  const metadata = await sharp(inputBuffer).metadata();
+  const badgeSize = Math.max(56, Math.round(Math.min(metadata.width ?? 1200, metadata.height ?? 1200) * 0.12));
+  const fontSize = Math.max(26, Math.round(badgeSize * 0.42));
+  const badgeSvg = Buffer.from(`
+    <svg width="${badgeSize}" height="${badgeSize}" viewBox="0 0 ${badgeSize} ${badgeSize}" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="${badgeSize / 2}" cy="${badgeSize / 2}" r="${badgeSize / 2 - 4}" fill="rgba(32,58,120,0.92)" stroke="rgba(255,255,255,0.92)" stroke-width="4"/>
+      <text x="50%" y="52%" text-anchor="middle" dominant-baseline="middle"
+        font-family="Arial, Helvetica, sans-serif" font-size="${fontSize}" font-weight="700" fill="#ffffff">${sequence}</text>
+    </svg>
+  `);
+
+  const output = await sharp(inputBuffer)
+    .composite([{ input: badgeSvg, top: 20, left: 20 }])
+    .toBuffer({ resolveWithObject: true });
+
+  return {
+    kind: "binary",
+    fileName: image.fileName,
+    bytes: Uint8Array.from(output.data).buffer,
+    mimeType: output.info.format === "png" ? "image/png" : "image/jpeg"
+  };
+}
+
+async function decorateMultiImageAiImages(images: ResolvedImage[], automationMode?: unknown) {
+  if (automationMode !== "multi-image-ai" || images.length <= 1) {
+    return images;
+  }
+
+  const decorated: ResolvedImage[] = [];
+  for (const [index, image] of images.entries()) {
+    decorated.push(await addSequenceBadgeToImage(image, index + 1));
+  }
+  return decorated;
+}
 
 function getBoundAutoPostConfigIds(job: JobExecution) {
   return {
@@ -667,7 +709,10 @@ async function executePostJob(job: JobExecution) {
   const chosenVariant = post.randomizeCaption ? randomItem(variants) : variants[0];
   const message = buildPublishMessage(chosenVariant.caption, chosenVariant.hashtags);
   const imageRefs = post.randomizeImages && post.imageUrls.length > 0 ? [randomItem(post.imageUrls)] : post.imageUrls;
-  const images = await resolveImages(job.userId, imageRefs);
+  const images = await decorateMultiImageAiImages(
+    await resolveImages(job.userId, imageRefs),
+    job.payload?.automationMode
+  );
 
   if (hasBoundAutoPostConfig(job)) {
     await updateBoundAutoPostState(
