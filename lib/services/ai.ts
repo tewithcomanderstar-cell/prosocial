@@ -261,6 +261,35 @@ export async function extractPrimaryCreativeTextFromImage(imageBytes: ArrayBuffe
   return normalizeExtractedText(result.output_text);
 }
 
+export async function describeVisualStyleFromImage(imageBytes: ArrayBuffer, mimeType: string) {
+  if (!process.env.OPENAI_API_KEY) {
+    return "";
+  }
+
+  const base64 = Buffer.from(imageBytes).toString("base64");
+  const dataUrl = `data:${mimeType};base64,${base64}`;
+
+  const result = await client.responses.create({
+    model: getContentModel(),
+    input: [
+      {
+        role: "system",
+        content:
+          "Describe the visible nail design in the image as a short Thai phrase only. Focus on style, mood, color, and standout details. Ignore app UI, captions, page names, timestamps, and file-like text. Return 1 short phrase, around 4 to 10 Thai words. Do not use hashtags. Do not say that no text was found."
+      },
+      {
+        role: "user",
+        content: [
+          { type: "input_text", text: "Describe the nail style in this image as a short Thai phrase." },
+          { type: "input_image", image_url: dataUrl, detail: "high" }
+        ]
+      }
+    ]
+  });
+
+  return normalizeExtractedText(result.output_text);
+}
+
 type TrendFactSheet = {
   who: string[];
   what: string[];

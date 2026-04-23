@@ -1,5 +1,6 @@
 ﻿import { createAutoPostAiRecords } from "@/lib/services/automation-records-ai";
 import {
+  describeVisualStyleFromImage,
   extractExactTextFromImage,
   extractPrimaryCreativeTextFromImage,
   generateFacebookContent,
@@ -593,15 +594,78 @@ function deriveImageSummary(sourceChunk: string, fallbackName: string, index: nu
     .replace(/\s+/g, " ")
     .trim();
 
-  const summary = cleaned || fallbackName || `ไอเดียเล็บแบบที่ ${index + 1}`;
+  const summary = isWeakImageSummary(cleaned)
+    ? isWeakImageSummary(fallbackName)
+      ? `ไอเดียเล็บแบบที่ ${index + 1}`
+      : fallbackName
+    : cleaned;
   return shortenSentence(summary, 54);
 }
 
-function buildRequiredModelLines(sourceChunks: string[], images: DriveImage[]) {
+function extractModelDetails(lines: string[]) {
+  const details = new Map<number, string>();
+
+  for (const line of lines) {
+    const match = /^แบบ\s*(\d+)\s*:\s*(.+)$/i.exec(line);
+    if (!match) continue;
+    const modelIndex = Number(match[1]);
+    const detail = match[2]?.trim() ?? "";
+    if (!detail || isWeakImageSummary(detail)) continue;
+    details.set(modelIndex, detail);
+  }
+
+  return details;
+}
+
+function buildRequiredModelLines(
+  sourceChunks: string[],
+  images: DriveImage[],
+  existingModelDetails?: Map<number, string>
+) {
   return images.map((image, index) => {
-    const summary = deriveImageSummary(sourceChunks[index] ?? "", summarizeImageStyleLabel(image.name), index);
+    const existing = existingModelDetails?.get(index + 1)?.trim();
+    const summary =
+      existing && !isWeakImageSummary(existing)
+        ? existing
+        : deriveImageSummary(sourceChunks[index] ?? "", summarizeImageStyleLabel(image.name), index);
     return `แบบ ${index + 1} : ${summary}`;
   });
+}
+
+function isWeakImageSummary(value?: string | null) {
+  if (!value) return true;
+  const normalized = value
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+
+  if (!normalized) return true;
+
+  if (
+    /^(img|image|photo|pic)\b/.test(normalized) ||
+    normalized === "milim" ||
+    normalized === "nail couture" ||
+    normalized === "premium curation" ||
+    normalized === "nail set" ||
+    normalized === "nail idea set"
+  ) {
+    return true;
+  }
+
+  if (
+    normalized.includes("no text found") ||
+    normalized.includes("no text detected") ||
+    normalized.includes("text found") ||
+    normalized.includes("text detected")
+  ) {
+    return true;
+  }
+
+  if (/^img[_\s-]*\d+/.test(normalized)) {
+    return true;
+  }
+
+  return normalized.length < 4;
 }
 
 function ensureCompleteMultiImageCaption(caption: string, requiredModelLines: string[], mode: "balanced" | "short" = "balanced") {
@@ -616,24 +680,8 @@ function ensureCompleteMultiImageCaption(caption: string, requiredModelLines: st
     .filter(Boolean);
 
   const modelLinePattern = /^แบบ\s*\d+\s*:/;
-  const existingModelIndices = new Set(
-    lines
-      .map((line) => {
-        const match = /^แบบ\s*(\d+)\s*:/.exec(line);
-        return match ? Number(match[1]) : null;
-      })
-      .filter((value): value is number => value !== null)
-  );
-
-  if (requiredModelLines.every((_, index) => existingModelIndices.has(index + 1))) {
-    return formatMultiImageCaption(normalized, mode);
-  }
-
   const nonModelLines = lines.filter((line) => !modelLinePattern.test(line));
-  const completedLines = [
-    ...nonModelLines.slice(0, Math.max(2, nonModelLines.length)),
-    ...requiredModelLines
-  ];
+  const completedLines = [...nonModelLines, ...requiredModelLines];
 
   return formatMultiImageCaption(completedLines.join("\n"), mode);
 }
@@ -773,6 +821,10 @@ async function buildMultiImagePackage(config: LeanAutoPostConfig, images: DriveI
       const imageFile = await fetchDriveImageBinary(driveAccessToken, image.id);
       creativeText = await extractPrimaryCreativeTextFromImage(imageFile.bytes, imageFile.mimeType);
       exactText = creativeText ? "" : await extractExactTextFromImage(imageFile.bytes, imageFile.mimeType);
+      if (isWeakImageSummary(creativeText) && isWeakImageSummary(exactText)) {
+        creativeText = await describeVisualStyleFromImage(imageFile.bytes, imageFile.mimeType);
+        exactText = "";
+      }
     } catch {
       // Keep caption generation resilient even if one image cannot be analyzed.
     }
@@ -790,8 +842,8 @@ async function buildMultiImagePackage(config: LeanAutoPostConfig, images: DriveI
     }
   }
 
-  const requiredModelLines = buildRequiredModelLines(sourceChunks, sampleImages);
   const keyword = `${config.folderName || "Google Drive"} nail idea set`;
+  const defaultRequiredModelLines = buildRequiredModelLines(sourceChunks, sampleImages);
   const builtInPrompt =
     `คุณคือผู้เชี่ยวชาญด้านการสร้างคอนเทนต์โซเชียลมีเดียสายไวรัล (Facebook/Instagram) ที่เน้นเพิ่ม Like, Comment, Share และ Time Spent
 
@@ -852,7 +904,7 @@ Optional:
   const fallbackCaption = appendHashtags(
     ensureCompleteMultiImageCaption(
       `เล็บ ${sampleImages.length} แบบนี้ แต่ละแบบให้ฟีลไม่เหมือนกันเลย\nลองเลือกแบบที่ชอบที่สุดก่อน\nเมนต์เลขที่ชอบ เดี๋ยวทายนิสัยให้\nเซฟไว้เป็นเรฟ แล้วแชร์ให้เพื่อนช่วยเลือกได้เลย`,
-      requiredModelLines,
+      defaultRequiredModelLines,
       config.captionLengthMode ?? "balanced"
     ),
     config.hashtags
@@ -867,9 +919,18 @@ Optional:
     });
     const chosen = variants?.length ? randomItem(variants) : null;
     if (chosen) {
+      const rawCaption = [chosen.caption, chosen.hashtags.join(" ")].filter(Boolean).join("\n\n");
+      const existingModelDetails = extractModelDetails(
+        rawCaption
+          .replace(/\r\n/g, "\n")
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean)
+      );
+      const requiredModelLines = buildRequiredModelLines(sourceChunks, sampleImages, existingModelDetails);
       const caption = appendHashtags(
         ensureCompleteMultiImageCaption(
-          [chosen.caption, chosen.hashtags.join(" ")].filter(Boolean).join("\n\n"),
+          rawCaption,
           requiredModelLines,
           config.captionLengthMode ?? "balanced"
         ),

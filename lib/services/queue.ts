@@ -126,13 +126,16 @@ async function addSequenceBadgeToImage(image: ResolvedImage, sequence: number): 
 
   const inputBuffer = Buffer.from(image.bytes);
   const metadata = await sharp(inputBuffer).metadata();
-  const badgeSize = Math.max(56, Math.round(Math.min(metadata.width ?? 1200, metadata.height ?? 1200) * 0.12));
-  const fontSize = Math.max(26, Math.round(badgeSize * 0.42));
+  const badgeSize = Math.max(72, Math.round(Math.min(metadata.width ?? 1200, metadata.height ?? 1200) * 0.13));
+  const fontSize = Math.max(32, Math.round(badgeSize * 0.5));
+  const center = badgeSize / 2;
+  const textY = center + fontSize * 0.18;
   const badgeSvg = Buffer.from(`
     <svg width="${badgeSize}" height="${badgeSize}" viewBox="0 0 ${badgeSize} ${badgeSize}" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="${badgeSize / 2}" cy="${badgeSize / 2}" r="${badgeSize / 2 - 4}" fill="rgba(32,58,120,0.92)" stroke="rgba(255,255,255,0.92)" stroke-width="4"/>
-      <text x="50%" y="52%" text-anchor="middle" dominant-baseline="middle"
-        font-family="Arial, Helvetica, sans-serif" font-size="${fontSize}" font-weight="700" fill="#ffffff">${sequence}</text>
+      <circle cx="${center}" cy="${center}" r="${center - 4}" fill="#234cbb" stroke="#ffffff" stroke-width="4"/>
+      <text x="${center}" y="${textY}" text-anchor="middle"
+        font-family="DejaVu Sans, Arial, Helvetica, sans-serif"
+        font-size="${fontSize}" font-weight="800" fill="#ffffff">${sequence}</text>
     </svg>
   `);
 
