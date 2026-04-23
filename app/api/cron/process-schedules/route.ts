@@ -5,7 +5,6 @@ import { processDueAutoPostAiConfigs } from "@/lib/services/auto-post-ai";
 import { syncTrackedAutoCommentPosts } from "@/lib/services/comment-automation";
 import { processQueuedJobs } from "@/lib/services/queue";
 import { queueDueSchedules } from "@/lib/services/scheduler";
-import { processDueTrendRssNewsModes } from "@/lib/services/trend-rss/pipeline";
 import { runPlatformScheduler } from "@/src/jobs/schedulers/run-platform-scheduler";
 import { randomUUID } from "crypto";
 
@@ -37,12 +36,11 @@ export async function GET(request: Request) {
     }
 
     await connectDb();
-    const [scheduledQueued, autoPostsQueued, autoPostAiQueued, syncedComments, trendRssProcessed] = await Promise.all([
+    const [scheduledQueued, autoPostsQueued, autoPostAiQueued, syncedComments] = await Promise.all([
       queueDueSchedules(),
       processDueAutoPosts(),
       processDueAutoPostAiConfigs(),
-      syncTrackedAutoCommentPosts(),
-      processDueTrendRssNewsModes()
+      syncTrackedAutoCommentPosts()
     ]);
     const processedJobs = inlinePublisherEnabled ? await processQueuedJobs(inlineBatchSize) : [];
     console.info("[SCHEDULER] completed", {
@@ -51,7 +49,6 @@ export async function GET(request: Request) {
       autoPostsQueued,
       autoPostAiQueued,
       syncedComments,
-      trendRssProcessed,
       processedJobs: processedJobs.length,
       durationMs: Date.now() - startedAt
     });
@@ -62,7 +59,6 @@ export async function GET(request: Request) {
         autoPostsQueued,
         autoPostAiQueued,
         syncedComments,
-        trendRssProcessed,
         processedJobs,
         schedulerEngine,
         inlinePublisherEnabled,
