@@ -78,6 +78,8 @@ type QueueAutoPostsResult = {
   workflowId: string;
   workflowRunId: string;
   contentItemId: string;
+  waiting?: boolean;
+  message?: string;
 };
 
 type MultiImagePackage = {
@@ -338,6 +340,11 @@ function getMultiImageTargetCount(mode: "4" | "5" | "6-10" = "4", availableCount
     return Math.floor(Math.random() * (max - 6 + 1)) + 6;
   }
   return availableCount >= 4 ? 4 : 0;
+}
+
+function isInsufficientEligibleImagesError(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+  return message.startsWith("Not enough eligible images to build unique multi-image sets");
 }
 
 function getMinimumMultiImageCount(mode: "4" | "5" | "6-10" = "4") {
@@ -1224,10 +1231,52 @@ export async function processAutoPostAiConfigNow(userId: string, configId: strin
     throw new Error("Auto Post settings not found");
   }
 
-  const result = await queueAutoPostsForConfig(config, {
-    source: "manual-start",
-    immediate: true
-  });
+  let result: QueueAutoPostsResult;
+  try {
+    result = await queueAutoPostsForConfig(config, {
+      source: "manual-start",
+      immediate: true
+    });
+  } catch (error) {
+    if (!isInsufficientEligibleImagesError(error)) {
+      throw error;
+    }
+
+    const waitingMessage =
+      "ยังมีรูปสดที่ไม่ซ้ำในช่วง 24 ชั่วโมงไม่พอสำหรับโพสต์หลายภาพ ระบบจะรอรอบถัดไปหรือรอให้เพิ่มรูปใหม่ก่อน";
+    const nextRunAt = getNextAutoRun(config.intervalMinutes, config.postingWindowStart, config.postingWindowEnd);
+    await updateAutoPostState(config._id, {
+      lastRunAt: new Date(),
+      nextRunAt,
+      autoPostStatus: "waiting",
+      jobStatus: "pending",
+      lastStatus: "pending",
+      lastError: null
+    });
+
+    await logAction({
+      userId: config.userId,
+      type: "queue",
+      level: "info",
+      message: waitingMessage,
+      metadata: {
+        autoPostAi: true,
+        autoPostAiConfigId: config._id,
+        source: "manual-start",
+        nextRunAt: nextRunAt.toISOString()
+      }
+    });
+
+    return {
+      queued: 0,
+      workflowId: "",
+      workflowRunId: "",
+      contentItemId: "",
+      waiting: true,
+      message: waitingMessage,
+      processedJobs: []
+    };
+  }
 
   const processedJobs = await processQueuedJobs(Math.max(config.targetPageIds.length, 1));
 
@@ -1267,6 +1316,33 @@ export async function processDueAutoPostAiConfigs() {
       });
       processed += result.queued;
     } catch (error) {
+      if (isInsufficientEligibleImagesError(error)) {
+        const nextRunAt = getNextAutoRun(config.intervalMinutes, config.postingWindowStart, config.postingWindowEnd);
+        await updateAutoPostState(config._id, {
+          lastRunAt: new Date(),
+          nextRunAt,
+          autoPostStatus: "waiting",
+          jobStatus: "pending",
+          lastStatus: "pending",
+          lastError: null
+        });
+
+        await logAction({
+          userId: config.userId,
+          type: "queue",
+          level: "info",
+          message:
+            "กำลังรอรูปสดที่ไม่ซ้ำในช่วง 24 ชั่วโมงให้พอสำหรับโพสต์หลายภาพ ระบบจะลองใหม่รอบถัดไปอัตโนมัติ",
+          metadata: {
+            autoPostAi: true,
+            autoPostAiConfigId: config._id,
+            source: "schedule",
+            nextRunAt: nextRunAt.toISOString()
+          }
+        });
+        continue;
+      }
+
       await updateAutoPostState(config._id, {
         lastRunAt: new Date(),
         nextRunAt: getNextAutoRun(config.intervalMinutes, config.postingWindowStart, config.postingWindowEnd),
