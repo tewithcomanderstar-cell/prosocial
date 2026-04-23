@@ -255,18 +255,19 @@ async function addPageProfileBadgeToImage(image: ResolvedImage, profileImage?: {
   };
 }
 
-async function decorateMultiImageAiImages(
+async function decorateAutoPostImages(
   images: ResolvedImage[],
   automationMode?: unknown,
   profileImage?: { bytes: ArrayBuffer; mimeType: string } | null
 ) {
-  if (automationMode !== "multi-image-ai" || images.length <= 1) {
+  if (images.length === 0) {
     return images;
   }
 
   const decorated: ResolvedImage[] = [];
   for (const [index, image] of images.entries()) {
-    const withSequence = await addSequenceBadgeToImage(image, index + 1);
+    const withSequence =
+      automationMode === "multi-image-ai" && images.length > 1 ? await addSequenceBadgeToImage(image, index + 1) : image;
     decorated.push(await addPageProfileBadgeToImage(withSequence, profileImage));
   }
   return decorated;
@@ -826,7 +827,7 @@ async function executePostJob(job: JobExecution) {
   }
 
   let pageProfileImage: { bytes: ArrayBuffer; mimeType: string } | null = null;
-  if (job.payload?.automationMode === "multi-image-ai") {
+  if (hasBoundAutoPostConfig(job)) {
     try {
       pageProfileImage = await fetchFacebookPageProfileImage({
         pageId: page.pageId,
@@ -841,7 +842,7 @@ async function executePostJob(job: JobExecution) {
   const chosenVariant = post.randomizeCaption ? randomItem(variants) : variants[0];
   const message = buildPublishMessage(chosenVariant.caption, chosenVariant.hashtags);
   const imageRefs = post.randomizeImages && post.imageUrls.length > 0 ? [randomItem(post.imageUrls)] : post.imageUrls;
-  const images = await decorateMultiImageAiImages(
+  const images = await decorateAutoPostImages(
     await resolveImages(job.userId, imageRefs),
     job.payload?.automationMode,
     pageProfileImage
