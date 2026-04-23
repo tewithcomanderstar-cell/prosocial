@@ -536,24 +536,32 @@ function formatMultiImageCaption(caption: string, mode: "balanced" | "short" = "
   const maxCtaLines = mode === "short" ? 1 : 2;
   const maxNonModelLines = mode === "short" ? 3 : 4;
 
+  const cuteIntroEmojis = ["👀", "✨", "💅"];
+  const cuteModelEmojis = ["💅", "✨", "🌷", "💖", "🫶", "🌸", "🎀", "💎"];
+  const cuteCtaEmojis = ["💬", "📌", "💕", "✨"];
   const formattedContent: string[] = [];
   const introLines = contentLines.filter((line) => !modelLabel.test(line));
   const modelLines = contentLines.filter((line) => modelLabel.test(line));
 
   if (introLines[0]) {
-    formattedContent.push(shortenSentence(introLines[0], maxHookLength));
+    formattedContent.push(ensureCuteEmoji(shortenSentence(introLines[0], maxHookLength), cuteIntroEmojis[0]));
   }
 
   const secondaryIntro = introLines.slice(1, maxNonModelLines).map((line, index, array) => {
     const isLast = index >= array.length - maxCtaLines;
-    return shortenSentence(line, isLast ? maxDetailLength : maxHookLength + 12);
+    const shortened = shortenSentence(line, isLast ? maxDetailLength : maxHookLength + 12);
+    if (isLast) {
+      return ensureCuteEmoji(shortened, cuteCtaEmojis[index % cuteCtaEmojis.length]);
+    }
+    return ensureCuteEmoji(shortened, cuteIntroEmojis[(index + 1) % cuteIntroEmojis.length]);
   });
   formattedContent.push(...secondaryIntro);
 
-  const formattedModels = modelLines.map((line) => {
+  const formattedModels = modelLines.map((line, index) => {
     const [label, ...rest] = line.split(":");
     const detail = shortenSentence(rest.join(":").trim(), maxDetailLength);
-    return detail ? `${label.trim()} : ${detail}` : label.trim();
+    const baseLine = detail ? `${label.trim()} : ${detail}` : label.trim();
+    return ensureCuteEmoji(baseLine, cuteModelEmojis[index % cuteModelEmojis.length]);
   });
 
   const limitedModels = mode === "short" ? formattedModels.slice(0, 4) : formattedModels;
@@ -568,6 +576,19 @@ function formatMultiImageCaption(caption: string, mode: "balanced" | "short" = "
   }
 
   return outputLines.join("\n");
+}
+
+function ensureCuteEmoji(line: string, preferredEmoji: string) {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  if (/[\p{Extended_Pictographic}\p{Emoji_Presentation}]/u.test(trimmed)) {
+    return trimmed;
+  }
+
+  return `${preferredEmoji} ${trimmed}`;
 }
 
 function formatPinnedComment(comment: string) {
@@ -882,6 +903,7 @@ async function buildMultiImagePackage(config: LeanAutoPostConfig, images: DriveI
 - ไม่เป็นทางการ
 - ต้องทำให้คนรู้สึกว่า "เกี่ยวกับตัวเอง"
 - ห้ามเขียนเหมือนบทความ
+- ให้มีอิโมจิน่ารัก ๆ แบบพอดีอย่างน้อยใน hook, บรรทัดชวนมีส่วนร่วม, และแต่ละแบบ
 - ห้ามพูดถึงชื่อไฟล์ภาพ
 - ห้ามพูดถึงการวิเคราะห์ภาพ
 - ห้ามพูดถึง OCR, source, prompt, ไฟล์, หรือข้อความหลังบ้าน
