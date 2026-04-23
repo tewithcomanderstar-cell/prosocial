@@ -119,62 +119,54 @@ type EnqueueOptions = {
   payloadExtras?: Record<string, unknown>;
 };
 
-const SEVEN_SEGMENT_DIGITS: Record<string, Array<"a" | "b" | "c" | "d" | "e" | "f" | "g">> = {
-  "0": ["a", "b", "c", "d", "e", "f"],
-  "1": ["b", "c"],
-  "2": ["a", "b", "g", "e", "d"],
-  "3": ["a", "b", "c", "d", "g"],
-  "4": ["f", "g", "b", "c"],
-  "5": ["a", "f", "g", "c", "d"],
-  "6": ["a", "f", "e", "d", "c", "g"],
-  "7": ["a", "b", "c"],
-  "8": ["a", "b", "c", "d", "e", "f", "g"],
-  "9": ["a", "b", "c", "d", "f", "g"]
+const MODERN_DIGIT_PATHS: Record<string, string> = {
+  "0": "M50 20 C68 20 80 34 80 70 C80 106 68 120 50 120 C32 120 20 106 20 70 C20 34 32 20 50 20 Z",
+  "1": "M38 40 L58 28 L58 120",
+  "2": "M24 44 C28 28 40 20 56 20 C72 20 82 30 82 44 C82 56 76 64 62 74 L38 92 C30 98 26 104 24 112 L84 112",
+  "3": "M28 34 C36 24 46 20 58 20 C72 20 82 28 82 42 C82 54 74 62 62 66 C76 70 84 80 84 94 C84 110 70 120 52 120 C38 120 28 116 20 108",
+  "4": "M72 120 L72 20 L24 82 L88 82",
+  "5": "M80 20 L32 20 L28 64 C36 56 44 52 56 52 C74 52 86 64 86 86 C86 108 72 120 50 120 C34 120 24 114 18 106",
+  "6": "M76 26 C70 22 64 20 56 20 C34 20 20 40 20 72 C20 104 34 120 54 120 C72 120 84 108 84 90 C84 72 72 60 56 60 C42 60 32 66 26 78",
+  "7": "M20 24 L84 24 L42 120",
+  "8": "M52 20 C70 20 82 30 82 46 C82 58 74 68 62 72 C78 78 88 90 88 104 C88 120 72 132 52 132 C32 132 16 120 16 104 C16 90 26 78 42 72 C30 68 22 58 22 46 C22 30 34 20 52 20 Z",
+  "9": "M78 62 C72 74 62 80 48 80 C32 80 20 68 20 50 C20 32 34 20 52 20 C72 20 86 36 86 68 C86 100 72 120 48 120 C38 120 30 118 22 112"
 };
 
-function createSevenSegmentDigitSvg(digit: string, x: number, y: number, width: number, height: number, thickness: number) {
-  const rightX = x + width - thickness;
-  const midY = y + height / 2 - thickness / 2;
-  const bottomY = y + height - thickness;
-  const segmentRects = {
-    a: { x: x + thickness / 2, y, width: width - thickness, height: thickness },
-    b: { x: rightX, y: y + thickness / 2, width: thickness, height: height / 2 - thickness },
-    c: { x: rightX, y: y + height / 2, width: thickness, height: height / 2 - thickness / 2 },
-    d: { x: x + thickness / 2, y: bottomY, width: width - thickness, height: thickness },
-    e: { x, y: y + height / 2, width: thickness, height: height / 2 - thickness / 2 },
-    f: { x, y: y + thickness / 2, width: thickness, height: height / 2 - thickness },
-    g: { x: x + thickness / 2, y: midY, width: width - thickness, height: thickness }
-  } as const;
-
-  return (SEVEN_SEGMENT_DIGITS[digit] ?? [])
-    .map((segment) => {
-      const rect = segmentRects[segment];
-      return `<rect x="${rect.x}" y="${rect.y}" width="${rect.width}" height="${rect.height}" rx="${Math.max(
-        2,
-        thickness / 3
-      )}" fill="#ffffff" />`;
-    })
-    .join("");
+function createModernDigitSvg(digit: string, x: number, y: number, size: number, strokeWidth: number) {
+  const path = MODERN_DIGIT_PATHS[digit] ?? MODERN_DIGIT_PATHS["0"];
+  const scale = size / 140;
+  return `<g transform="translate(${x}, ${y}) scale(${scale})">
+    <path d="${path}" fill="none" stroke="#ffffff" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>`;
 }
 
 function buildSequenceBadgeSvg(sequence: number, badgeSize: number) {
   const digits = String(sequence).slice(0, 2).split("");
-  const digitWidth = digits.length === 1 ? badgeSize * 0.26 : badgeSize * 0.2;
-  const digitHeight = badgeSize * 0.42;
-  const thickness = Math.max(6, badgeSize * 0.06);
-  const gap = digits.length === 1 ? 0 : badgeSize * 0.05;
-  const totalWidth = digits.length * digitWidth + (digits.length - 1) * gap;
+  const digitSize = digits.length === 1 ? badgeSize * 0.58 : badgeSize * 0.42;
+  const gap = digits.length === 1 ? 0 : badgeSize * 0.04;
+  const totalWidth = digits.length * digitSize + (digits.length - 1) * gap;
   const startX = (badgeSize - totalWidth) / 2;
-  const startY = (badgeSize - digitHeight) / 2;
+  const startY = (badgeSize - digitSize) / 2;
+  const strokeWidth = digits.length === 1 ? 12 : 10;
   const digitsSvg = digits
     .map((digit, index) =>
-      createSevenSegmentDigitSvg(digit, startX + index * (digitWidth + gap), startY, digitWidth, digitHeight, thickness)
+      createModernDigitSvg(digit, startX + index * (digitSize + gap), startY, digitSize, strokeWidth)
     )
     .join("");
 
   return `
     <svg width="${badgeSize}" height="${badgeSize}" viewBox="0 0 ${badgeSize} ${badgeSize}" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="${badgeSize / 2}" cy="${badgeSize / 2}" r="${badgeSize / 2 - 4}" fill="#234cbb" stroke="#ffffff" stroke-width="4"/>
+      <defs>
+        <linearGradient id="badgeFill" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#2556d8"/>
+          <stop offset="100%" stop-color="#123a9e"/>
+        </linearGradient>
+        <filter id="badgeShadow" x="-30%" y="-30%" width="160%" height="160%">
+          <feDropShadow dx="0" dy="5" stdDeviation="6" flood-color="#0f2d75" flood-opacity="0.32"/>
+        </filter>
+      </defs>
+      <circle cx="${badgeSize / 2}" cy="${badgeSize / 2}" r="${badgeSize / 2 - 5}" fill="url(#badgeFill)" stroke="rgba(255,255,255,0.96)" stroke-width="4" filter="url(#badgeShadow)"/>
+      <circle cx="${badgeSize / 2}" cy="${badgeSize / 2}" r="${badgeSize / 2 - 10}" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="2"/>
       ${digitsSvg}
     </svg>
   `;
