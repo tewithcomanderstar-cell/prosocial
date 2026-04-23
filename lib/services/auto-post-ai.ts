@@ -606,7 +606,7 @@ function extractModelDetails(lines: string[]) {
   const details = new Map<number, string>();
 
   for (const line of lines) {
-    const match = /^แบบ\s*(\d+)\s*:\s*(.+)$/i.exec(line);
+    const match = /^(?:[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F\u200D]+\s*)?แบบ\s*(\d+)\s*:\s*(.+)$/iu.exec(line);
     if (!match) continue;
     const modelIndex = Number(match[1]);
     const detail = match[2]?.trim() ?? "";
@@ -679,7 +679,7 @@ function ensureCompleteMultiImageCaption(caption: string, requiredModelLines: st
     .map((line) => line.trim())
     .filter(Boolean);
 
-  const modelLinePattern = /^แบบ\s*\d+\s*:/;
+  const modelLinePattern = /^(?:[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F\u200D]+\s*)?แบบ\s*\d+\s*:/u;
   const nonModelLines = lines.filter((line) => !modelLinePattern.test(line));
   const completedLines = [...nonModelLines, ...requiredModelLines];
 

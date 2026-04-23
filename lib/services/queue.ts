@@ -119,6 +119,67 @@ type EnqueueOptions = {
   payloadExtras?: Record<string, unknown>;
 };
 
+const SEVEN_SEGMENT_DIGITS: Record<string, Array<"a" | "b" | "c" | "d" | "e" | "f" | "g">> = {
+  "0": ["a", "b", "c", "d", "e", "f"],
+  "1": ["b", "c"],
+  "2": ["a", "b", "g", "e", "d"],
+  "3": ["a", "b", "c", "d", "g"],
+  "4": ["f", "g", "b", "c"],
+  "5": ["a", "f", "g", "c", "d"],
+  "6": ["a", "f", "e", "d", "c", "g"],
+  "7": ["a", "b", "c"],
+  "8": ["a", "b", "c", "d", "e", "f", "g"],
+  "9": ["a", "b", "c", "d", "f", "g"]
+};
+
+function createSevenSegmentDigitSvg(digit: string, x: number, y: number, width: number, height: number, thickness: number) {
+  const rightX = x + width - thickness;
+  const midY = y + height / 2 - thickness / 2;
+  const bottomY = y + height - thickness;
+  const segmentRects = {
+    a: { x: x + thickness / 2, y, width: width - thickness, height: thickness },
+    b: { x: rightX, y: y + thickness / 2, width: thickness, height: height / 2 - thickness },
+    c: { x: rightX, y: y + height / 2, width: thickness, height: height / 2 - thickness / 2 },
+    d: { x: x + thickness / 2, y: bottomY, width: width - thickness, height: thickness },
+    e: { x, y: y + height / 2, width: thickness, height: height / 2 - thickness / 2 },
+    f: { x, y: y + thickness / 2, width: thickness, height: height / 2 - thickness },
+    g: { x: x + thickness / 2, y: midY, width: width - thickness, height: thickness }
+  } as const;
+
+  return (SEVEN_SEGMENT_DIGITS[digit] ?? [])
+    .map((segment) => {
+      const rect = segmentRects[segment];
+      return `<rect x="${rect.x}" y="${rect.y}" width="${rect.width}" height="${rect.height}" rx="${Math.max(
+        2,
+        thickness / 3
+      )}" fill="#ffffff" />`;
+    })
+    .join("");
+}
+
+function buildSequenceBadgeSvg(sequence: number, badgeSize: number) {
+  const digits = String(sequence).slice(0, 2).split("");
+  const digitWidth = digits.length === 1 ? badgeSize * 0.26 : badgeSize * 0.2;
+  const digitHeight = badgeSize * 0.42;
+  const thickness = Math.max(6, badgeSize * 0.06);
+  const gap = digits.length === 1 ? 0 : badgeSize * 0.05;
+  const totalWidth = digits.length * digitWidth + (digits.length - 1) * gap;
+  const startX = (badgeSize - totalWidth) / 2;
+  const startY = (badgeSize - digitHeight) / 2;
+  const digitsSvg = digits
+    .map((digit, index) =>
+      createSevenSegmentDigitSvg(digit, startX + index * (digitWidth + gap), startY, digitWidth, digitHeight, thickness)
+    )
+    .join("");
+
+  return `
+    <svg width="${badgeSize}" height="${badgeSize}" viewBox="0 0 ${badgeSize} ${badgeSize}" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="${badgeSize / 2}" cy="${badgeSize / 2}" r="${badgeSize / 2 - 4}" fill="#234cbb" stroke="#ffffff" stroke-width="4"/>
+      ${digitsSvg}
+    </svg>
+  `;
+}
+
 async function addSequenceBadgeToImage(image: ResolvedImage, sequence: number): Promise<ResolvedImage> {
   if (image.kind !== "binary") {
     return image;
@@ -127,17 +188,7 @@ async function addSequenceBadgeToImage(image: ResolvedImage, sequence: number): 
   const inputBuffer = Buffer.from(image.bytes);
   const metadata = await sharp(inputBuffer).metadata();
   const badgeSize = Math.max(72, Math.round(Math.min(metadata.width ?? 1200, metadata.height ?? 1200) * 0.13));
-  const fontSize = Math.max(32, Math.round(badgeSize * 0.5));
-  const center = badgeSize / 2;
-  const textY = center + fontSize * 0.18;
-  const badgeSvg = Buffer.from(`
-    <svg width="${badgeSize}" height="${badgeSize}" viewBox="0 0 ${badgeSize} ${badgeSize}" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="${center}" cy="${center}" r="${center - 4}" fill="#234cbb" stroke="#ffffff" stroke-width="4"/>
-      <text x="${center}" y="${textY}" text-anchor="middle"
-        font-family="DejaVu Sans, Arial, Helvetica, sans-serif"
-        font-size="${fontSize}" font-weight="800" fill="#ffffff">${sequence}</text>
-    </svg>
-  `);
+  const badgeSvg = Buffer.from(buildSequenceBadgeSvg(sequence, badgeSize));
 
   const output = await sharp(inputBuffer)
     .composite([{ input: badgeSvg, top: 20, left: 20 }])
