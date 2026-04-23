@@ -527,7 +527,7 @@ function formatMultiImageCaption(caption: string, mode: "balanced" | "short" = "
     return normalizedCaption;
   }
 
-  const modelLabel = /^แบบ\s*\d+\s*:/;
+  const modelLabel = /^(?:[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F\u200D]+\s*)?แบบ\s*\d+\s*:/u;
   const hashtagLines = lines.filter((line) => line.startsWith("#"));
   const contentLines = lines.filter((line) => !line.startsWith("#"));
 
