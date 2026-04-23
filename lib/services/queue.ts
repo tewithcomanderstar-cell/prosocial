@@ -11,7 +11,7 @@ import { finalizeTrackedPostIfComplete, notifyCommentFailure } from "@/lib/servi
 import { logCommentStage } from "@/lib/services/comment-logging";
 import { updateAutoPostRecords } from "@/lib/services/automation-records";
 import { updateAutoPostAiRecords } from "@/lib/services/automation-records-ai";
-import { FacebookPublishError, publishPostToFacebook, replyToFacebookComment } from "@/lib/services/facebook";
+import { FacebookPublishError, fetchFacebookPageProfileImage, publishPostToFacebook, replyToFacebookComment } from "@/lib/services/facebook";
 import { ensureValidFacebookConnection, ensureValidGoogleDriveConnection, getStoredFacebookConnection } from "@/lib/services/integration-auth";
 import { fetchDriveImageBinary } from "@/lib/services/google-drive";
 import { recordMetricSnapshot } from "@/lib/services/analytics";
@@ -194,14 +194,80 @@ async function addSequenceBadgeToImage(image: ResolvedImage, sequence: number): 
   };
 }
 
-async function decorateMultiImageAiImages(images: ResolvedImage[], automationMode?: unknown) {
+async function addPageProfileBadgeToImage(image: ResolvedImage, profileImage?: { bytes: ArrayBuffer; mimeType: string } | null): Promise<ResolvedImage> {
+  if (image.kind !== "binary" || !profileImage) {
+    return image;
+  }
+
+  const inputBuffer = Buffer.from(image.bytes);
+  const metadata = await sharp(inputBuffer).metadata();
+  const baseSize = Math.min(metadata.width ?? 1200, metadata.height ?? 1200);
+  const badgeSize = Math.max(84, Math.round(baseSize * 0.16));
+  const inset = Math.max(20, Math.round(badgeSize * 0.18));
+  const profileBuffer = await sharp(Buffer.from(profileImage.bytes))
+    .resize(badgeSize, badgeSize, { fit: "cover" })
+    .png()
+    .toBuffer();
+
+  const ringSvg = Buffer.from(`
+    <svg width="${badgeSize}" height="${badgeSize}" viewBox="0 0 ${badgeSize} ${badgeSize}" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <filter id="profileShadow" x="-30%" y="-30%" width="170%" height="170%">
+          <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#0f172a" flood-opacity="0.28"/>
+        </filter>
+      </defs>
+      <circle cx="${badgeSize / 2}" cy="${badgeSize / 2}" r="${badgeSize / 2 - 4}" fill="none" stroke="#ffffff" stroke-width="6" filter="url(#profileShadow)"/>
+      <circle cx="${badgeSize / 2}" cy="${badgeSize / 2}" r="${badgeSize / 2 - 9}" fill="none" stroke="rgba(37,86,216,0.85)" stroke-width="3"/>
+    </svg>
+  `);
+
+  const maskSvg = Buffer.from(
+    `<svg width="${badgeSize}" height="${badgeSize}" viewBox="0 0 ${badgeSize} ${badgeSize}" xmlns="http://www.w3.org/2000/svg"><circle cx="${badgeSize / 2}" cy="${
+      badgeSize / 2
+    }" r="${badgeSize / 2 - 10}" fill="#ffffff"/></svg>`
+  );
+
+  const avatar = await sharp(profileBuffer)
+    .composite([{ input: maskSvg, blend: "dest-in" }])
+    .png()
+    .toBuffer();
+
+  const output = await sharp(inputBuffer)
+    .composite([
+      {
+        input: avatar,
+        top: Math.max(20, (metadata.height ?? baseSize) - badgeSize - inset),
+        left: Math.max(20, (metadata.width ?? baseSize) - badgeSize - inset)
+      },
+      {
+        input: ringSvg,
+        top: Math.max(20, (metadata.height ?? baseSize) - badgeSize - inset),
+        left: Math.max(20, (metadata.width ?? baseSize) - badgeSize - inset)
+      }
+    ])
+    .toBuffer({ resolveWithObject: true });
+
+  return {
+    kind: "binary",
+    fileName: image.fileName,
+    bytes: Uint8Array.from(output.data).buffer,
+    mimeType: output.info.format === "png" ? "image/png" : "image/jpeg"
+  };
+}
+
+async function decorateMultiImageAiImages(
+  images: ResolvedImage[],
+  automationMode?: unknown,
+  profileImage?: { bytes: ArrayBuffer; mimeType: string } | null
+) {
   if (automationMode !== "multi-image-ai" || images.length <= 1) {
     return images;
   }
 
   const decorated: ResolvedImage[] = [];
   for (const [index, image] of images.entries()) {
-    decorated.push(await addSequenceBadgeToImage(image, index + 1));
+    const withSequence = await addSequenceBadgeToImage(image, index + 1);
+    decorated.push(await addPageProfileBadgeToImage(withSequence, profileImage));
   }
   return decorated;
 }
@@ -759,13 +825,26 @@ async function executePostJob(job: JobExecution) {
     throw new Error("Target page token was not found");
   }
 
+  let pageProfileImage: { bytes: ArrayBuffer; mimeType: string } | null = null;
+  if (job.payload?.automationMode === "multi-image-ai") {
+    try {
+      pageProfileImage = await fetchFacebookPageProfileImage({
+        pageId: page.pageId,
+        pageAccessToken: page.pageAccessToken
+      });
+    } catch {
+      pageProfileImage = null;
+    }
+  }
+
   const variants = post.variants?.length ? post.variants : [{ caption: post.content, hashtags: post.hashtags }];
   const chosenVariant = post.randomizeCaption ? randomItem(variants) : variants[0];
   const message = buildPublishMessage(chosenVariant.caption, chosenVariant.hashtags);
   const imageRefs = post.randomizeImages && post.imageUrls.length > 0 ? [randomItem(post.imageUrls)] : post.imageUrls;
   const images = await decorateMultiImageAiImages(
     await resolveImages(job.userId, imageRefs),
-    job.payload?.automationMode
+    job.payload?.automationMode,
+    pageProfileImage
   );
 
   if (hasBoundAutoPostConfig(job)) {
