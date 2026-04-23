@@ -527,7 +527,7 @@ function formatMultiImageCaption(caption: string, mode: "balanced" | "short" = "
     return normalizedCaption;
   }
 
-  const modelLabel = /^(?:[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F\u200D]+\s*)?แบบ\s*\d+\s*:/u;
+  const modelLabel = /^(?:[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F\u200D]+\s*)?แบบ\s*\d+\s*(?::|：|-|—)\s*/u;
   const hashtagLines = lines.filter((line) => line.startsWith("#"));
   const contentLines = lines.filter((line) => !line.startsWith("#"));
 
@@ -558,9 +558,10 @@ function formatMultiImageCaption(caption: string, mode: "balanced" | "short" = "
   formattedContent.push(...secondaryIntro);
 
   const formattedModels = modelLines.map((line, index) => {
-    const [label, ...rest] = line.split(":");
-    const detail = shortenSentence(rest.join(":").trim(), maxDetailLength);
-    const baseLine = detail ? `${label.trim()} : ${detail}` : label.trim();
+    const match = /^(.*?แบบ\s*\d+)\s*(?::|：|-|—)\s*(.+)$/u.exec(line.trim());
+    const label = match?.[1]?.trim() ?? line.trim();
+    const detail = shortenSentence(match?.[2]?.trim() ?? "", maxDetailLength);
+    const baseLine = detail ? `${label} : ${detail}` : label;
     return ensureCuteEmoji(baseLine, cuteModelEmojis[index % cuteModelEmojis.length]);
   });
 
@@ -627,7 +628,7 @@ function extractModelDetails(lines: string[]) {
   const details = new Map<number, string>();
 
   for (const line of lines) {
-    const match = /^(?:[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F\u200D]+\s*)?แบบ\s*(\d+)\s*:\s*(.+)$/iu.exec(line);
+    const match = /^(?:[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F\u200D]+\s*)?แบบ\s*(\d+)\s*(?::|：|-|—)\s*(.+)$/iu.exec(line);
     if (!match) continue;
     const modelIndex = Number(match[1]);
     const detail = match[2]?.trim() ?? "";
@@ -700,9 +701,17 @@ function ensureCompleteMultiImageCaption(caption: string, requiredModelLines: st
     .map((line) => line.trim())
     .filter(Boolean);
 
-  const modelLinePattern = /^(?:[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F\u200D]+\s*)?แบบ\s*\d+\s*:/u;
+  const modelLinePattern = /^(?:[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F\u200D]+\s*)?แบบ\s*\d+\s*(?::|：|-|—)\s*/u;
   const nonModelLines = lines.filter((line) => !modelLinePattern.test(line));
-  const completedLines = [...nonModelLines, ...requiredModelLines];
+  const existingModelDetails = extractModelDetails(lines);
+  const completedModelLines = requiredModelLines.map((requiredLine, index) => {
+    const existing = existingModelDetails.get(index + 1)?.trim();
+    if (existing && !isWeakImageSummary(existing)) {
+      return `แบบ ${index + 1} : ${existing}`;
+    }
+    return requiredLine;
+  });
+  const completedLines = [...nonModelLines, ...completedModelLines];
 
   return formatMultiImageCaption(completedLines.join("\n"), mode);
 }
