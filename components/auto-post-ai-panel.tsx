@@ -324,7 +324,7 @@ export function AutoPostAiPanel() {
       const response = await fetch("/api/auto-post-ai/start", { method: "POST" });
       const result = await response.json();
       if (!result.ok) throw new Error(result.message || "Unable to start Auto Post");
-      setMessage("Automation started");
+      setMessage(result.message || (result.data?.waiting ? "Automation is waiting for more eligible images" : "Automation started"));
       await loadStatus(false);
     } catch (startError) {
       setError(sanitizeAutomationError(startError instanceof Error ? startError.message : "Unable to start Auto Post"));

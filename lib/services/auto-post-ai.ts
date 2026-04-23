@@ -1263,6 +1263,7 @@ export async function processAutoPostAiConfigNow(userId: string, configId: strin
         autoPostAi: true,
         autoPostAiConfigId: config._id,
         source: "manual-start",
+        autoPostStatus: "waiting",
         nextRunAt: nextRunAt.toISOString()
       }
     });
@@ -1337,6 +1338,7 @@ export async function processDueAutoPostAiConfigs() {
             autoPostAi: true,
             autoPostAiConfigId: config._id,
             source: "schedule",
+            autoPostStatus: "waiting",
             nextRunAt: nextRunAt.toISOString()
           }
         });

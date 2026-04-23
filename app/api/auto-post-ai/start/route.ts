@@ -88,8 +88,8 @@ export async function POST() {
     await logAction({
       userId,
       type: "queue",
-      level: "success",
-      message: "Auto Post AI triggered in-app",
+      level: result.waiting ? "info" : "success",
+      message: result.waiting ? result.message || "Auto Post AI is waiting for more eligible images" : "Auto Post AI triggered in-app",
       metadata: {
         autoPostAi: true,
         autoPostAiConfigId: config._id,
@@ -100,6 +100,7 @@ export async function POST() {
         destination: "in-app-automation-engine",
         queued: result.queued,
         processedJobs: result.processedJobs.length,
+        autoPostStatus: result.waiting ? "waiting" : "running",
         workflowId: result.workflowId,
         workflowRunId: result.workflowRunId,
         contentItemId: result.contentItemId
@@ -108,14 +109,16 @@ export async function POST() {
 
     return jsonOk(
       {
-        started: true,
+        started: !result.waiting,
+        waiting: Boolean(result.waiting),
         queued: result.queued,
         processedJobs: result.processedJobs,
         workflowId: result.workflowId,
         workflowRunId: result.workflowRunId,
-        contentItemId: result.contentItemId
+        contentItemId: result.contentItemId,
+        message: result.message ?? null
       },
-      "Auto Post AI started successfully"
+      result.waiting ? result.message || "Auto Post AI is waiting for more eligible images" : "Auto Post AI started successfully"
     );
   } catch (error) {
     if (error instanceof Error && error.message === "FORBIDDEN") {
