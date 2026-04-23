@@ -656,7 +656,7 @@ export async function syncTrackedAutoCommentPosts(userId?: string, options: { fo
           }
         }
 
-        if (shouldSyncNormal && settings.pageIds.includes(pageId) && settings.replies.length > 0 && trackedPostIds.size === 0) {
+        if (shouldSyncNormal && settings.pageIds.includes(pageId) && settings.replies.length > 0) {
           const recentPosts = await fetchRecentFacebookPostsWithComments({
             pageId,
             pageAccessToken: page.pageAccessToken,
