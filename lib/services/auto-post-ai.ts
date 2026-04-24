@@ -534,7 +534,7 @@ function formatMultiImageCaption(caption: string, mode: "balanced" | "short" = "
     return normalizedCaption;
   }
 
-  const modelLabel = /^(?:[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F\u200D]+\s*)?แบบ\s*\d+\s*(?::|：|-|—)\s*/u;
+  const modelLabel = /^(?:[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F\u200D\d#*.\-–—\s]+\s*)?แบบ\s*\d+\s*(?::|：|-|—)\s*/u;
   const hashtagLines = lines.filter((line) => line.startsWith("#"));
   const contentLines = lines.filter((line) => !line.startsWith("#"));
 
@@ -635,7 +635,9 @@ function extractModelDetails(lines: string[]) {
   const details = new Map<number, string>();
 
   for (const line of lines) {
-    const match = /^(?:[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F\u200D]+\s*)?แบบ\s*(\d+)\s*(?::|：|-|—)\s*(.+)$/iu.exec(line);
+    const match = /^(?:[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F\u200D\d#*.\-–—\s]+\s*)?แบบ\s*(\d+)\s*(?::|：|-|—)\s*(.+)$/iu.exec(
+      line
+    );
     if (!match) continue;
     const modelIndex = Number(match[1]);
     const detail = match[2]?.trim() ?? "";
@@ -708,7 +710,7 @@ function ensureCompleteMultiImageCaption(caption: string, requiredModelLines: st
     .map((line) => line.trim())
     .filter(Boolean);
 
-  const modelLinePattern = /^(?:[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F\u200D]+\s*)?แบบ\s*\d+\s*(?::|：|-|—)\s*/u;
+  const modelLinePattern = /^(?:[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F\u200D\d#*.\-–—\s]+\s*)?แบบ\s*\d+\s*(?::|：|-|—)\s*/u;
   const nonModelLines = lines.filter((line) => !modelLinePattern.test(line));
   const existingModelDetails = extractModelDetails(lines);
   const completedModelLines = requiredModelLines.map((requiredLine, index) => {
