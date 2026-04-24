@@ -524,15 +524,18 @@ type ParsedModelLine = {
   detail: string;
 };
 
-function parseModelLine(line: string): ParsedModelLine | null {
-  const trimmed = line.trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  const normalized = trimmed
+function normalizeDecoratedLine(line: string) {
+  return line
+    .trim()
     .replace(/^[\s\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F\u200D\u20E3#*.()\[\]{}_\-–—:：]+/gu, "")
     .trim();
+}
+
+function parseModelLine(line: string): ParsedModelLine | null {
+  const normalized = normalizeDecoratedLine(line);
+  if (!normalized) {
+    return null;
+  }
 
   const match = /^แบบ\s*(\d+)\s*(?::|：|-|—)\s*(.+)$/iu.exec(normalized);
   if (!match) {
@@ -549,6 +552,51 @@ function parseModelLine(line: string): ParsedModelLine | null {
     index,
     detail
   };
+}
+
+function parseLooseNumberedLine(line: string): ParsedModelLine | null {
+  const normalized = normalizeDecoratedLine(line);
+  if (!normalized) {
+    return null;
+  }
+
+  const match = /^(\d+)\s+(.+)$/u.exec(normalized);
+  if (!match) {
+    return null;
+  }
+
+  const index = Number(match[1]);
+  const detail = match[2]?.trim() ?? "";
+  if (!Number.isFinite(index) || index <= 0 || !detail) {
+    return null;
+  }
+
+  return {
+    index,
+    detail
+  };
+}
+
+function isLikelyCtaLine(line: string) {
+  const normalized = line.replace(/\s+/g, " ").trim().toLowerCase();
+  return /(เมนต์|คอมเมนต์|comment|เลือก|เลข|เดี๋ยว|ทายนิสัย|เซฟ|แชร์|save|share)/.test(normalized);
+}
+
+function isLikelyDuplicateModelIntroLine(line: string, expectedCount: number) {
+  if (isLikelyCtaLine(line) || parseModelLine(line)) {
+    return false;
+  }
+
+  const parsed = parseLooseNumberedLine(line);
+  if (!parsed) {
+    return false;
+  }
+
+  if (parsed.index > expectedCount) {
+    return false;
+  }
+
+  return !isWeakImageSummary(parsed.detail) || /\b(mimi|milim|smile)\b/i.test(parsed.detail);
 }
 
 function formatMultiImageCaption(caption: string, mode: "balanced" | "short" = "balanced") {
@@ -704,6 +752,8 @@ function isWeakImageSummary(value?: string | null) {
   if (
     /^(img|image|photo|pic)\b/.test(normalized) ||
     normalized === "milim" ||
+    normalized === "mimi" ||
+    normalized === "smile" ||
     normalized === "nail couture" ||
     normalized === "premium curation" ||
     normalized === "nail set" ||
@@ -742,6 +792,9 @@ function ensureCompleteMultiImageCaption(caption: string, requiredModelLines: st
   const seenIntroLines = new Set<string>();
   const nonModelLines = lines.filter((line) => {
     if (parseModelLine(line)) {
+      return false;
+    }
+    if (isLikelyDuplicateModelIntroLine(line, requiredModelLines.length)) {
       return false;
     }
     const normalizedLine = line.replace(/\s+/g, " ").trim().toLowerCase();
