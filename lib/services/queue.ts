@@ -202,29 +202,37 @@ async function addPageProfileBadgeToImage(image: ResolvedImage, profileImage?: {
   const inputBuffer = Buffer.from(image.bytes);
   const metadata = await sharp(inputBuffer).metadata();
   const baseSize = Math.min(metadata.width ?? 1200, metadata.height ?? 1200);
-  const badgeSize = Math.max(84, Math.round(baseSize * 0.16));
-  const inset = Math.max(20, Math.round(badgeSize * 0.18));
+  const avatarSize = Math.max(92, Math.round(baseSize * 0.17));
+  const containerWidth = Math.round(avatarSize * 1.18);
+  const containerHeight = Math.round(avatarSize * 1.18);
+  const inset = Math.max(32, Math.round(baseSize * 0.055));
+  const avatarInset = Math.round((containerWidth - avatarSize) / 2);
   const profileBuffer = await sharp(Buffer.from(profileImage.bytes))
-    .resize(badgeSize, badgeSize, { fit: "cover" })
+    .resize(avatarSize, avatarSize, { fit: "cover" })
     .png()
     .toBuffer();
 
-  const ringSvg = Buffer.from(`
-    <svg width="${badgeSize}" height="${badgeSize}" viewBox="0 0 ${badgeSize} ${badgeSize}" xmlns="http://www.w3.org/2000/svg">
+  const containerSvg = Buffer.from(`
+    <svg width="${containerWidth}" height="${containerHeight}" viewBox="0 0 ${containerWidth} ${containerHeight}" xmlns="http://www.w3.org/2000/svg">
       <defs>
-        <filter id="profileShadow" x="-30%" y="-30%" width="170%" height="170%">
-          <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#0f172a" flood-opacity="0.28"/>
+        <linearGradient id="profileFrame" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="rgba(255,255,255,0.96)"/>
+          <stop offset="100%" stop-color="rgba(233,241,255,0.9)"/>
+        </linearGradient>
+        <filter id="profileShadow" x="-35%" y="-35%" width="180%" height="180%">
+          <feDropShadow dx="0" dy="9" stdDeviation="9" flood-color="#0f172a" flood-opacity="0.26"/>
         </filter>
       </defs>
-      <circle cx="${badgeSize / 2}" cy="${badgeSize / 2}" r="${badgeSize / 2 - 4}" fill="none" stroke="#ffffff" stroke-width="6" filter="url(#profileShadow)"/>
-      <circle cx="${badgeSize / 2}" cy="${badgeSize / 2}" r="${badgeSize / 2 - 9}" fill="none" stroke="rgba(37,86,216,0.85)" stroke-width="3"/>
+      <rect x="3" y="3" width="${containerWidth - 6}" height="${containerHeight - 6}" rx="${Math.round(containerWidth * 0.34)}" fill="url(#profileFrame)" fill-opacity="0.96" stroke="rgba(255,255,255,0.9)" stroke-width="2" filter="url(#profileShadow)"/>
+      <circle cx="${containerWidth / 2}" cy="${containerHeight / 2}" r="${avatarSize / 2 + 5}" fill="none" stroke="rgba(37,86,216,0.9)" stroke-width="3"/>
+      <circle cx="${containerWidth / 2}" cy="${containerHeight / 2}" r="${avatarSize / 2 + 1}" fill="none" stroke="rgba(255,255,255,0.82)" stroke-width="2"/>
     </svg>
   `);
 
   const maskSvg = Buffer.from(
-    `<svg width="${badgeSize}" height="${badgeSize}" viewBox="0 0 ${badgeSize} ${badgeSize}" xmlns="http://www.w3.org/2000/svg"><circle cx="${badgeSize / 2}" cy="${
-      badgeSize / 2
-    }" r="${badgeSize / 2 - 10}" fill="#ffffff"/></svg>`
+    `<svg width="${avatarSize}" height="${avatarSize}" viewBox="0 0 ${avatarSize} ${avatarSize}" xmlns="http://www.w3.org/2000/svg"><circle cx="${avatarSize / 2}" cy="${
+      avatarSize / 2
+    }" r="${avatarSize / 2 - 4}" fill="#ffffff"/></svg>`
   );
 
   const avatar = await sharp(profileBuffer)
@@ -232,17 +240,20 @@ async function addPageProfileBadgeToImage(image: ResolvedImage, profileImage?: {
     .png()
     .toBuffer();
 
+  const top = Math.max(24, (metadata.height ?? baseSize) - containerHeight - inset);
+  const left = Math.max(24, (metadata.width ?? baseSize) - containerWidth - inset);
+
   const output = await sharp(inputBuffer)
     .composite([
       {
         input: avatar,
-        top: Math.max(20, (metadata.height ?? baseSize) - badgeSize - inset),
-        left: Math.max(20, (metadata.width ?? baseSize) - badgeSize - inset)
+        top: top + avatarInset,
+        left: left + avatarInset
       },
       {
-        input: ringSvg,
-        top: Math.max(20, (metadata.height ?? baseSize) - badgeSize - inset),
-        left: Math.max(20, (metadata.width ?? baseSize) - badgeSize - inset)
+        input: containerSvg,
+        top,
+        left
       }
     ])
     .toBuffer({ resolveWithObject: true });
@@ -833,8 +844,23 @@ async function executePostJob(job: JobExecution) {
         pageId: page.pageId,
         pageAccessToken: page.pageAccessToken
       });
-    } catch {
+    } catch (error) {
       pageProfileImage = null;
+      await logAction({
+        userId: job.userId,
+        type: "queue",
+        level: "warn",
+        message: "Could not fetch Facebook page profile image for image watermark",
+        relatedJobId: job._id,
+        relatedPostId: job.postId,
+        relatedScheduleId: job.scheduleId,
+        metadata: {
+          ...getAutoPostLogFlags(job),
+          targetPageId: page.pageId,
+          correlationId: job.correlationId,
+          error: error instanceof Error ? error.message : "unknown"
+        }
+      });
     }
   }
 
