@@ -9,6 +9,7 @@ import {
 import { fetchDriveImageBinary, fetchImagesFromFolder } from "@/lib/services/google-drive";
 import { ensureValidFacebookConnection, ensureValidGoogleDriveConnection } from "@/lib/services/integration-auth";
 import { logAction, logAndNotifyError } from "@/lib/services/logging";
+import { sanitizeMultiImageCaption } from "@/lib/services/multi-image-caption";
 import { enqueuePostJobsForPost, processQueuedJobs } from "@/lib/services/queue";
 import { randomItem } from "@/lib/utils";
 import { AutoPostAiConfig } from "@/models/AutoPostAiConfig";
@@ -554,51 +555,6 @@ function parseModelLine(line: string): ParsedModelLine | null {
   };
 }
 
-function parseLooseNumberedLine(line: string): ParsedModelLine | null {
-  const normalized = normalizeDecoratedLine(line);
-  if (!normalized) {
-    return null;
-  }
-
-  const match = /^(\d+)\s+(.+)$/u.exec(normalized);
-  if (!match) {
-    return null;
-  }
-
-  const index = Number(match[1]);
-  const detail = match[2]?.trim() ?? "";
-  if (!Number.isFinite(index) || index <= 0 || !detail) {
-    return null;
-  }
-
-  return {
-    index,
-    detail
-  };
-}
-
-function isLikelyCtaLine(line: string) {
-  const normalized = line.replace(/\s+/g, " ").trim().toLowerCase();
-  return /(เมนต์|คอมเมนต์|comment|เลือก|เลข|เดี๋ยว|ทายนิสัย|เซฟ|แชร์|save|share)/.test(normalized);
-}
-
-function isLikelyDuplicateModelIntroLine(line: string, expectedCount: number) {
-  if (isLikelyCtaLine(line) || parseModelLine(line)) {
-    return false;
-  }
-
-  const parsed = parseLooseNumberedLine(line);
-  if (!parsed) {
-    return false;
-  }
-
-  if (parsed.index > expectedCount) {
-    return false;
-  }
-
-  return !isWeakImageSummary(parsed.detail) || /\b(mimi|milim|smile)\b/i.test(parsed.detail);
-}
-
 function formatMultiImageCaption(caption: string, mode: "balanced" | "short" = "balanced") {
   const normalizedCaption = caption.replace(/\r\n/g, "\n").trim();
   if (!normalizedCaption) {
@@ -779,9 +735,9 @@ function isWeakImageSummary(value?: string | null) {
 }
 
 function ensureCompleteMultiImageCaption(caption: string, requiredModelLines: string[], mode: "balanced" | "short" = "balanced") {
-  const normalized = caption.replace(/\r\n/g, "\n").trim();
+  const normalized = sanitizeMultiImageCaption(caption.replace(/\r\n/g, "\n").trim());
   if (!normalized) {
-    return formatMultiImageCaption(requiredModelLines.join("\n"), mode);
+    return formatMultiImageCaption(sanitizeMultiImageCaption(requiredModelLines.join("\n")), mode);
   }
 
   const lines = normalized
@@ -792,9 +748,6 @@ function ensureCompleteMultiImageCaption(caption: string, requiredModelLines: st
   const seenIntroLines = new Set<string>();
   const nonModelLines = lines.filter((line) => {
     if (parseModelLine(line)) {
-      return false;
-    }
-    if (isLikelyDuplicateModelIntroLine(line, requiredModelLines.length)) {
       return false;
     }
     const normalizedLine = line.replace(/\s+/g, " ").trim().toLowerCase();
@@ -814,7 +767,7 @@ function ensureCompleteMultiImageCaption(caption: string, requiredModelLines: st
   });
   const completedLines = [...nonModelLines, ...completedModelLines];
 
-  return formatMultiImageCaption(completedLines.join("\n"), mode);
+  return formatMultiImageCaption(sanitizeMultiImageCaption(completedLines.join("\n")), mode);
 }
 
 function normalizeHashtags(hashtags?: string[]) {
@@ -1018,6 +971,13 @@ async function buildMultiImagePackage(config: LeanAutoPostConfig, images: DriveI
 - ห้ามพูดถึงการวิเคราะห์ภาพ
 - ห้ามพูดถึง OCR, source, prompt, ไฟล์, หรือข้อความหลังบ้าน
 - ห้ามถามกลับเพื่อขอข้อมูลเพิ่ม
+- ห้ามสร้าง preview list หรือ summary list ก่อนรายการหลัก
+- ห้ามสร้างบรรทัดรูปแบบ "📌 1 แบบ 1 — ..."
+- ห้ามสร้างบรรทัดรูปแบบ "📌 2 แบบ 2 — ..."
+- ห้ามสร้างรายการซ้ำก่อนรายการหลัก
+- ให้มีรายการหลักเพียงชุดเดียวเท่านั้น
+- รายการหลักต้องเป็น "แบบ 1" ถึง "แบบ ${sampleImages.length}" ตามปกติ
+- Output สุดท้ายต้องไม่มี duplicate intro block
 - ต้องอิงจากรายละเอียดในภาพจริงเท่านั้น
 - ถ้ารายละเอียดบางรูปไม่ชัด ให้สรุปจากธีมที่เห็น แต่ยังต้องเขียนเหมือนโพสต์จริง
 - ความยาวรวมของ caption ต้องอยู่ประมาณ ${config.captionLengthMode === "short" ? "8-9" : "8-12"} บรรทัด
