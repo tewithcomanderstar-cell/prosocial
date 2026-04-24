@@ -519,6 +519,38 @@ function shortenSentence(value: string, maxLength: number) {
   return `${shortened.replace(/[,.!?;:]+$/g, "").trim()}...`;
 }
 
+type ParsedModelLine = {
+  index: number;
+  detail: string;
+};
+
+function parseModelLine(line: string): ParsedModelLine | null {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const normalized = trimmed
+    .replace(/^[\s\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F\u200D\u20E3#*.()\[\]{}_\-–—:：]+/gu, "")
+    .trim();
+
+  const match = /^แบบ\s*(\d+)\s*(?::|：|-|—)\s*(.+)$/iu.exec(normalized);
+  if (!match) {
+    return null;
+  }
+
+  const index = Number(match[1]);
+  const detail = match[2]?.trim() ?? "";
+  if (!Number.isFinite(index) || index <= 0) {
+    return null;
+  }
+
+  return {
+    index,
+    detail
+  };
+}
+
 function formatMultiImageCaption(caption: string, mode: "balanced" | "short" = "balanced") {
   const normalizedCaption = caption.replace(/\r\n/g, "\n").trim();
   if (!normalizedCaption) {
@@ -534,7 +566,6 @@ function formatMultiImageCaption(caption: string, mode: "balanced" | "short" = "
     return normalizedCaption;
   }
 
-  const modelLabel = /^(?:[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F\u200D\d#*.\-–—\s]+\s*)?แบบ\s*\d+\s*(?::|：|-|—)\s*/u;
   const hashtagLines = lines.filter((line) => line.startsWith("#"));
   const contentLines = lines.filter((line) => !line.startsWith("#"));
 
@@ -547,8 +578,8 @@ function formatMultiImageCaption(caption: string, mode: "balanced" | "short" = "
   const cuteModelEmojis = ["💅", "✨", "🌷", "💖", "🫶", "🌸", "🎀", "💎"];
   const cuteCtaEmojis = ["💬", "📌", "💕", "✨"];
   const formattedContent: string[] = [];
-  const introLines = contentLines.filter((line) => !modelLabel.test(line));
-  const modelLines = contentLines.filter((line) => modelLabel.test(line));
+  const introLines = contentLines.filter((line) => !parseModelLine(line));
+  const modelLines = contentLines.filter((line) => parseModelLine(line));
 
   if (introLines[0]) {
     formattedContent.push(ensureCuteEmoji(shortenSentence(introLines[0], maxHookLength), cuteIntroEmojis[0]));
@@ -565,9 +596,9 @@ function formatMultiImageCaption(caption: string, mode: "balanced" | "short" = "
   formattedContent.push(...secondaryIntro);
 
   const formattedModels = modelLines.map((line, index) => {
-    const match = /^(.*?แบบ\s*\d+)\s*(?::|：|-|—)\s*(.+)$/u.exec(line.trim());
-    const label = match?.[1]?.trim() ?? line.trim();
-    const detail = shortenSentence(match?.[2]?.trim() ?? "", maxDetailLength);
+    const parsed = parseModelLine(line);
+    const label = `แบบ ${parsed?.index ?? index + 1}`;
+    const detail = shortenSentence(parsed?.detail ?? "", maxDetailLength);
     const baseLine = detail ? `${label} : ${detail}` : label;
     return ensureCuteEmoji(baseLine, cuteModelEmojis[index % cuteModelEmojis.length]);
   });
@@ -635,12 +666,10 @@ function extractModelDetails(lines: string[]) {
   const details = new Map<number, string>();
 
   for (const line of lines) {
-    const match = /^(?:[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F\u200D\d#*.\-–—\s]+\s*)?แบบ\s*(\d+)\s*(?::|：|-|—)\s*(.+)$/iu.exec(
-      line
-    );
-    if (!match) continue;
-    const modelIndex = Number(match[1]);
-    const detail = match[2]?.trim() ?? "";
+    const parsed = parseModelLine(line);
+    if (!parsed) continue;
+    const modelIndex = parsed.index;
+    const detail = parsed.detail;
     if (!detail || isWeakImageSummary(detail)) continue;
     details.set(modelIndex, detail);
   }
@@ -710,8 +739,18 @@ function ensureCompleteMultiImageCaption(caption: string, requiredModelLines: st
     .map((line) => line.trim())
     .filter(Boolean);
 
-  const modelLinePattern = /^(?:[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F\u200D\d#*.\-–—\s]+\s*)?แบบ\s*\d+\s*(?::|：|-|—)\s*/u;
-  const nonModelLines = lines.filter((line) => !modelLinePattern.test(line));
+  const seenIntroLines = new Set<string>();
+  const nonModelLines = lines.filter((line) => {
+    if (parseModelLine(line)) {
+      return false;
+    }
+    const normalizedLine = line.replace(/\s+/g, " ").trim().toLowerCase();
+    if (!normalizedLine || seenIntroLines.has(normalizedLine)) {
+      return false;
+    }
+    seenIntroLines.add(normalizedLine);
+    return true;
+  });
   const existingModelDetails = extractModelDetails(lines);
   const completedModelLines = requiredModelLines.map((requiredLine, index) => {
     const existing = existingModelDetails.get(index + 1)?.trim();
