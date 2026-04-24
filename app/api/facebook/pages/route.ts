@@ -1,4 +1,4 @@
-﻿import { jsonError, jsonOk, requireAuth } from "@/lib/api";
+import { jsonError, jsonOk, normalizeRouteError, requireAuth } from "@/lib/api";
 import { ensureValidFacebookConnection } from "@/lib/services/integration-auth";
 
 type LeanFacebookConnection = {
@@ -17,6 +17,7 @@ export async function GET() {
     const connection = (await ensureValidFacebookConnection(userId)) as LeanFacebookConnection | null;
     return jsonOk({ pages: connection?.pages ?? [], tokenStatus: connection?.tokenStatus ?? "unknown" });
   } catch (error) {
-    return jsonError(error instanceof Error ? error.message : "Unauthorized", 401);
+    const normalized = normalizeRouteError(error, "Unable to load Facebook pages right now.");
+    return jsonError(normalized.message, normalized.status, normalized.code);
   }
 }

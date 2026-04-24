@@ -1,5 +1,24 @@
-﻿import { Job } from "@/models/Job";
+import { Job } from "@/models/Job";
 import { getUserSettings } from "@/lib/services/settings";
+
+function getBangkokDayWindow(now = new Date()) {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  });
+
+  const parts = formatter.formatToParts(now);
+  const year = Number(parts.find((part) => part.type === "year")?.value ?? "0");
+  const month = Number(parts.find((part) => part.type === "month")?.value ?? "1");
+  const day = Number(parts.find((part) => part.type === "day")?.value ?? "1");
+
+  const start = new Date(Date.UTC(year, month - 1, day, -7, 0, 0, 0));
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+
+  return { start, end };
+}
 
 export async function checkRateLimits(userId: string, type: "post" | "comment-reply") {
   const { settings } = await getUserSettings(userId);
@@ -15,7 +34,7 @@ export async function checkRateLimits(userId: string, type: "post" | "comment-re
 
   const now = new Date();
   const hourAgo = new Date(now.getTime() - 60 * 60 * 1000);
-  const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const bangkokDayWindow = getBangkokDayWindow(now);
 
   const [hourCount, dayCount, burstCount] = await Promise.all([
     Job.countDocuments({
@@ -28,7 +47,7 @@ export async function checkRateLimits(userId: string, type: "post" | "comment-re
       userId,
       type,
       status: "success",
-      completedAt: { $gte: dayAgo }
+      completedAt: { $gte: bangkokDayWindow.start, $lt: bangkokDayWindow.end }
     }),
     Job.countDocuments({
       userId,

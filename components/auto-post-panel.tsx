@@ -105,6 +105,27 @@ function sanitizeAutomationError(value?: string | null) {
   return sanitizeText(value);
 }
 
+async function readApiResult(response: Response) {
+  const rawText = await response.text();
+  const contentType = response.headers.get("content-type") || "";
+
+  if (contentType.includes("application/json")) {
+    try {
+      return JSON.parse(rawText) as { ok?: boolean; message?: string; data?: any; code?: string };
+    } catch {
+      return {
+        ok: false,
+        message: sanitizeAutomationError(rawText || "The server returned invalid JSON.")
+      };
+    }
+  }
+
+  return {
+    ok: false,
+    message: sanitizeAutomationError(rawText || "The server returned an unexpected response.")
+  };
+}
+
 function statusLabel(status?: AutoPostStatus) {
   switch (status) {
     case "running":
@@ -184,19 +205,23 @@ export function AutoPostPanel() {
       ]);
 
       const [statusJson, pagesJson, foldersJson] = await Promise.all([
-        statusRes.json(),
-        pagesRes.json(),
-        foldersRes.json()
+        readApiResult(statusRes),
+        readApiResult(pagesRes),
+        readApiResult(foldersRes)
       ]);
 
       if (statusJson.ok) {
         const statusData = statusJson.data as StatusResponse;
         setConfig((current) => ({ ...current, ...defaults, ...statusData.config }));
         setLogs((statusData.logs ?? []).slice(0, 10).map((log) => ({ ...log, message: sanitizeText(log.message) })));
+      } else if (statusJson.message) {
+        setError(statusJson.message);
       }
 
       if (pagesJson.ok) setPages(pagesJson.data?.pages ?? []);
+      else if (pagesJson.message) setError(pagesJson.message);
       if (foldersJson.ok) setFolders(foldersJson.data?.folders ?? []);
+      else if (foldersJson.message) setError(foldersJson.message);
     } catch (statusError) {
       setError(statusError instanceof Error ? statusError.message : "Unable to load Auto Post status");
     } finally {
@@ -264,7 +289,7 @@ export function AutoPostPanel() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...config, enabled: enabledOverride ?? config.enabled })
     });
-    const result = await response.json();
+    const result = await readApiResult(response);
     if (!result.ok) throw new Error(result.message || "Unable to save Auto Post settings");
     setConfig({ ...defaults, ...result.data.config });
     return result;
@@ -295,7 +320,7 @@ export function AutoPostPanel() {
     try {
       await saveConfig(true);
       const response = await fetch("/api/auto-post/start", { method: "POST" });
-      const result = await response.json();
+      const result = await readApiResult(response);
       if (!result.ok) throw new Error(result.message || "Unable to start Auto Post");
       setMessage("Automation started");
       await loadStatus(false);
@@ -313,7 +338,7 @@ export function AutoPostPanel() {
 
     try {
       const response = await fetch("/api/auto-post/pause", { method: "POST" });
-      const result = await response.json();
+      const result = await readApiResult(response);
       if (!result.ok) throw new Error(result.message || "Unable to pause Auto Post");
       setMessage("Auto Post paused");
       await loadStatus(false);
@@ -331,7 +356,7 @@ export function AutoPostPanel() {
 
     try {
       const response = await fetch("/api/auto-post/stop", { method: "POST" });
-      const result = await response.json();
+      const result = await readApiResult(response);
       if (!result.ok) throw new Error(result.message || "Unable to stop Auto Post");
       setMessage("Auto Post stopped");
       await loadStatus(false);
