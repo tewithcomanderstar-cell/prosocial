@@ -120,6 +120,27 @@ function sanitizeAutomationError(value?: string | null) {
   return sanitizeText(value);
 }
 
+async function readApiResult(response: Response) {
+  const rawText = await response.text();
+  const contentType = response.headers.get("content-type") || "";
+
+  if (contentType.includes("application/json")) {
+    try {
+      return JSON.parse(rawText) as { ok?: boolean; message?: string; data?: any };
+    } catch {
+      return {
+        ok: false,
+        message: sanitizeAutomationError(rawText || "The server returned invalid JSON.")
+      };
+    }
+  }
+
+  return {
+    ok: false,
+    message: sanitizeAutomationError(rawText || "The server returned an unexpected response.")
+  };
+}
+
 function statusLabel(status?: AutoPostStatus) {
   switch (status) {
     case "running":
@@ -201,9 +222,9 @@ export function AutoPostAiPanel() {
       ]);
 
       const [statusJson, pagesJson, foldersJson] = await Promise.all([
-        statusRes.json(),
-        pagesRes.json(),
-        foldersRes.json()
+        readApiResult(statusRes),
+        readApiResult(pagesRes),
+        readApiResult(foldersRes)
       ]);
 
       if (statusJson.ok) {
@@ -291,7 +312,7 @@ export function AutoPostAiPanel() {
         enabled: enabledOverride ?? config.enabled
       })
     });
-    const result = await response.json();
+    const result = await readApiResult(response);
     if (!result.ok) throw new Error(result.message || "Unable to save Auto Post settings");
     setConfig({ ...defaults, ...result.data.config });
     return result;
@@ -322,7 +343,7 @@ export function AutoPostAiPanel() {
     try {
       await saveConfig(true);
       const response = await fetch("/api/auto-post-ai/start", { method: "POST" });
-      const result = await response.json();
+      const result = await readApiResult(response);
       if (!result.ok) throw new Error(result.message || "Unable to start Auto Post");
       setMessage(result.message || (result.data?.waiting ? "Automation is waiting for more eligible images" : "Automation started"));
       await loadStatus(false);
@@ -340,7 +361,7 @@ export function AutoPostAiPanel() {
 
     try {
       const response = await fetch("/api/auto-post-ai/pause", { method: "POST" });
-      const result = await response.json();
+      const result = await readApiResult(response);
       if (!result.ok) throw new Error(result.message || "Unable to pause Auto Post");
       setMessage("Auto Post paused");
       await loadStatus(false);
@@ -358,7 +379,7 @@ export function AutoPostAiPanel() {
 
     try {
       const response = await fetch("/api/auto-post-ai/stop", { method: "POST" });
-      const result = await response.json();
+      const result = await readApiResult(response);
       if (!result.ok) throw new Error(result.message || "Unable to stop Auto Post");
       setMessage("Auto Post stopped");
       await loadStatus(false);
