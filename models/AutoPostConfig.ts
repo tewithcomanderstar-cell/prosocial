@@ -24,6 +24,18 @@ const autoPostConfigSchema = new Schema(
     captions: { type: [String], default: [] },
     hashtags: { type: [String], default: [] },
     aiPrompt: { type: String, default: "" },
+    watermarkEnabled: { type: Boolean, default: true },
+    watermarkSource: {
+      type: String,
+      enum: ["page_profile", "custom_logo", "none"],
+      default: "page_profile"
+    },
+    watermarkPosition: {
+      type: String,
+      enum: ["top-left", "top-right", "bottom-left", "bottom-right"],
+      default: "bottom-right"
+    },
+    watermarkSizePercent: { type: Number, default: 17 },
     postingWindowStart: { type: String, default: "06:00" },
     postingWindowEnd: { type: String, default: "00:00" },
     language: {

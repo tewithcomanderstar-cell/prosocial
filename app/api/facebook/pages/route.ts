@@ -6,7 +6,8 @@ type LeanFacebookConnection = {
     pageId: string;
     name: string;
     category?: string;
-    pageAccessToken: string;
+    profilePictureUrl?: string | null;
+    profilePictureFetchedAt?: Date | string | null;
   }>;
   tokenStatus?: string;
 };
@@ -15,7 +16,16 @@ export async function GET() {
   try {
     const userId = await requireAuth();
     const connection = (await ensureValidFacebookConnection(userId)) as LeanFacebookConnection | null;
-    return jsonOk({ pages: connection?.pages ?? [], tokenStatus: connection?.tokenStatus ?? "unknown" });
+    return jsonOk({
+      pages: (connection?.pages ?? []).map((page) => ({
+        pageId: page.pageId,
+        name: page.name,
+        category: page.category,
+        profilePictureUrl: page.profilePictureUrl ?? null,
+        profilePictureFetchedAt: page.profilePictureFetchedAt ?? null
+      })),
+      tokenStatus: connection?.tokenStatus ?? "unknown"
+    });
   } catch (error) {
     const normalized = normalizeRouteError(error, "Unable to load Facebook pages right now.");
     return jsonError(normalized.message, normalized.status, normalized.code);

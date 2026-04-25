@@ -5,6 +5,11 @@ type FacebookPage = {
   name: string;
   access_token: string;
   category?: string;
+  picture?: {
+    data?: {
+      url?: string;
+    };
+  };
 };
 
 type FacebookGraphErrorPayload = {
@@ -46,6 +51,14 @@ type FacebookPostNode = {
 type FacebookPicturePayload = {
   data?: {
     url?: string;
+  };
+};
+
+type FacebookPagePictureFieldPayload = {
+  picture?: {
+    data?: {
+      url?: string;
+    };
   };
 };
 
@@ -186,6 +199,7 @@ export async function exchangeFacebookCode(code: string) {
 
 export async function fetchFacebookPages(userAccessToken: string) {
   const url = new URL("https://graph.facebook.com/v21.0/me/accounts");
+  url.searchParams.set("fields", "id,name,access_token,category,picture.type(large){url}");
   url.searchParams.set("access_token", userAccessToken);
 
   const response = await fetchWithRetry(url.toString(), { cache: "no-store" });
@@ -199,7 +213,9 @@ export async function fetchFacebookPages(userAccessToken: string) {
     pageId: page.id,
     name: page.name,
     pageAccessToken: page.access_token,
-    category: page.category
+    category: page.category,
+    profilePictureUrl: page.picture?.data?.url ?? null,
+    profilePictureFetchedAt: page.picture?.data?.url ? new Date() : null
   }));
 }
 
@@ -225,48 +241,79 @@ export async function subscribePageToWebhook(pageId: string, pageAccessToken: st
   return response.json() as Promise<{ success?: boolean }>;
 }
 
-export async function fetchFacebookPageProfileImage(params: {
+export async function fetchFacebookPageProfilePictureUrl(params: {
   pageId: string;
   pageAccessToken: string;
 }) {
-  const downloadPicture = async (url: string) => {
-    const imageResponse = await fetchWithRetry(url, { cache: "no-store" });
-    if (!imageResponse.ok) {
-      throw new FacebookPublishError("Failed to download Facebook page profile image", "provider_unknown", true);
+  try {
+    const pageUrl = new URL(`https://graph.facebook.com/v21.0/${params.pageId}`);
+    pageUrl.searchParams.set("fields", "picture.type(large){url}");
+    pageUrl.searchParams.set("access_token", params.pageAccessToken);
+
+    const pageResponse = await fetchWithRetry(pageUrl.toString(), { cache: "no-store" });
+    if (pageResponse.ok) {
+      const payload = (await pageResponse.json()) as FacebookPagePictureFieldPayload;
+      const resolvedUrl = payload.picture?.data?.url;
+      if (resolvedUrl) {
+        return resolvedUrl;
+      }
     }
+  } catch {}
 
-    const arrayBuffer = await imageResponse.arrayBuffer();
-    const mimeType = imageResponse.headers.get("content-type") || "image/png";
+  const pictureUrl = new URL(`https://graph.facebook.com/v21.0/${params.pageId}/picture`);
+  pictureUrl.searchParams.set("redirect", "false");
+  pictureUrl.searchParams.set("type", "large");
+  pictureUrl.searchParams.set("access_token", params.pageAccessToken);
 
-    return {
-      bytes: arrayBuffer,
-      mimeType
-    };
+  const pictureResponse = await fetchWithRetry(pictureUrl.toString(), { cache: "no-store" });
+  if (!pictureResponse.ok) {
+    const payload = (await pictureResponse.json().catch(() => ({}))) as FacebookGraphErrorPayload;
+    throw classifyFacebookPublishError(payload, "Failed to fetch Facebook page profile image URL");
+  }
+
+  const picturePayload = (await pictureResponse.json()) as FacebookPicturePayload;
+  const resolvedUrl = picturePayload.data?.url;
+  if (!resolvedUrl) {
+    throw new FacebookPublishError("Facebook page profile image URL is missing", "provider_unknown", true);
+  }
+
+  return resolvedUrl;
+}
+
+export async function downloadRemoteImageBinary(url: string) {
+  const imageResponse = await fetchWithRetry(url, { cache: "no-store" });
+  if (!imageResponse.ok) {
+    throw new FacebookPublishError("Failed to download remote image", "provider_unknown", true);
+  }
+
+  const arrayBuffer = await imageResponse.arrayBuffer();
+  const mimeType = imageResponse.headers.get("content-type") || "image/png";
+
+  return {
+    bytes: arrayBuffer,
+    mimeType
   };
+}
+
+export async function fetchFacebookPageProfileImage(params: {
+  pageId: string;
+  pageAccessToken: string;
+  cachedUrl?: string | null;
+}) {
+  if (params.cachedUrl) {
+    try {
+      return await downloadRemoteImageBinary(params.cachedUrl);
+    } catch {}
+  }
 
   try {
-    const pictureUrl = new URL(`https://graph.facebook.com/v21.0/${params.pageId}/picture`);
-    pictureUrl.searchParams.set("redirect", "false");
-    pictureUrl.searchParams.set("type", "large");
-    pictureUrl.searchParams.set("access_token", params.pageAccessToken);
-
-    const pictureResponse = await fetchWithRetry(pictureUrl.toString(), { cache: "no-store" });
-    if (!pictureResponse.ok) {
-      const payload = (await pictureResponse.json().catch(() => ({}))) as FacebookGraphErrorPayload;
-      throw classifyFacebookPublishError(payload, "Failed to fetch Facebook page profile image URL");
-    }
-
-    const picturePayload = (await pictureResponse.json()) as FacebookPicturePayload;
-    const resolvedUrl = picturePayload.data?.url;
-    if (!resolvedUrl) {
-      throw new FacebookPublishError("Facebook page profile image URL is missing", "provider_unknown", true);
-    }
-
-    return await downloadPicture(resolvedUrl);
+    const resolvedUrl = await fetchFacebookPageProfilePictureUrl(params);
+    return await downloadRemoteImageBinary(resolvedUrl);
   } catch {
     const fallbackUrl = new URL(`https://graph.facebook.com/v21.0/${params.pageId}/picture`);
     fallbackUrl.searchParams.set("type", "large");
-    return downloadPicture(fallbackUrl.toString());
+    fallbackUrl.searchParams.set("access_token", params.pageAccessToken);
+    return downloadRemoteImageBinary(fallbackUrl.toString());
   }
 }
 

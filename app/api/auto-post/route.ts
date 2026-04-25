@@ -55,6 +55,10 @@ const schema = z.object({
   captions: z.array(z.string()).default([]),
   hashtags: z.array(z.string()).default([]),
   aiPrompt: z.string().default(""),
+  watermarkEnabled: z.boolean().default(true),
+  watermarkSource: z.enum(["page_profile", "custom_logo", "none"]).default("page_profile"),
+  watermarkPosition: z.enum(["top-left", "top-right", "bottom-left", "bottom-right"]).default("bottom-right"),
+  watermarkSizePercent: z.number().min(8).max(30).default(17),
   postingWindowStart: z.string().regex(/^\d{2}:\d{2}$/).default("06:00"),
   postingWindowEnd: z.string().regex(/^\d{2}:\d{2}$/).default("00:00"),
   language: z.enum(["th", "en"]).default("th")
@@ -73,7 +77,11 @@ export async function GET() {
           autoPostStatus: "paused",
           jobStatus: "pending",
           retryCount: 0,
-          intervalMinutes: 60
+          intervalMinutes: 60,
+          watermarkEnabled: true,
+          watermarkSource: "page_profile",
+          watermarkPosition: "bottom-right",
+          watermarkSizePercent: 17
         }
       },
       { upsert: true, new: true }
@@ -124,6 +132,10 @@ export async function POST(request: Request) {
         folderId: normalizedFolderId,
         captions: (payload.captions ?? []).map((caption) => caption.trim()).filter(Boolean),
         hashtags: (payload.hashtags ?? []).map((hashtag) => hashtag.trim()).filter(Boolean),
+        watermarkEnabled: payload.watermarkEnabled,
+        watermarkSource: payload.watermarkSource,
+        watermarkPosition: payload.watermarkPosition,
+        watermarkSizePercent: payload.watermarkSizePercent,
         nextRunAt,
         autoPostStatus,
         jobStatus: payload.enabled ? current?.jobStatus ?? "pending" : "pending",
@@ -148,6 +160,10 @@ export async function POST(request: Request) {
         intervalMinutes: payload.intervalMinutes,
         captionStrategy: payload.captionStrategy,
         hashtagCount: (payload.hashtags ?? []).length,
+        watermarkEnabled: payload.watermarkEnabled,
+        watermarkSource: payload.watermarkSource,
+        watermarkPosition: payload.watermarkPosition,
+        watermarkSizePercent: payload.watermarkSizePercent,
         postingWindowStart: payload.postingWindowStart,
         postingWindowEnd: payload.postingWindowEnd,
         autoPostStatus,

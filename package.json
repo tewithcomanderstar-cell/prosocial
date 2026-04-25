@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node --experimental-strip-types ./lib/services/multi-image-caption.test.ts",
+    "test": "node --experimental-strip-types ./lib/services/run-tests.ts",
     "lint": "next lint",
     "prisma:generate": "prisma generate",
     "prisma:migrate:dev": "prisma migrate dev",

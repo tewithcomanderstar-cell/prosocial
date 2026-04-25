@@ -72,7 +72,7 @@ export async function createAutoPostAiRecords(input: StartAutoPostRecordInput) {
 
   const connection = await FacebookConnection.findOne({ userId: input.userId }).lean<{
     _id: Types.ObjectId;
-    pages?: Array<{ pageId: string; name: string }>;
+    pages?: Array<{ pageId: string; name: string; profilePictureUrl?: string | null }>;
     tokenStatus?: string;
   } | null>();
 
@@ -91,7 +91,7 @@ export async function createAutoPostAiRecords(input: StartAutoPostRecordInput) {
     { upsert: true, new: true }
   );
 
-  const pageNameMap = new Map((connection?.pages || []).map((page) => [page.pageId, page.name]));
+  const pageMap = new Map((connection?.pages || []).map((page) => [page.pageId, page]));
   const destinationIds: string[] = [];
 
   for (const pageId of input.pageIds) {
@@ -102,10 +102,14 @@ export async function createAutoPostAiRecords(input: StartAutoPostRecordInput) {
         accountId: account._id,
         externalDestinationId: pageId,
         type: "page",
-        name: pageNameMap.get(pageId) || `Facebook Page ${pageId.slice(-6)}`,
+        name: pageMap.get(pageId)?.name || `Facebook Page ${pageId.slice(-6)}`,
         status: "connected",
         permissionsJson: { publish: true },
-        healthJson: { source: "facebook-connection", tokenStatus: connection?.tokenStatus || "unknown" }
+        healthJson: {
+          source: "facebook-connection",
+          tokenStatus: connection?.tokenStatus || "unknown",
+          profilePictureUrl: pageMap.get(pageId)?.profilePictureUrl ?? null
+        }
       },
       { upsert: true, new: true }
     );

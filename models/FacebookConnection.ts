@@ -5,7 +5,9 @@ const connectedPageSchema = new Schema(
     pageId: { type: String, required: true },
     name: { type: String, required: true },
     pageAccessToken: { type: String, required: true },
-    category: { type: String }
+    category: { type: String },
+    profilePictureUrl: { type: String, default: null },
+    profilePictureFetchedAt: { type: Date, default: null }
   },
   { _id: false }
 );

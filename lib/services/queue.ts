@@ -11,13 +11,15 @@ import { finalizeTrackedPostIfComplete, notifyCommentFailure } from "@/lib/servi
 import { logCommentStage } from "@/lib/services/comment-logging";
 import { updateAutoPostRecords } from "@/lib/services/automation-records";
 import { updateAutoPostAiRecords } from "@/lib/services/automation-records-ai";
-import { FacebookPublishError, fetchFacebookPageProfileImage, publishPostToFacebook, replyToFacebookComment } from "@/lib/services/facebook";
+import { FacebookPublishError, publishPostToFacebook, replyToFacebookComment } from "@/lib/services/facebook";
+import { composeImageWithLogo } from "@/lib/services/image-composer";
 import { ensureValidFacebookConnection, ensureValidGoogleDriveConnection, getStoredFacebookConnection } from "@/lib/services/integration-auth";
 import { fetchDriveImageBinary } from "@/lib/services/google-drive";
 import { recordMetricSnapshot } from "@/lib/services/analytics";
 import { isDuplicatePostBlocked } from "@/lib/services/duplicate";
 import { contentFingerprint } from "@/lib/services/fingerprint";
 import { logAction, logAndNotifyError, serializeError } from "@/lib/services/logging";
+import { getPageLogoForFacebookPage } from "@/lib/services/page-logo";
 import { checkRateLimits } from "@/lib/services/rate-limit";
 import { getUserSettings, randomDelayMs } from "@/lib/services/settings";
 import { computeNextRunAt, randomItem } from "@/lib/utils";
@@ -46,6 +48,8 @@ type LeanFacebookConnection = {
   pages: Array<{
     pageId: string;
     pageAccessToken: string;
+    profilePictureUrl?: string | null;
+    profilePictureFetchedAt?: Date | string | null;
   }>;
 };
 
@@ -194,76 +198,11 @@ async function addSequenceBadgeToImage(image: ResolvedImage, sequence: number): 
   };
 }
 
-async function addPageProfileBadgeToImage(image: ResolvedImage, profileImage?: { bytes: ArrayBuffer; mimeType: string } | null): Promise<ResolvedImage> {
-  if (image.kind !== "binary" || !profileImage) {
-    return image;
-  }
-
-  const inputBuffer = Buffer.from(image.bytes);
-  const metadata = await sharp(inputBuffer).metadata();
-  const baseSize = Math.min(metadata.width ?? 1200, metadata.height ?? 1200);
-  const avatarSize = Math.max(92, Math.round(baseSize * 0.17));
-  const containerWidth = Math.round(avatarSize * 1.18);
-  const containerHeight = Math.round(avatarSize * 1.18);
-  const inset = Math.max(32, Math.round(baseSize * 0.055));
-  const avatarInset = Math.round((containerWidth - avatarSize) / 2);
-  const profileBuffer = await sharp(Buffer.from(profileImage.bytes))
-    .resize(avatarSize, avatarSize, { fit: "cover" })
-    .png()
-    .toBuffer();
-
-  const containerSvg = Buffer.from(`
-    <svg width="${containerWidth}" height="${containerHeight}" viewBox="0 0 ${containerWidth} ${containerHeight}" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <linearGradient id="profileFrame" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stop-color="rgba(255,255,255,0.96)"/>
-          <stop offset="100%" stop-color="rgba(233,241,255,0.9)"/>
-        </linearGradient>
-        <filter id="profileShadow" x="-35%" y="-35%" width="180%" height="180%">
-          <feDropShadow dx="0" dy="9" stdDeviation="9" flood-color="#0f172a" flood-opacity="0.26"/>
-        </filter>
-      </defs>
-      <rect x="3" y="3" width="${containerWidth - 6}" height="${containerHeight - 6}" rx="${Math.round(containerWidth * 0.34)}" fill="url(#profileFrame)" fill-opacity="0.96" stroke="rgba(255,255,255,0.9)" stroke-width="2" filter="url(#profileShadow)"/>
-      <circle cx="${containerWidth / 2}" cy="${containerHeight / 2}" r="${avatarSize / 2 + 5}" fill="none" stroke="rgba(37,86,216,0.9)" stroke-width="3"/>
-      <circle cx="${containerWidth / 2}" cy="${containerHeight / 2}" r="${avatarSize / 2 + 1}" fill="none" stroke="rgba(255,255,255,0.82)" stroke-width="2"/>
-    </svg>
-  `);
-
-  const maskSvg = Buffer.from(
-    `<svg width="${avatarSize}" height="${avatarSize}" viewBox="0 0 ${avatarSize} ${avatarSize}" xmlns="http://www.w3.org/2000/svg"><circle cx="${avatarSize / 2}" cy="${
-      avatarSize / 2
-    }" r="${avatarSize / 2 - 4}" fill="#ffffff"/></svg>`
-  );
-
-  const avatar = await sharp(profileBuffer)
-    .composite([{ input: maskSvg, blend: "dest-in" }])
-    .png()
-    .toBuffer();
-
-  const top = Math.max(24, (metadata.height ?? baseSize) - containerHeight - inset);
-  const left = Math.max(24, (metadata.width ?? baseSize) - containerWidth - inset);
-
-  const output = await sharp(inputBuffer)
-    .composite([
-      {
-        input: avatar,
-        top: top + avatarInset,
-        left: left + avatarInset
-      },
-      {
-        input: containerSvg,
-        top,
-        left
-      }
-    ])
-    .toBuffer({ resolveWithObject: true });
-
-  return {
-    kind: "binary",
-    fileName: image.fileName,
-    bytes: Uint8Array.from(output.data).buffer,
-    mimeType: output.info.format === "png" ? "image/png" : "image/jpeg"
-  };
+async function addPageProfileBadgeToImage(
+  image: ResolvedImage,
+  profileImage?: { bytes: ArrayBuffer; mimeType: string } | null
+): Promise<ResolvedImage> {
+  return composeImageWithLogo(image, profileImage) as Promise<ResolvedImage>;
 }
 
 async function decorateAutoPostImages(
@@ -305,6 +244,55 @@ function getAutoPostLogFlags(job: JobExecution) {
     return { autoPost: true };
   }
   return {};
+}
+
+async function getWatermarkSettings(job: JobExecution) {
+  const { autoPostConfigId, autoPostAiConfigId } = getBoundAutoPostConfigIds(job);
+
+  if (autoPostAiConfigId) {
+    const config = (await AutoPostAiConfig.findById(autoPostAiConfigId)
+      .select("watermarkEnabled watermarkSource watermarkPosition watermarkSizePercent")
+      .lean()) as
+      | {
+          watermarkEnabled?: boolean;
+          watermarkSource?: "page_profile" | "custom_logo" | "none";
+          watermarkPosition?: "top-left" | "top-right" | "bottom-left" | "bottom-right";
+          watermarkSizePercent?: number;
+        }
+      | null;
+    return {
+      enabled: config?.watermarkEnabled !== false,
+      source: config?.watermarkSource ?? "page_profile",
+      position: config?.watermarkPosition ?? "bottom-right",
+      sizePercent: config?.watermarkSizePercent ?? 17
+    };
+  }
+
+  if (autoPostConfigId) {
+    const config = (await AutoPostConfig.findById(autoPostConfigId)
+      .select("watermarkEnabled watermarkSource watermarkPosition watermarkSizePercent")
+      .lean()) as
+      | {
+          watermarkEnabled?: boolean;
+          watermarkSource?: "page_profile" | "custom_logo" | "none";
+          watermarkPosition?: "top-left" | "top-right" | "bottom-left" | "bottom-right";
+          watermarkSizePercent?: number;
+        }
+      | null;
+    return {
+      enabled: config?.watermarkEnabled !== false,
+      source: config?.watermarkSource ?? "page_profile",
+      position: config?.watermarkPosition ?? "bottom-right",
+      sizePercent: config?.watermarkSizePercent ?? 17
+    };
+  }
+
+  return {
+    enabled: false,
+    source: "none" as const,
+    position: "bottom-right" as const,
+    sizePercent: 17
+  };
 }
 
 async function updateBoundAutoPostState(
@@ -838,12 +826,35 @@ async function executePostJob(job: JobExecution) {
   }
 
   let pageProfileImage: { bytes: ArrayBuffer; mimeType: string } | null = null;
-  if (hasBoundAutoPostConfig(job)) {
+  const watermarkSettings = hasBoundAutoPostConfig(job) ? await getWatermarkSettings(job) : null;
+  if (hasBoundAutoPostConfig(job) && watermarkSettings?.enabled && watermarkSettings.source === "page_profile") {
     try {
-      pageProfileImage = await fetchFacebookPageProfileImage({
+      const pageLogo = await getPageLogoForFacebookPage({
+        userId: job.userId,
         pageId: page.pageId,
-        pageAccessToken: page.pageAccessToken
+        connection
       });
+      pageProfileImage = pageLogo.image;
+      if (!pageLogo.image) {
+        await logAction({
+          userId: job.userId,
+          type: "queue",
+          level: "warn",
+          message: "Page logo unavailable, publishing without watermark logo",
+          relatedJobId: job._id,
+          relatedPostId: job.postId,
+          relatedScheduleId: job.scheduleId,
+          metadata: {
+            ...getAutoPostLogFlags(job),
+            targetPageId: page.pageId,
+            correlationId: job.correlationId,
+            watermarkEnabled: watermarkSettings?.enabled ?? true,
+            watermarkSource: watermarkSettings?.source ?? "page_profile",
+            pageLogoSource: pageLogo.source,
+            cachedProfilePictureUrl: pageLogo.profilePictureUrl
+          }
+        });
+      }
     } catch (error) {
       pageProfileImage = null;
       await logAction({
@@ -858,6 +869,8 @@ async function executePostJob(job: JobExecution) {
           ...getAutoPostLogFlags(job),
           targetPageId: page.pageId,
           correlationId: job.correlationId,
+          watermarkEnabled: watermarkSettings?.enabled ?? true,
+          watermarkSource: watermarkSettings?.source ?? "page_profile",
           error: error instanceof Error ? error.message : "unknown"
         }
       });

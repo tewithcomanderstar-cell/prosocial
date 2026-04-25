@@ -25,16 +25,24 @@ function inferAuditAction(input: LogInput) {
 }
 
 export function serializeError(error: unknown) {
+  const redact = (value: string | null | undefined) =>
+    value
+      ?.replace(/(access_token=)[^&\s]+/gi, "$1[redacted]")
+      .replace(/(Bearer\s+)[A-Za-z0-9._-]+/gi, "$1[redacted]")
+      .replace(/("pageAccessToken"\s*:\s*")[^"]+/gi, '$1[redacted]')
+      .replace(/("accessToken"\s*:\s*")[^"]+/gi, '$1[redacted]')
+      .replace(/("token"\s*:\s*")[^"]+/gi, '$1[redacted]') ?? null;
+
   if (error instanceof Error) {
     return {
-      reason: error.message,
-      stack: error.stack ?? null,
+      reason: redact(error.message) ?? "unknown",
+      stack: redact(error.stack ?? null),
       name: error.name
     };
   }
 
   return {
-    reason: typeof error === "string" ? error : "unknown",
+    reason: typeof error === "string" ? redact(error) ?? "unknown" : "unknown",
     stack: null,
     name: "UnknownError"
   };
