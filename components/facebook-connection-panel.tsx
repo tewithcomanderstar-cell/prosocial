@@ -26,7 +26,7 @@ function mapFacebookMessage(code: string, isThai: boolean) {
       ? "การเชื่อม Facebook ล้มเหลว กรุณาตรวจสิทธิ์ของแอปและลองใหม่อีกครั้ง"
       : "Facebook connection failed. Please review your app permissions and token.",
     unsupported_permission: isThai
-      ? "Meta ปฏิเสธสิทธิ์ที่ใช้เชื่อมเพจในรอบนี้ แม้ระบบจะลดเหลือสิทธิ์ขั้นต่ำแล้ว กรุณาตรวจ App Review, บทบาทผู้ใช้ในแอป และ Business Integrations ของเพจนั้นอีกครั้ง"
+      ? "Meta ปฏิเสธสิทธิ์ที่ใช้เชื่อมเพจในรอบนี้ ระบบได้ลดเหลือสิทธิ์ขั้นต่ำแล้ว หากยังไม่ผ่านให้ตรวจ App Review, บทบาทผู้ใช้ในแอป, Business Integrations และลบ env เก่า FACEBOOK_PAGE_CONNECT_SCOPE ที่อาจค้างอยู่"
       : "Meta rejected the page permissions requested by this app. Review App Review, app roles, and Business Integrations for the Page.",
     permission_denied: isThai
       ? "บัญชีนี้ยังไม่มีสิทธิ์เชื่อมเพจเข้ากับแอป ลองใช้บัญชีที่เป็น App Admin, Developer หรือ Tester ของแอปเดียวกัน"

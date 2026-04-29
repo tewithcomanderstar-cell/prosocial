@@ -99,7 +99,8 @@ export class FacebookOAuthError extends Error {
 
 function getFacebookPageConnectScope() {
   const explicitScope = process.env.FACEBOOK_PAGE_CONNECT_SCOPE?.trim();
-  if (explicitScope) {
+  const forceExplicitScope = process.env.FACEBOOK_PAGE_CONNECT_SCOPE_FORCE === "true";
+  if (explicitScope && forceExplicitScope) {
     return explicitScope;
   }
 
