@@ -5,6 +5,7 @@ import { applyOAuthStartCookies, getRequestBaseUrl, getSocialRedirectUriForReque
 export async function GET(request: Request) {
   const clientId = process.env.FACEBOOK_APP_ID;
   const configId = process.env.FACEBOOK_LOGIN_CONFIG_ID;
+  const useConfigId = process.env.FACEBOOK_LOGIN_USE_CONFIG_ID === "true";
   const requestUrl = new URL(request.url);
   const requestBaseUrl = getRequestBaseUrl(request);
 
@@ -19,7 +20,7 @@ export async function GET(request: Request) {
   url.searchParams.set("state", state);
   url.searchParams.set("response_type", "code");
 
-  if (configId) {
+  if (configId && useConfigId) {
     url.searchParams.set("config_id", configId);
   } else {
     url.searchParams.set("scope", "email,public_profile");

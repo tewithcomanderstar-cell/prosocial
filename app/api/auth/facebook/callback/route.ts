@@ -43,6 +43,16 @@ function mapFacebookLoginFailure(error: unknown) {
     return "auth_storage_unavailable";
   }
 
+  if (
+    message.includes("timed out") ||
+    message.includes("fetch failed") ||
+    message.includes("network") ||
+    message.includes("econnreset") ||
+    message.includes("enotfound")
+  ) {
+    return "facebook_provider_unavailable";
+  }
+
   return "facebook_login_failed";
 }
 
