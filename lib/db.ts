@@ -29,8 +29,10 @@ export async function connectDb() {
   if (!cached.promise) {
     cached.promise = mongoose.connect(uri, {
       dbName: "facebook-auto-posting",
-      serverSelectionTimeoutMS: 1500,
-      connectTimeoutMS: 1500
+      serverSelectionTimeoutMS: 10000,
+      connectTimeoutMS: 10000,
+      socketTimeoutMS: 20000,
+      maxPoolSize: 10
     });
   }
 

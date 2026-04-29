@@ -26,6 +26,26 @@ async function logFacebookAuthError(params: {
   });
 }
 
+function mapFacebookLoginFailure(error: unknown) {
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+
+  if (message.includes("jwt_secret")) {
+    return "session_config_error";
+  }
+
+  if (
+    message.includes("mongodb_uri") ||
+    message.includes("server selection timed out") ||
+    message.includes("connect econnrefused") ||
+    message.includes("querysrv") ||
+    message.includes("socket timeout")
+  ) {
+    return "auth_storage_unavailable";
+  }
+
+  return "facebook_login_failed";
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
@@ -162,6 +182,6 @@ export async function GET(request: Request) {
       error,
       metadata: { stage: "callback-catch", url: request.url }
     });
-    return NextResponse.redirect(buildLoginErrorUrl("facebook_login_failed", null, url.origin));
+    return NextResponse.redirect(buildLoginErrorUrl(mapFacebookLoginFailure(error), null, url.origin));
   }
 }
