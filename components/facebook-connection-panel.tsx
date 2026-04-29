@@ -20,27 +20,27 @@ type AuthUser = {
 function mapFacebookMessage(code: string, isThai: boolean) {
   const messages: Record<string, string> = {
     missing_code: isThai
-      ? "Facebook did not return an authorization code. Please try connecting again."
+      ? "Facebook ไม่ได้ส่ง authorization code กลับมา กรุณาลองเชื่อมใหม่อีกครั้ง"
       : "Facebook did not return an authorization code.",
     oauth_failed: isThai
-      ? "Facebook connection failed. Please review the app token and permissions."
+      ? "การเชื่อม Facebook ล้มเหลว กรุณาตรวจสิทธิ์ของแอปและลองใหม่อีกครั้ง"
       : "Facebook connection failed. Please review your app permissions and token.",
     unsupported_permission: isThai
-      ? "This Facebook app still cannot use pages_show_list in its current Meta setup. Review app roles, Facebook Login, and Pages access in Business Integrations."
-      : "This Facebook app still cannot use pages_show_list in its current Meta setup. Review app roles, Facebook Login, and Pages access in Business Integrations.",
+      ? "Meta ปฏิเสธสิทธิ์ที่ใช้เชื่อมเพจในรอบนี้ แม้ระบบจะลดเหลือสิทธิ์ขั้นต่ำแล้ว กรุณาตรวจ App Review, บทบาทผู้ใช้ในแอป และ Business Integrations ของเพจนั้นอีกครั้ง"
+      : "Meta rejected the page permissions requested by this app. Review App Review, app roles, and Business Integrations for the Page.",
     permission_denied: isThai
-      ? "This account cannot connect pages to the app yet. Try again with an app admin, developer, or tester account from the same Meta app."
+      ? "บัญชีนี้ยังไม่มีสิทธิ์เชื่อมเพจเข้ากับแอป ลองใช้บัญชีที่เป็น App Admin, Developer หรือ Tester ของแอปเดียวกัน"
       : "This account cannot connect pages to the app yet. Try again with an app admin, developer, or tester account from the same Meta app.",
     invalid_redirect: isThai
-      ? "The Facebook callback URL does not match the current production domain. Verify Valid OAuth Redirect URIs and App Domains use the same domain."
+      ? "ค่า callback URL ของ Facebook ไม่ตรงกับโดเมน production ปัจจุบัน กรุณาตรวจ Valid OAuth Redirect URIs และ App Domains ให้ใช้โดเมนเดียวกัน"
       : "The Facebook callback URL does not match the current production domain. Verify Valid OAuth Redirect URIs and App Domains use the same domain.",
     missing_config: isThai
-      ? "Facebook OAuth is not fully configured yet. Check FACEBOOK_APP_ID, FACEBOOK_APP_SECRET, and both redirect URIs."
+      ? "Facebook OAuth ยังตั้งค่าไม่ครบ กรุณาตรวจ FACEBOOK_APP_ID, FACEBOOK_APP_SECRET และ redirect URI ทั้งสองตัว"
       : "Facebook OAuth is not fully configured yet. Check FACEBOOK_APP_ID, FACEBOOK_APP_SECRET, and both redirect URIs.",
-    login_required: isThai ? "Please sign in before connecting Facebook." : "Please sign in before connecting Facebook.",
-    facebook_not_connected: isThai ? "Facebook is not connected to this workspace yet." : "Facebook is not connected to this workspace yet.",
-    token_expired: isThai ? "Facebook token expired. Please reconnect your account." : "Facebook token expired. Please reconnect your account.",
-    success: isThai ? "Facebook Pages connected successfully." : "Facebook Pages connected successfully."
+    login_required: isThai ? "กรุณาเข้าสู่ระบบก่อนเชื่อม Facebook" : "Please sign in before connecting Facebook.",
+    facebook_not_connected: isThai ? "Workspace นี้ยังไม่ได้เชื่อม Facebook" : "Facebook is not connected to this workspace yet.",
+    token_expired: isThai ? "Facebook token หมดอายุแล้ว กรุณาเชื่อมใหม่อีกครั้ง" : "Facebook token expired. Please reconnect your account.",
+    success: isThai ? "เชื่อม Facebook Pages สำเร็จแล้ว" : "Facebook Pages connected successfully."
   };
 
   if (code === "Please login before connecting Facebook" || code === "UNAUTHORIZED") {
@@ -128,7 +128,10 @@ export function FacebookConnectionPanel() {
       } else {
         setAuthUser(null);
         setPages([]);
-        setMessage(meResult?.message || (isThai ? "Unable to verify current user session." : "Unable to verify the current user session."));
+        setMessage(
+          meResult?.message ||
+            (isThai ? "ยังตรวจสอบ session ของผู้ใช้ไม่สำเร็จ" : "Unable to verify the current user session.")
+        );
       }
 
       setAuthResolved(true);
@@ -178,19 +181,23 @@ export function FacebookConnectionPanel() {
       setPages([]);
       setMessage(
         isThai
-          ? "ล้างการเชื่อมต่อ Facebook เดิมแล้ว กรุณากดเชื่อมต่อใหม่อีกครั้ง"
+          ? "ล้างการเชื่อม Facebook เดิมแล้ว กรุณากดเชื่อมใหม่อีกครั้ง"
           : "The old Facebook connection has been cleared. Please connect again."
       );
       return;
     }
 
-    setMessage(result?.message || (isThai ? "ไม่สามารถล้างการเชื่อมต่อ Facebook ได้" : "Unable to clear the Facebook connection."));
+    setMessage(
+      result?.message ||
+        (isThai ? "ยังล้างการเชื่อม Facebook เดิมไม่สำเร็จ กรุณาลองอีกครั้ง" : "Unable to clear the Facebook connection.")
+    );
   }
 
   const showPermissionChecklist =
     message.includes("pages_show_list") ||
     message.includes("Business Integrations") ||
-    message.includes("admin, developer, or tester");
+    message.includes("Admin, Developer") ||
+    message.includes("Meta ปฏิเสธสิทธิ์");
   const showResetConnection =
     /bad auth/i.test(message) ||
     /authentication failed/i.test(message) ||
@@ -198,10 +205,12 @@ export function FacebookConnectionPanel() {
 
   return (
     <div className="stack">
-      {!authResolved ? <p className="muted">Loading...</p> : null}
+      {!authResolved ? <p className="muted">{isThai ? "กำลังโหลด..." : "Loading..."}</p> : null}
 
       {authUser ? (
-        <p className="muted">Signed in as {authUser.name || authUser.email}</p>
+        <p className="muted">
+          {isThai ? `เข้าสู่ระบบเป็น ${authUser.name || authUser.email}` : `Signed in as ${authUser.name || authUser.email}`}
+        </p>
       ) : authResolved ? (
         <div
           style={{
@@ -218,20 +227,31 @@ export function FacebookConnectionPanel() {
         >
           <span className="muted">{mapFacebookMessage("login_required", isThai)}</span>
           <Link className="button" href="/login?next=%2Fconnections%2Ffacebook">
-            Sign in
+            {isThai ? "เข้าสู่ระบบ" : "Sign in"}
           </Link>
         </div>
       ) : null}
 
       <button className="button" onClick={connect} type="button" disabled={loading || !authUser}>
-        {loading ? "Connecting..." : t("facebookConnect")}
+        {loading ? (isThai ? "กำลังเชื่อม..." : "Connecting...") : t("facebookConnect")}
       </button>
 
       {message ? <p className="muted">{message}</p> : null}
 
       {showResetConnection ? (
-        <button className="button button-ghost" onClick={disconnectStaleConnection} type="button" disabled={disconnecting || !authUser}>
-          {disconnecting ? "Clearing..." : "Clear old Facebook connection"}
+        <button
+          className="button button-ghost"
+          onClick={disconnectStaleConnection}
+          type="button"
+          disabled={disconnecting || !authUser}
+        >
+          {disconnecting
+            ? isThai
+              ? "กำลังล้าง..."
+              : "Clearing..."
+            : isThai
+              ? "ล้างการเชื่อม Facebook เดิม"
+              : "Clear old Facebook connection"}
         </button>
       ) : null}
 
@@ -244,13 +264,35 @@ export function FacebookConnectionPanel() {
             padding: 16
           }}
         >
-          <strong style={{ display: "block", marginBottom: 8 }}>Meta checklist</strong>
+          <strong style={{ display: "block", marginBottom: 8 }}>
+            {isThai ? "เช็กจุดสำคัญใน Meta" : "Meta checklist"}
+          </strong>
           <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 6 }}>
-            <li>The same Facebook account must be an App Admin, Developer, or Tester.</li>
-            <li>Facebook Login must be added to the Meta app.</li>
-            <li>Business Integrations must allow the Pages you want to connect.</li>
-            <li>Valid OAuth Redirect URIs must use the theta production domain only.</li>
-            <li>App Domains must include prosocial-app-theta.vercel.app.</li>
+            <li>
+              {isThai
+                ? "บัญชี Facebook ที่ใช้เชื่อมต้องเป็น App Admin, Developer หรือ Tester ของแอปเดียวกัน"
+                : "The same Facebook account must be an App Admin, Developer, or Tester."}
+            </li>
+            <li>
+              {isThai
+                ? "ใน Meta App ต้องเพิ่มผลิตภัณฑ์ Facebook Login แล้ว"
+                : "Facebook Login must be added to the Meta app."}
+            </li>
+            <li>
+              {isThai
+                ? "Business Integrations ต้องอนุญาตเพจที่ต้องการเชื่อมจริง"
+                : "Business Integrations must allow the Pages you want to connect."}
+            </li>
+            <li>
+              {isThai
+                ? "Valid OAuth Redirect URIs ต้องใช้โดเมน theta ตัวปัจจุบันเท่านั้น"
+                : "Valid OAuth Redirect URIs must use the theta production domain only."}
+            </li>
+            <li>
+              {isThai
+                ? "App Domains ต้องมี prosocial-app-theta.vercel.app"
+                : "App Domains must include prosocial-app-theta.vercel.app."}
+            </li>
           </ul>
         </div>
       ) : null}

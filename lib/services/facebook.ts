@@ -97,6 +97,23 @@ export class FacebookOAuthError extends Error {
   }
 }
 
+function getFacebookPageConnectScope() {
+  const explicitScope = process.env.FACEBOOK_PAGE_CONNECT_SCOPE?.trim();
+  if (explicitScope) {
+    return explicitScope;
+  }
+
+  const extraScope = process.env.FACEBOOK_PAGE_CONNECT_EXTRA_SCOPE
+    ?.split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  const baseScope = ["pages_show_list"];
+  const merged = [...baseScope, ...(extraScope ?? [])];
+
+  return Array.from(new Set(merged)).join(",");
+}
+
 export function getFacebookOAuthUrl() {
   if (!process.env.FACEBOOK_APP_ID || !process.env.FACEBOOK_REDIRECT_URI) {
     throw new FacebookOAuthError("Facebook OAuth is not configured.", "missing_config");
@@ -105,11 +122,7 @@ export function getFacebookOAuthUrl() {
   const url = new URL("https://www.facebook.com/v21.0/dialog/oauth");
   url.searchParams.set("client_id", process.env.FACEBOOK_APP_ID ?? "");
   url.searchParams.set("redirect_uri", process.env.FACEBOOK_REDIRECT_URI ?? "");
-  url.searchParams.set(
-    "scope",
-    process.env.FACEBOOK_PAGE_CONNECT_SCOPE ??
-      "pages_show_list,pages_manage_metadata,pages_read_engagement,pages_manage_engagement"
-  );
+  url.searchParams.set("scope", getFacebookPageConnectScope());
   url.searchParams.set("auth_type", "rerequest");
   return url.toString();
 }
