@@ -1,4 +1,5 @@
-﻿import { ActionLog } from "@/models/ActionLog";
+import { connectDb } from "@/lib/db";
+import { ActionLog } from "@/models/ActionLog";
 import { AuditEntry } from "@/models/AuditEntry";
 import { Notification } from "@/models/Notification";
 
@@ -49,6 +50,8 @@ export function serializeError(error: unknown) {
 }
 
 export async function logAction(input: LogInput) {
+  await connectDb();
+
   const log = await ActionLog.create({
     userId: input.userId,
     type: input.type,
@@ -98,6 +101,36 @@ export async function logRouteError(params: {
   });
 }
 
+export async function safeLogAction(input: LogInput) {
+  try {
+    return await logAction(input);
+  } catch (error) {
+    console.error("[logging] unable to persist action log", serializeError(error));
+    return null;
+  }
+}
+
+export async function safeLogRouteError(params: {
+  userId: string;
+  type?: LogInput["type"];
+  message: string;
+  error: unknown;
+  metadata?: Record<string, unknown>;
+  relatedJobId?: string;
+  relatedPostId?: string;
+  relatedScheduleId?: string;
+}) {
+  try {
+    return await logRouteError(params);
+  } catch (loggingError) {
+    console.error("[logging] unable to persist route error", {
+      originalMessage: params.message,
+      loggingError: serializeError(loggingError)
+    });
+    return null;
+  }
+}
+
 export async function createNotification(params: {
   userId: string;
   type: "error" | "token" | "backup" | "rate_limit" | "analytics" | "system";
@@ -106,6 +139,8 @@ export async function createNotification(params: {
   message: string;
   metadata?: Record<string, unknown>;
 }) {
+  await connectDb();
+
   return Notification.create({
     userId: params.userId,
     type: params.type,
