@@ -17,6 +17,24 @@ type AuthUser = {
   name: string;
 };
 
+type FacebookOAuthDebug = {
+  effectiveScope: string;
+  explicitScopeConfigured: boolean;
+  explicitScopeForced: boolean;
+  explicitScopeValue: string | null;
+  ignoredLegacyScopePresent: boolean;
+  extraScopeConfigured: string | null;
+  facebookRedirectUri: string | null;
+  facebookAuthRedirectUri: string | null;
+  nextPublicAppUrl: string | null;
+  facebookLoginConfigIdPresent: boolean;
+  facebookLoginUseConfigId: boolean;
+  oauthDialogHost: string;
+  oauthDialogPath: string;
+  oauthDialogScope: string | null;
+  oauthDialogRedirectUri: string | null;
+};
+
 function mapFacebookMessage(code: string, isThai: boolean) {
   const messages: Record<string, string> = {
     missing_code: isThai
@@ -84,6 +102,7 @@ export function FacebookConnectionPanel() {
   const [disconnecting, setDisconnecting] = useState(false);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authResolved, setAuthResolved] = useState(false);
+  const [oauthDebug, setOauthDebug] = useState<FacebookOAuthDebug | null>(null);
 
   const queryMessage = useMemo(() => {
     if (searchParams.get("success")) {
@@ -121,13 +140,29 @@ export function FacebookConnectionPanel() {
         } else if (pagesResult?.message) {
           setMessage(mapFacebookMessage(pagesResult.message, isThai));
         }
+
+        const debugResponse = await fetch("/api/facebook/oauth/debug", {
+          cache: "no-store",
+          credentials: "include"
+        });
+        const debugResult = await debugResponse.json().catch(() => null);
+
+        if (!active) {
+          return;
+        }
+
+        if (debugResult?.ok && debugResult.data) {
+          setOauthDebug(debugResult.data);
+        }
       } else if (meResult?.message === "Unauthorized") {
         setAuthUser(null);
         setPages([]);
         setMessage(mapFacebookMessage("login_required", isThai));
+        setOauthDebug(null);
       } else {
         setAuthUser(null);
         setPages([]);
+        setOauthDebug(null);
         setMessage(
           meResult?.message ||
             (isThai ? "ยังตรวจสอบ session ของผู้ใช้ไม่สำเร็จ" : "Unable to verify the current user session.")
@@ -294,6 +329,49 @@ export function FacebookConnectionPanel() {
                 : "App Domains must include prosocial-app-theta.vercel.app."}
             </li>
           </ul>
+        </div>
+      ) : null}
+
+      {oauthDebug ? (
+        <div
+          style={{
+            border: "1px solid rgba(59, 130, 246, 0.22)",
+            background: "rgba(59, 130, 246, 0.05)",
+            borderRadius: 16,
+            padding: 16,
+            display: "grid",
+            gap: 10
+          }}
+        >
+          <strong>{isThai ? "สถานะ OAuth ที่ระบบใช้จริงตอนนี้" : "Active OAuth debug state"}</strong>
+          <div className="muted" style={{ display: "grid", gap: 4 }}>
+            <span>
+              {isThai ? "Scope ที่จะขอจริง" : "Effective scope"}: <code>{oauthDebug.oauthDialogScope || oauthDebug.effectiveScope}</code>
+            </span>
+            <span>
+              {isThai ? "Redirect URI ของ flow เชื่อมเพจ" : "Page connect redirect URI"}:{" "}
+              <code>{oauthDebug.oauthDialogRedirectUri || oauthDebug.facebookRedirectUri || "-"}</code>
+            </span>
+            <span>
+              {isThai ? "Redirect URI ของ flow login" : "Login redirect URI"}: <code>{oauthDebug.facebookAuthRedirectUri || "-"}</code>
+            </span>
+            <span>
+              {isThai ? "โดเมนแอปปัจจุบัน" : "Current app URL"}: <code>{oauthDebug.nextPublicAppUrl || "-"}</code>
+            </span>
+            <span>
+              {isThai ? "มี env scope เก่าค้างอยู่ไหม" : "Legacy scope env present"}:{" "}
+              <strong>{oauthDebug.ignoredLegacyScopePresent ? (isThai ? "มี แต่ระบบกำลังเมินอยู่" : "Present but ignored") : isThai ? "ไม่มี" : "No"}</strong>
+            </span>
+            <span>
+              {isThai ? "บังคับใช้ scope จาก env หรือไม่" : "Force explicit env scope"}:{" "}
+              <strong>{oauthDebug.explicitScopeForced ? (isThai ? "ใช่" : "Yes") : isThai ? "ไม่" : "No"}</strong>
+            </span>
+            {oauthDebug.explicitScopeForced && oauthDebug.explicitScopeValue ? (
+              <span>
+                {isThai ? "ค่า scope ที่ถูกบังคับ" : "Forced scope value"}: <code>{oauthDebug.explicitScopeValue}</code>
+              </span>
+            ) : null}
+          </div>
         </div>
       ) : null}
 
