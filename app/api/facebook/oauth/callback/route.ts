@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { requireAuth } from "@/lib/api";
 import { FacebookConnection } from "@/models/FacebookConnection";
 import { connectDb } from "@/lib/db";
@@ -9,6 +10,9 @@ import {
   subscribePageToWebhook
 } from "@/lib/services/facebook";
 import { logAction } from "@/lib/services/logging";
+
+const FACEBOOK_PAGE_STATE_COOKIE = "facebook_pages_oauth_state";
+const FACEBOOK_PAGE_REDIRECT_COOKIE = "facebook_pages_redirect_uri";
 
 function mapCallbackErrorCode(error: unknown) {
   if (error instanceof FacebookOAuthError) {
@@ -33,7 +37,33 @@ function mapCallbackErrorCode(error: unknown) {
     return "invalid_redirect";
   }
 
+  if (message.includes("state")) {
+    return "invalid_state";
+  }
+
   return "oauth_failed";
+}
+
+async function consumeFacebookPageOAuthState() {
+  const store = await cookies();
+  const savedState = store.get(FACEBOOK_PAGE_STATE_COOKIE)?.value ?? null;
+  const redirectUri = store.get(FACEBOOK_PAGE_REDIRECT_COOKIE)?.value ?? null;
+
+  store.set(FACEBOOK_PAGE_STATE_COOKIE, "", {
+    httpOnly: true,
+    expires: new Date(0),
+    path: "/"
+  });
+  store.set(FACEBOOK_PAGE_REDIRECT_COOKIE, "", {
+    httpOnly: true,
+    expires: new Date(0),
+    path: "/"
+  });
+
+  return {
+    savedState,
+    redirectUri
+  };
 }
 
 export async function GET(request: Request) {
@@ -42,12 +72,18 @@ export async function GET(request: Request) {
     const userId = await requireAuth();
     const url = new URL(request.url);
     const code = url.searchParams.get("code");
+    const returnedState = url.searchParams.get("state");
+    const { savedState, redirectUri } = await consumeFacebookPageOAuthState();
 
     if (!code) {
       return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/connections/facebook?error=missing_code`);
     }
 
-    const tokenPayload = await exchangeFacebookCode(code);
+    if (!savedState || !returnedState || savedState !== returnedState) {
+      return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/connections/facebook?error=invalid_state`);
+    }
+
+    const tokenPayload = await exchangeFacebookCode(code, redirectUri);
     const pages = await fetchFacebookPages(tokenPayload.access_token);
     const webhookResults = await Promise.allSettled(
       pages.map(async (page) => {

@@ -24,6 +24,7 @@ function main() {
   const debugInfo = getFacebookPageConnectDebugInfo({
     FACEBOOK_PAGE_CONNECT_SCOPE: "pages_show_list,pages_manage_metadata",
     FACEBOOK_PAGE_CONNECT_EXTRA_SCOPE: "pages_read_engagement",
+    FACEBOOK_LOGIN_CONFIG_ID: "1685723135915988",
     FACEBOOK_REDIRECT_URI: "https://prosocial-app-theta.vercel.app/api/facebook/oauth/callback",
     FACEBOOK_AUTH_REDIRECT_URI: "https://prosocial-app-theta.vercel.app/api/auth/facebook/callback",
     NEXT_PUBLIC_APP_URL: "https://prosocial-app-theta.vercel.app"
@@ -31,8 +32,10 @@ function main() {
 
   assert.equal(debugInfo.ignoredLegacyScopePresent, true);
   assert.equal(debugInfo.effectiveScope, "pages_show_list,pages_read_engagement");
+  assert.equal(debugInfo.configIdEnabled, true);
+  assert.equal(debugInfo.configIdSource, "FACEBOOK_LOGIN_CONFIG_ID");
   assert.equal(debugInfo.facebookRedirectUri, "https://prosocial-app-theta.vercel.app/api/facebook/oauth/callback");
-  console.log("PASS Facebook OAuth debug info reports ignored legacy scope and active redirect URIs");
+  console.log("PASS Facebook OAuth debug info reports ignored legacy scope, active redirect URIs, and config_id usage");
 }
 
 try {

@@ -1,6 +1,14 @@
 import { fetchWithRetry } from "@/lib/services/http";
-import { getFacebookPageConnectDebugInfo, resolveFacebookPageConnectScope } from "@/lib/services/facebook-oauth-debug";
-export { getFacebookPageConnectDebugInfo, resolveFacebookPageConnectScope } from "@/lib/services/facebook-oauth-debug";
+import {
+  getFacebookPageConnectDebugInfo,
+  resolveFacebookPageConnectConfigId,
+  resolveFacebookPageConnectScope
+} from "@/lib/services/facebook-oauth-debug";
+export {
+  getFacebookPageConnectDebugInfo,
+  resolveFacebookPageConnectConfigId,
+  resolveFacebookPageConnectScope
+} from "@/lib/services/facebook-oauth-debug";
 
 type FacebookPage = {
   id: string;
@@ -99,15 +107,25 @@ export class FacebookOAuthError extends Error {
   }
 }
 
-export function getFacebookOAuthUrl() {
-  if (!process.env.FACEBOOK_APP_ID || !process.env.FACEBOOK_REDIRECT_URI) {
+export function getFacebookOAuthUrl(options?: { redirectUri?: string | null }) {
+  const redirectUri = options?.redirectUri?.trim() || process.env.FACEBOOK_REDIRECT_URI;
+  if (!process.env.FACEBOOK_APP_ID || !redirectUri) {
     throw new FacebookOAuthError("Facebook OAuth is not configured.", "missing_config");
   }
 
   const url = new URL("https://www.facebook.com/v21.0/dialog/oauth");
   url.searchParams.set("client_id", process.env.FACEBOOK_APP_ID ?? "");
-  url.searchParams.set("redirect_uri", process.env.FACEBOOK_REDIRECT_URI ?? "");
-  url.searchParams.set("scope", resolveFacebookPageConnectScope());
+  url.searchParams.set("redirect_uri", redirectUri);
+
+  const { configId } = resolveFacebookPageConnectConfigId();
+  if (configId) {
+    url.searchParams.set("config_id", configId);
+    url.searchParams.set("response_type", "code");
+    url.searchParams.set("override_default_response_type", "true");
+  } else {
+    url.searchParams.set("scope", resolveFacebookPageConnectScope());
+  }
+
   url.searchParams.set("auth_type", "rerequest");
   return url.toString();
 }
@@ -179,11 +197,12 @@ function classifyFacebookPublishError(payload: FacebookGraphErrorPayload, fallba
   return new FacebookPublishError(message, "provider_unknown", true, payload.error);
 }
 
-export async function exchangeFacebookCode(code: string) {
+export async function exchangeFacebookCode(code: string, redirectUri?: string | null) {
+  const effectiveRedirectUri = redirectUri?.trim() || process.env.FACEBOOK_REDIRECT_URI || "";
   const url = new URL("https://graph.facebook.com/v21.0/oauth/access_token");
   url.searchParams.set("client_id", process.env.FACEBOOK_APP_ID ?? "");
   url.searchParams.set("client_secret", process.env.FACEBOOK_APP_SECRET ?? "");
-  url.searchParams.set("redirect_uri", process.env.FACEBOOK_REDIRECT_URI ?? "");
+  url.searchParams.set("redirect_uri", effectiveRedirectUri);
   url.searchParams.set("code", code);
 
   const response = await fetchWithRetry(url.toString(), { cache: "no-store" });

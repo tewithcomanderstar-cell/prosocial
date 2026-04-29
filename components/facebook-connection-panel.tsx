@@ -19,6 +19,8 @@ type AuthUser = {
 
 type FacebookOAuthDebug = {
   effectiveScope: string;
+  configIdEnabled: boolean;
+  configIdSource: string | null;
   explicitScopeConfigured: boolean;
   explicitScopeForced: boolean;
   explicitScopeValue: string | null;
@@ -40,6 +42,9 @@ function mapFacebookMessage(code: string, isThai: boolean) {
     missing_code: isThai
       ? "Facebook ไม่ได้ส่ง authorization code กลับมา กรุณาลองเชื่อมใหม่อีกครั้ง"
       : "Facebook did not return an authorization code.",
+    invalid_state: isThai
+      ? "รอบการเชื่อม Facebook นี้หมดอายุหรือ state ไม่ตรงกัน กรุณากดเชื่อมใหม่อีกครั้ง"
+      : "The Facebook OAuth state was invalid or expired. Please start the connection again.",
     oauth_failed: isThai
       ? "การเชื่อม Facebook ล้มเหลว กรุณาตรวจสิทธิ์ของแอปและลองใหม่อีกครั้ง"
       : "Facebook connection failed. Please review your app permissions and token.",
@@ -347,6 +352,16 @@ export function FacebookConnectionPanel() {
           <div className="muted" style={{ display: "grid", gap: 4 }}>
             <span>
               {isThai ? "Scope ที่จะขอจริง" : "Effective scope"}: <code>{oauthDebug.oauthDialogScope || oauthDebug.effectiveScope}</code>
+            </span>
+            <span>
+              {isThai ? "ใช้ config_id หรือไม่" : "Using config_id"}:{" "}
+              <strong>{oauthDebug.configIdEnabled ? (isThai ? "ใช่" : "Yes") : isThai ? "ไม่" : "No"}</strong>
+              {oauthDebug.configIdEnabled && oauthDebug.configIdSource ? (
+                <>
+                  {" "}
+                  (<code>{oauthDebug.configIdSource}</code>)
+                </>
+              ) : null}
             </span>
             <span>
               {isThai ? "Redirect URI ของ flow เชื่อมเพจ" : "Page connect redirect URI"}:{" "}
