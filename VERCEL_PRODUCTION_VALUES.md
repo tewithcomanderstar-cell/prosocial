@@ -43,6 +43,13 @@ FACEBOOK_PAGE_CONNECT_SCOPE=
 # Only set true if you explicitly want to force FACEBOOK_PAGE_CONNECT_SCOPE.
 FACEBOOK_PAGE_CONNECT_SCOPE_FORCE=false
 
+# Only set this when you have a dedicated Meta Login Configuration for connecting Pages.
+FACEBOOK_PAGE_CONNECT_CONFIG_ID=
+
+# Optional: allow page-connect flow to reuse FACEBOOK_LOGIN_CONFIG_ID.
+# Keep false unless you intentionally verified that configuration contains pages_show_list.
+FACEBOOK_PAGE_CONNECT_USE_LOGIN_CONFIG_ID=false
+
 # Optional extra scopes appended on top of pages_show_list.
 FACEBOOK_PAGE_CONNECT_EXTRA_SCOPE=
 ```

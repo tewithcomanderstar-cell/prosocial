@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { User } from "@/models/User";
 import { connectDb } from "@/lib/db";
+export { resolveFacebookLoginConfigId } from "@/lib/services/facebook-login-auth";
 
 export type SocialProvider = "google" | "facebook";
 

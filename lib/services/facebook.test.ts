@@ -32,10 +32,10 @@ function main() {
 
   assert.equal(debugInfo.ignoredLegacyScopePresent, true);
   assert.equal(debugInfo.effectiveScope, "pages_show_list,pages_read_engagement");
-  assert.equal(debugInfo.configIdEnabled, true);
-  assert.equal(debugInfo.configIdSource, "FACEBOOK_LOGIN_CONFIG_ID");
+  assert.equal(debugInfo.configIdEnabled, false);
+  assert.equal(debugInfo.configIdSource, null);
   assert.equal(debugInfo.facebookRedirectUri, "https://prosocial-app-theta.vercel.app/api/facebook/oauth/callback");
-  console.log("PASS Facebook OAuth debug info reports ignored legacy scope, active redirect URIs, and config_id usage");
+  console.log("PASS Facebook OAuth debug info reports ignored legacy scope and active redirect URIs");
 }
 
 try {

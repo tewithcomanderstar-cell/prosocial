@@ -1,11 +1,14 @@
 import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
-import { applyOAuthStartCookies, getRequestBaseUrl, getSocialRedirectUriForRequest } from "@/lib/social-auth";
+import {
+  applyOAuthStartCookies,
+  getRequestBaseUrl,
+  getSocialRedirectUriForRequest,
+  resolveFacebookLoginConfigId
+} from "@/lib/social-auth";
 
 export async function GET(request: Request) {
   const clientId = process.env.FACEBOOK_APP_ID;
-  const configId = process.env.FACEBOOK_LOGIN_CONFIG_ID;
-  const useConfigId = process.env.FACEBOOK_LOGIN_USE_CONFIG_ID === "true";
   const requestUrl = new URL(request.url);
   const requestBaseUrl = getRequestBaseUrl(request);
 
@@ -14,14 +17,16 @@ export async function GET(request: Request) {
   }
 
   const state = randomUUID();
-  const url = new URL("https://www.facebook.com/v20.0/dialog/oauth");
+  const url = new URL("https://www.facebook.com/v21.0/dialog/oauth");
   url.searchParams.set("client_id", clientId);
   url.searchParams.set("redirect_uri", getSocialRedirectUriForRequest("facebook", request));
   url.searchParams.set("state", state);
   url.searchParams.set("response_type", "code");
 
-  if (configId && useConfigId) {
+  const { enabled, configId } = resolveFacebookLoginConfigId();
+  if (enabled && configId) {
     url.searchParams.set("config_id", configId);
+    url.searchParams.set("override_default_response_type", "true");
   } else {
     url.searchParams.set("scope", "email,public_profile");
   }

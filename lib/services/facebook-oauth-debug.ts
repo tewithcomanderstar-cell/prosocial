@@ -25,7 +25,7 @@ export function resolveFacebookPageConnectConfigId(env: Record<string, string | 
   }
 
   const loginConfigId = env.FACEBOOK_LOGIN_CONFIG_ID?.trim();
-  const allowLoginConfigFallback = env.FACEBOOK_PAGE_CONNECT_USE_LOGIN_CONFIG_ID !== "false";
+  const allowLoginConfigFallback = env.FACEBOOK_PAGE_CONNECT_USE_LOGIN_CONFIG_ID === "true";
   if (loginConfigId && allowLoginConfigFallback) {
     return {
       configId: loginConfigId,
