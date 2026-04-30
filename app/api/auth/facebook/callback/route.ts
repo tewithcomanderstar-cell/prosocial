@@ -28,6 +28,9 @@ async function logFacebookAuthError(params: {
 
 function mapFacebookLoginFailure(error: unknown) {
   const message = error instanceof Error ? error.message.toLowerCase() : "";
+  const code = typeof error === "object" && error !== null && "code" in error
+    ? String((error as { code?: string | number }).code ?? "")
+    : "";
 
   if (message.includes("jwt_secret")) {
     return "session_config_error";
@@ -51,6 +54,15 @@ function mapFacebookLoginFailure(error: unknown) {
     message.includes("enotfound")
   ) {
     return "facebook_provider_unavailable";
+  }
+
+  if (
+    message.includes("duplicate key") ||
+    message.includes("validation failed") ||
+    message.includes("social_user_upsert_failed") ||
+    code === "11000"
+  ) {
+    return "facebook_account_link_failed";
   }
 
   return "facebook_login_failed";
@@ -163,16 +175,44 @@ export async function GET(request: Request) {
       ? profile.email
       : `${profile.id}@facebook.local`;
 
-    const user = await upsertSocialUser({
-      provider: "facebook",
-      providerId: String(profile.id),
-      email,
-      name: String(profile.name),
-      avatar: profile.picture?.data?.url ?? null
-    });
+    let user;
+    try {
+      user = await upsertSocialUser({
+        provider: "facebook",
+        providerId: String(profile.id),
+        email,
+        name: String(profile.name),
+        avatar: profile.picture?.data?.url ?? null
+      });
+    } catch (userError) {
+      console.error("[facebook-login] social user upsert failed", userError);
+      await logFacebookAuthError({
+        message: "Facebook account link failed while upserting user",
+        error: userError,
+        metadata: {
+          stage: "user-upsert",
+          providerId: profile.id,
+          hasEmail: Boolean(profile.email)
+        }
+      });
+      return NextResponse.redirect(buildLoginErrorUrl("facebook_account_link_failed", null, url.origin));
+    }
 
     const response = NextResponse.redirect(await buildLoginSuccessUrlForRequest(request));
-    await attachSessionCookie(response, String(user._id));
+    try {
+      await attachSessionCookie(response, String(user._id));
+    } catch (sessionError) {
+      console.error("[facebook-login] attach session failed", sessionError);
+      await logFacebookAuthError({
+        message: "Facebook login failed while attaching session cookie",
+        error: sessionError,
+        metadata: {
+          stage: "session-attach",
+          userId: String(user._id)
+        }
+      });
+      return NextResponse.redirect(buildLoginErrorUrl("session_config_error", null, url.origin));
+    }
     try {
       await logAction({
         userId: String(user._id),

@@ -130,39 +130,62 @@ export async function verifyOAuthState(provider: SocialProvider, state: string |
 export async function upsertSocialUser(profile: SocialProfile) {
   await connectDb();
 
-  let user = await User.findOne({
+  const filter = {
     $or: [
       { provider: profile.provider, providerId: profile.providerId },
       { email: profile.email }
     ]
-  });
+  };
 
-  if (!user) {
-    user = await User.create({
+  const update = {
+    $set: {
       name: profile.name,
       email: profile.email,
       provider: profile.provider,
       providerId: profile.providerId,
-      avatar: profile.avatar ?? null,
+      ...(profile.avatar ? { avatar: profile.avatar } : {})
+    },
+    $setOnInsert: {
       passwordHash: null,
       role: "admin",
       timezone: "Asia/Bangkok",
       locale: "th-TH"
+    }
+  };
+
+  try {
+    const user = await User.findOneAndUpdate(filter, update, {
+      new: true,
+      upsert: true,
+      runValidators: true,
+      setDefaultsOnInsert: true
     });
 
+    if (!user) {
+      throw new Error("social_user_upsert_failed");
+    }
+
     return user;
-  }
+  } catch (error) {
+    const duplicateKey = typeof error === "object" && error !== null && "code" in error && (error as { code?: number }).code === 11000;
+    if (duplicateKey) {
+      const existingUser = await User.findOne(filter);
+      if (existingUser) {
+        existingUser.name = profile.name || existingUser.name;
+        existingUser.email = profile.email || existingUser.email;
+        existingUser.provider = profile.provider;
+        existingUser.providerId = profile.providerId;
+        if (profile.avatar) {
+          existingUser.avatar = profile.avatar;
+        }
 
-  user.name = profile.name || user.name;
-  user.email = profile.email || user.email;
-  user.provider = profile.provider;
-  user.providerId = profile.providerId;
-  if (profile.avatar) {
-    user.avatar = profile.avatar;
-  }
+        await existingUser.save();
+        return existingUser;
+      }
+    }
 
-  await user.save();
-  return user;
+    throw error;
+  }
 }
 
 export function buildLoginErrorUrl(message: string, nextPath?: string | null, baseUrl?: string) {
