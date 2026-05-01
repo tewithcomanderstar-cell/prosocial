@@ -199,9 +199,28 @@ export async function upsertSocialUser(profile: SocialProfile) {
           existingUser.avatar = profile.avatar;
         }
 
-        await existingUser.save();
+        try {
+          await existingUser.save();
+        } catch {
+          return existingUser;
+        }
         return existingUser;
       }
+    }
+
+    const providerUser = await User.findOne({
+      provider: profile.provider,
+      providerId: profile.providerId
+    });
+    if (providerUser) {
+      return providerUser;
+    }
+
+    const emailUser = await User.findOne({
+      email: profile.email
+    });
+    if (emailUser) {
+      return emailUser;
     }
 
     throw error;
