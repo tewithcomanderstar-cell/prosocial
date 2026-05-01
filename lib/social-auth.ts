@@ -130,46 +130,66 @@ export async function verifyOAuthState(provider: SocialProvider, state: string |
 export async function upsertSocialUser(profile: SocialProfile) {
   await connectDb();
 
-  const filter = {
-    $or: [
-      { provider: profile.provider, providerId: profile.providerId },
-      { email: profile.email }
-    ]
-  };
+  try {
+    const providerUser = await User.findOne({
+      provider: profile.provider,
+      providerId: profile.providerId
+    });
 
-  const update = {
-    $set: {
+    const emailUser = await User.findOne({
+      email: profile.email
+    });
+
+    if (providerUser) {
+      const targetUser =
+        emailUser && String(emailUser._id) !== String(providerUser._id)
+          ? emailUser
+          : providerUser;
+
+      targetUser.name = profile.name || targetUser.name;
+      targetUser.email = profile.email || targetUser.email;
+      targetUser.provider = profile.provider;
+      targetUser.providerId = profile.providerId;
+      if (profile.avatar) {
+        targetUser.avatar = profile.avatar;
+      }
+
+      await targetUser.save();
+      return targetUser;
+    }
+
+    if (emailUser) {
+      emailUser.name = profile.name || emailUser.name;
+      emailUser.provider = profile.provider;
+      emailUser.providerId = profile.providerId;
+      if (profile.avatar) {
+        emailUser.avatar = profile.avatar;
+      }
+
+      await emailUser.save();
+      return emailUser;
+    }
+
+    return await User.create({
       name: profile.name,
       email: profile.email,
       provider: profile.provider,
       providerId: profile.providerId,
-      ...(profile.avatar ? { avatar: profile.avatar } : {})
-    },
-    $setOnInsert: {
+      avatar: profile.avatar ?? null,
       passwordHash: null,
       role: "admin",
       timezone: "Asia/Bangkok",
       locale: "th-TH"
-    }
-  };
-
-  try {
-    const user = await User.findOneAndUpdate(filter, update, {
-      new: true,
-      upsert: true,
-      runValidators: true,
-      setDefaultsOnInsert: true
     });
-
-    if (!user) {
-      throw new Error("social_user_upsert_failed");
-    }
-
-    return user;
   } catch (error) {
     const duplicateKey = typeof error === "object" && error !== null && "code" in error && (error as { code?: number }).code === 11000;
     if (duplicateKey) {
-      const existingUser = await User.findOne(filter);
+      const existingUser = await User.findOne({
+        $or: [
+          { provider: profile.provider, providerId: profile.providerId },
+          { email: profile.email }
+        ]
+      });
       if (existingUser) {
         existingUser.name = profile.name || existingUser.name;
         existingUser.email = profile.email || existingUser.email;
