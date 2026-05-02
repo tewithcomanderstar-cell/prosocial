@@ -71,16 +71,17 @@ export async function GET(request: Request) {
     await connectDb();
     const userId = await requireAuth();
     const url = new URL(request.url);
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || url.origin;
     const code = url.searchParams.get("code");
     const returnedState = url.searchParams.get("state");
     const { savedState, redirectUri } = await consumeFacebookPageOAuthState();
 
     if (!code) {
-      return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/connections/facebook?error=missing_code`);
+      return NextResponse.redirect(`${appUrl}/connections/facebook?error=missing_code`);
     }
 
     if (!savedState || !returnedState || savedState !== returnedState) {
-      return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/connections/facebook?error=invalid_state`);
+      return NextResponse.redirect(`${appUrl}/connections/facebook?error=invalid_state`);
     }
 
     const tokenPayload = await exchangeFacebookCode(code, redirectUri);
@@ -125,7 +126,7 @@ export async function GET(request: Request) {
       }
     });
 
-    return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/connections/facebook?success=1`);
+    return NextResponse.redirect(`${appUrl}/connections/facebook?success=1`);
   } catch (error) {
     const errorCode = mapCallbackErrorCode(error);
 
@@ -144,7 +145,7 @@ export async function GET(request: Request) {
     } catch {}
 
     return NextResponse.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL}/connections/facebook?error=${errorCode}`
+      `${(process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin)}/connections/facebook?error=${errorCode}`
     );
   }
 }

@@ -34,7 +34,7 @@ async function markProviderStatus(
     { userId },
     { tokenStatus: status, lastValidatedAt: new Date() },
     { new: true }
-  );
+  ).catch(() => null);
 
   if (status !== "healthy") {
     await logAction({
@@ -43,7 +43,7 @@ async function markProviderStatus(
       level: status === "expired" ? "error" : "warn",
       message: `${provider} token requires attention`,
       metadata
-    });
+    }).catch(() => null);
 
     await createNotification({
       userId,
@@ -55,7 +55,7 @@ async function markProviderStatus(
           ? `Reconnect ${provider} to resume automation.`
           : `Review ${provider} token soon to avoid interruptions.`,
       metadata
-    });
+    }).catch(() => null);
   }
 }
 
@@ -87,6 +87,13 @@ export async function ensureValidFacebookConnection(userId: string) {
       }
     );
   } catch {
+    if (connection.pages?.length) {
+      connection.tokenStatus = "warning";
+      connection.lastValidatedAt = new Date();
+      await connection.save();
+      return connection;
+    }
+
     throw new IntegrationConnectionError(
       "Unable to verify Facebook right now. Please try again shortly.",
       "provider_unavailable",
@@ -95,6 +102,12 @@ export async function ensureValidFacebookConnection(userId: string) {
   }
 
   if (!response.ok) {
+    if (connection.pages?.length) {
+      await markProviderStatus(userId, "facebook", "warning", { source: "facebook-validate" });
+      const freshConnection = await FacebookConnection.findOne({ userId });
+      return freshConnection ?? connection;
+    }
+
     await markProviderStatus(userId, "facebook", "expired", { source: "facebook-validate" });
     throw new IntegrationConnectionError(
       "Facebook token expired. Please reconnect your account.",
@@ -189,11 +202,11 @@ export async function ensureValidGoogleDriveConnection(userId: string) {
         throw error;
       }
 
-      throw new IntegrationConnectionError(
-        "Unable to verify Google Drive right now. Please try again shortly.",
-        "provider_unavailable",
-        503
-      );
+      connection.tokenStatus = "warning";
+      connection.lastValidatedAt = new Date();
+      await connection.save();
+      return connection;
+
     }
 
     if (!refreshed) {

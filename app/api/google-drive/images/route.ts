@@ -1,4 +1,4 @@
-﻿import { jsonError, jsonOk, requireAuth } from "@/lib/api";
+import { jsonError, jsonOk, normalizeRouteError, requireAuth } from "@/lib/api";
 import { fetchDriveFolders, fetchImagesFromFolder } from "@/lib/services/google-drive";
 import { ensureValidGoogleDriveConnection } from "@/lib/services/integration-auth";
 
@@ -22,6 +22,7 @@ export async function GET(request: Request) {
     const payload = await fetchImagesFromFolder(connection.accessToken, folderId);
     return jsonOk({ images: payload.files, tokenStatus: connection.tokenStatus ?? "healthy" });
   } catch (error) {
-    return jsonError(error instanceof Error ? error.message : "Unable to fetch images", 400);
+    const normalized = normalizeRouteError(error, "Unable to fetch Google Drive images right now.");
+    return jsonError(normalized.message, normalized.status, normalized.code);
   }
 }

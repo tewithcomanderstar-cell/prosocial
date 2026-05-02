@@ -18,6 +18,9 @@ function mapAuthMessage(code: string, isThai: boolean) {
     auth_storage_unavailable: isThai ? "ระบบฐานข้อมูลยังไม่พร้อมใช้งานชั่วคราว กรุณาลองใหม่อีกครั้งในอีกสักครู่" : "The database is temporarily unavailable. Please try again shortly.",
     session_config_error: isThai ? "ระบบ session ของการเข้าสู่ระบบยังตั้งค่าไม่ครบ กรุณาตรวจสอบ JWT_SECRET" : "Session configuration is incomplete. Please verify JWT_SECRET.",
     facebook_provider_unavailable: isThai ? "Facebook ใช้งานไม่ได้ชั่วคราวหรือเชื่อมต่อไม่สำเร็จ กรุณาลองใหม่อีกครั้ง" : "Facebook is temporarily unavailable. Please try again.",
+    facebook_account_link_failed: isThai
+      ? "ไม่สามารถผูกบัญชี Facebook เข้ากับผู้ใช้ในระบบได้ กรุณาลองอีกครั้ง หรือเข้าสู่ระบบด้วยอีเมลเดิมก่อนแล้วค่อยเชื่อม Facebook ใหม่"
+      : "We could not link this Facebook account to an existing user. Please try again.",
     google_login_failed: isThai ? "Google Login ล้มเหลว กรุณาลองใหม่" : "Google login failed. Please try again.",
     facebook_login_failed: isThai ? "Facebook Login ล้มเหลว กรุณาลองใหม่" : "Facebook login failed. Please try again.",
     unsupported_permission: isThai ? "แอป Facebook ยังไม่ได้รับสิทธิ์ที่จำเป็น กรุณาตรวจสอบ Login Configuration และ App Review" : "The Facebook app is missing required permissions. Review Login Configuration and app permissions.",

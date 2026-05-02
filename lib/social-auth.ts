@@ -130,6 +130,19 @@ export async function verifyOAuthState(provider: SocialProvider, state: string |
 export async function upsertSocialUser(profile: SocialProfile) {
   await connectDb();
 
+  const normalizedEmail = profile.email.trim().toLowerCase();
+
+  const updatePayload: Record<string, unknown> = {
+    name: profile.name,
+    email: normalizedEmail,
+    provider: profile.provider,
+    providerId: profile.providerId
+  };
+
+  if (profile.avatar) {
+    updatePayload.avatar = profile.avatar;
+  }
+
   try {
     const providerUser = await User.findOne({
       provider: profile.provider,
@@ -137,7 +150,7 @@ export async function upsertSocialUser(profile: SocialProfile) {
     });
 
     const emailUser = await User.findOne({
-      email: profile.email
+      email: normalizedEmail
     });
 
     if (providerUser) {
@@ -146,33 +159,45 @@ export async function upsertSocialUser(profile: SocialProfile) {
           ? emailUser
           : providerUser;
 
-      targetUser.name = profile.name || targetUser.name;
-      targetUser.email = profile.email || targetUser.email;
-      targetUser.provider = profile.provider;
-      targetUser.providerId = profile.providerId;
-      if (profile.avatar) {
-        targetUser.avatar = profile.avatar;
+      if (emailUser && String(emailUser._id) !== String(providerUser._id)) {
+        await User.findByIdAndUpdate(providerUser._id, {
+          $unset: {
+            provider: 1,
+            providerId: 1
+          }
+        });
       }
 
-      await targetUser.save();
-      return targetUser;
+      const updatedUser = await User.findByIdAndUpdate(
+        targetUser._id,
+        {
+          $set: updatePayload
+        },
+        { new: true }
+      );
+
+      if (updatedUser) {
+        return updatedUser;
+      }
     }
 
     if (emailUser) {
-      emailUser.name = profile.name || emailUser.name;
-      emailUser.provider = profile.provider;
-      emailUser.providerId = profile.providerId;
-      if (profile.avatar) {
-        emailUser.avatar = profile.avatar;
-      }
+      const updatedUser = await User.findByIdAndUpdate(
+        emailUser._id,
+        {
+          $set: updatePayload
+        },
+        { new: true }
+      );
 
-      await emailUser.save();
-      return emailUser;
+      if (updatedUser) {
+        return updatedUser;
+      }
     }
 
     return await User.create({
       name: profile.name,
-      email: profile.email,
+      email: normalizedEmail,
       provider: profile.provider,
       providerId: profile.providerId,
       avatar: profile.avatar ?? null,
@@ -187,23 +212,23 @@ export async function upsertSocialUser(profile: SocialProfile) {
       const existingUser = await User.findOne({
         $or: [
           { provider: profile.provider, providerId: profile.providerId },
-          { email: profile.email }
+          { email: normalizedEmail }
         ]
       });
       if (existingUser) {
-        existingUser.name = profile.name || existingUser.name;
-        existingUser.email = profile.email || existingUser.email;
-        existingUser.provider = profile.provider;
-        existingUser.providerId = profile.providerId;
-        if (profile.avatar) {
-          existingUser.avatar = profile.avatar;
-        }
-
         try {
-          await existingUser.save();
-        } catch {
-          return existingUser;
-        }
+          const updatedUser = await User.findByIdAndUpdate(
+            existingUser._id,
+            {
+              $set: updatePayload
+            },
+            { new: true }
+          );
+          if (updatedUser) {
+            return updatedUser;
+          }
+        } catch {}
+
         return existingUser;
       }
     }
@@ -217,7 +242,7 @@ export async function upsertSocialUser(profile: SocialProfile) {
     }
 
     const emailUser = await User.findOne({
-      email: profile.email
+      email: normalizedEmail
     });
     if (emailUser) {
       return emailUser;

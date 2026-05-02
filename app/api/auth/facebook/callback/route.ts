@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { attachSessionCookie } from "@/lib/auth";
+import { User } from "@/models/User";
 import { logAction, safeLogRouteError } from "@/lib/services/logging";
 import { fetchWithRetry } from "@/lib/services/http";
 import {
@@ -195,7 +196,20 @@ export async function GET(request: Request) {
           hasEmail: Boolean(profile.email)
         }
       });
-      return NextResponse.redirect(buildLoginErrorUrl("facebook_account_link_failed", null, url.origin));
+
+      const recoveryEmail = email.trim().toLowerCase();
+      user =
+        (await User.findOne({
+          provider: "facebook",
+          providerId: String(profile.id)
+        })) ||
+        (await User.findOne({
+          email: recoveryEmail
+        }));
+
+      if (!user) {
+        return NextResponse.redirect(buildLoginErrorUrl("facebook_account_link_failed", null, url.origin));
+      }
     }
 
     const response = NextResponse.redirect(await buildLoginSuccessUrlForRequest(request));

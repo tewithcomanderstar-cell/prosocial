@@ -1,9 +1,9 @@
 ﻿import { fetchWithRetry } from "@/lib/services/http";
 
-export function getGoogleOAuthUrl() {
+export function getGoogleOAuthUrl(options?: { redirectUri?: string | null; state?: string | null }) {
   const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   url.searchParams.set("client_id", process.env.GOOGLE_CLIENT_ID ?? "");
-  url.searchParams.set("redirect_uri", process.env.GOOGLE_REDIRECT_URI ?? "");
+  url.searchParams.set("redirect_uri", options?.redirectUri?.trim() || (process.env.GOOGLE_REDIRECT_URI ?? ""));
   url.searchParams.set("response_type", "code");
   url.searchParams.set("access_type", "offline");
   url.searchParams.set(
@@ -11,10 +11,13 @@ export function getGoogleOAuthUrl() {
     "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/userinfo.email"
   );
   url.searchParams.set("prompt", "consent");
+  if (options?.state) {
+    url.searchParams.set("state", options.state);
+  }
   return url.toString();
 }
 
-export async function exchangeGoogleCode(code: string) {
+export async function exchangeGoogleCode(code: string, redirectUri?: string | null) {
   const response = await fetchWithRetry("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: {
@@ -24,7 +27,7 @@ export async function exchangeGoogleCode(code: string) {
       code,
       client_id: process.env.GOOGLE_CLIENT_ID ?? "",
       client_secret: process.env.GOOGLE_CLIENT_SECRET ?? "",
-      redirect_uri: process.env.GOOGLE_REDIRECT_URI ?? "",
+      redirect_uri: redirectUri?.trim() || (process.env.GOOGLE_REDIRECT_URI ?? ""),
       grant_type: "authorization_code"
     })
   });

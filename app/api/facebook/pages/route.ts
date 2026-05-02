@@ -1,5 +1,5 @@
 import { jsonError, jsonOk, normalizeRouteError, requireAuth } from "@/lib/api";
-import { ensureValidFacebookConnection } from "@/lib/services/integration-auth";
+import { getStoredFacebookConnection, ensureValidFacebookConnection, IntegrationConnectionError } from "@/lib/services/integration-auth";
 
 type LeanFacebookConnection = {
   pages?: Array<{
@@ -15,7 +15,18 @@ type LeanFacebookConnection = {
 export async function GET() {
   try {
     const userId = await requireAuth();
-    const connection = (await ensureValidFacebookConnection(userId)) as LeanFacebookConnection | null;
+    let connection: LeanFacebookConnection | null = null;
+
+    try {
+      connection = (await ensureValidFacebookConnection(userId)) as LeanFacebookConnection | null;
+    } catch (error) {
+      if (error instanceof IntegrationConnectionError && error.code !== "provider_not_connected") {
+        connection = (await getStoredFacebookConnection(userId)) as LeanFacebookConnection | null;
+      } else {
+        throw error;
+      }
+    }
+
     return jsonOk({
       pages: (connection?.pages ?? []).map((page) => ({
         pageId: page.pageId,

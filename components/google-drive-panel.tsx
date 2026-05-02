@@ -20,7 +20,16 @@ type DriveImage = {
 function mapGoogleDriveMessage(code: string, isThai: boolean) {
   const messages: Record<string, string> = {
     missing_code: isThai ? "Google ไม่ส่ง code กลับมา กรุณาลองเชื่อมต่อใหม่" : "Google did not return an authorization code.",
+    invalid_state: isThai
+      ? "รอบการเชื่อม Google Drive หมดอายุหรือ state ไม่ตรงกัน กรุณากดเชื่อมใหม่อีกครั้ง"
+      : "The Google Drive OAuth state was invalid or expired. Please start the connection again.",
     oauth_failed: isThai ? "เชื่อมต่อ Google Drive ไม่สำเร็จ กรุณาลองใหม่" : "Google Drive connection failed. Please try again.",
+    reconnect_required: isThai
+      ? "Google Drive ต้องเชื่อมใหม่อีกครั้งเพื่อรีเฟรชสิทธิ์การเข้าถึง"
+      : "Google Drive needs to be reconnected to refresh access.",
+    provider_not_connected: isThai
+      ? "ยังไม่ได้เชื่อม Google Drive กับระบบนี้"
+      : "Google Drive is not connected to this workspace yet.",
     success: isThai ? "เชื่อมต่อ Google Drive แล้ว" : "Google Drive connected successfully."
   };
 
@@ -48,14 +57,14 @@ export function GoogleDrivePanel() {
 
   async function loadFolders() {
     const response = await fetch("/api/google-drive/folders", { cache: "no-store" });
-    const result = await response.json();
+    const result = await response.json().catch(() => null);
     if (result.ok) {
       setFolders(result.data.folders);
       return true;
     }
 
     if (result.message) {
-      setMessage(result.message);
+      setMessage(mapGoogleDriveMessage(result.code || result.message, isThai));
     }
     return false;
   }
@@ -63,11 +72,11 @@ export function GoogleDrivePanel() {
   async function loadImages(folderId: string) {
     setSelectedFolder(folderId);
     const response = await fetch(`/api/google-drive/images?folderId=${folderId}`, { cache: "no-store" });
-    const result = await response.json();
+    const result = await response.json().catch(() => null);
     if (result.ok) {
       setImages(result.data.images);
     } else {
-      setMessage(result.message || t("commonRequestFailed"));
+      setMessage(mapGoogleDriveMessage(result?.code || result?.message || t("commonRequestFailed"), isThai));
       setImages([]);
     }
   }
@@ -84,14 +93,14 @@ export function GoogleDrivePanel() {
   async function connect() {
     setLoading(true);
     const response = await fetch("/api/google-drive/oauth/url");
-    const result = await response.json();
+    const result = await response.json().catch(() => null);
     if (result.ok && result.data.url) {
       window.location.href = result.data.url;
       return;
     }
 
     setLoading(false);
-    setMessage(result.message || t("commonRequestFailed"));
+    setMessage(mapGoogleDriveMessage(result?.code || result?.message || t("commonRequestFailed"), isThai));
   }
 
   return (
