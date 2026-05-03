@@ -14,6 +14,12 @@ export async function GET() {
       error,
       "Unable to verify Google Drive right now. Please try again shortly."
     );
-    return jsonError(normalized.message, normalized.status, normalized.code);
+    const code =
+      normalized.code === "reconnect_required"
+        ? "google_reconnect_required"
+        : normalized.code === "provider_not_connected"
+          ? "google_provider_not_connected"
+          : normalized.code;
+    return jsonError(normalized.message, normalized.status, code);
   }
 }

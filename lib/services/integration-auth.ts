@@ -30,9 +30,20 @@ async function markProviderStatus(
   metadata: Record<string, unknown> = {}
 ) {
   const Model = provider === "facebook" ? FacebookConnection : GoogleDriveConnection;
+  const errorCode =
+    typeof metadata.errorCode === "string" && metadata.errorCode.length > 0
+      ? metadata.errorCode
+      : status === "healthy"
+        ? null
+        : "provider_attention_required";
   await Model.findOneAndUpdate(
     { userId },
-    { tokenStatus: status, lastValidatedAt: new Date() },
+    {
+      tokenStatus: status,
+      lastValidatedAt: new Date(),
+      lastErrorCode: errorCode,
+      lastErrorAt: status === "healthy" ? null : new Date()
+    },
     { new: true }
   ).catch(() => null);
 
@@ -90,6 +101,8 @@ export async function ensureValidFacebookConnection(userId: string) {
     if (connection.pages?.length) {
       connection.tokenStatus = "warning";
       connection.lastValidatedAt = new Date();
+      connection.lastErrorCode = "facebook_validation_unavailable";
+      connection.lastErrorAt = new Date();
       await connection.save();
       return connection;
     }
@@ -103,12 +116,18 @@ export async function ensureValidFacebookConnection(userId: string) {
 
   if (!response.ok) {
     if (connection.pages?.length) {
-      await markProviderStatus(userId, "facebook", "warning", { source: "facebook-validate" });
+      await markProviderStatus(userId, "facebook", "warning", {
+        source: "facebook-validate",
+        errorCode: "facebook_token_validation_failed"
+      });
       const freshConnection = await FacebookConnection.findOne({ userId });
       return freshConnection ?? connection;
     }
 
-    await markProviderStatus(userId, "facebook", "expired", { source: "facebook-validate" });
+    await markProviderStatus(userId, "facebook", "expired", {
+      source: "facebook-validate",
+      errorCode: "facebook_reconnect_required"
+    });
     throw new IntegrationConnectionError(
       "Facebook token expired. Please reconnect your account.",
       "reconnect_required",
@@ -118,6 +137,8 @@ export async function ensureValidFacebookConnection(userId: string) {
 
   connection.tokenStatus = "healthy";
   connection.lastValidatedAt = new Date();
+  connection.lastErrorCode = null;
+  connection.lastErrorAt = null;
   await connection.save();
   return connection;
 }
@@ -186,7 +207,10 @@ export async function ensureValidGoogleDriveConnection(userId: string) {
 
   if (needsRefresh) {
     if (!connection.refreshToken) {
-      await markProviderStatus(userId, "google-drive", "expired", { source: "google-missing-refresh-token" });
+      await markProviderStatus(userId, "google-drive", "expired", {
+        source: "google-missing-refresh-token",
+        errorCode: "google_refresh_token_missing"
+      });
       throw new IntegrationConnectionError(
         "Google Drive token expired. Please reconnect your account.",
         "reconnect_required",
@@ -204,6 +228,8 @@ export async function ensureValidGoogleDriveConnection(userId: string) {
 
       connection.tokenStatus = "warning";
       connection.lastValidatedAt = new Date();
+      connection.lastErrorCode = "google_token_refresh_unavailable";
+      connection.lastErrorAt = new Date();
       await connection.save();
       return connection;
 
@@ -222,6 +248,8 @@ export async function ensureValidGoogleDriveConnection(userId: string) {
 
   connection.tokenStatus = "healthy";
   connection.lastValidatedAt = new Date();
+  connection.lastErrorCode = null;
+  connection.lastErrorAt = null;
   await connection.save();
   return connection;
 }

@@ -17,6 +17,16 @@ type DriveImage = {
   webViewLink?: string;
 };
 
+type GoogleDriveStatusDebug = {
+  hasGoogleAccount: boolean;
+  hasRefreshToken: boolean;
+  credentialStatus: string;
+  tokenExpiresAt: string | null;
+  canRefreshToken: boolean;
+  lastVerifiedAt: string | null;
+  lastErrorCode: string | null;
+};
+
 function mapGoogleDriveMessage(code: string, isThai: boolean) {
   const messages: Record<string, string> = {
     missing_code: isThai ? "Google ไม่ส่ง code กลับมา กรุณาลองเชื่อมต่อใหม่" : "Google did not return an authorization code.",
@@ -27,9 +37,18 @@ function mapGoogleDriveMessage(code: string, isThai: boolean) {
     reconnect_required: isThai
       ? "Google Drive ต้องเชื่อมใหม่อีกครั้งเพื่อรีเฟรชสิทธิ์การเข้าถึง"
       : "Google Drive needs to be reconnected to refresh access.",
+    google_reconnect_required: isThai
+      ? "Google Drive ต้องเชื่อมใหม่อีกครั้งเพื่อรีเฟรชสิทธิ์การเข้าถึง"
+      : "Google Drive needs to be reconnected to refresh access.",
     provider_not_connected: isThai
       ? "ยังไม่ได้เชื่อม Google Drive กับระบบนี้"
       : "Google Drive is not connected to this workspace yet.",
+    google_provider_not_connected: isThai
+      ? "ยังไม่ได้เชื่อม Google Drive กับระบบนี้"
+      : "Google Drive is not connected to this workspace yet.",
+    google_refresh_token_missing: isThai
+      ? "Google ไม่ส่ง refresh token กลับมา และระบบไม่มี token เดิมให้ใช้ กรุณากดเชื่อม Google Drive ใหม่อีกครั้ง"
+      : "Google did not return a refresh token and no previous refresh token is available. Please reconnect Google Drive.",
     success: isThai ? "เชื่อมต่อ Google Drive แล้ว" : "Google Drive connected successfully."
   };
 
@@ -45,6 +64,7 @@ export function GoogleDrivePanel() {
   const [images, setImages] = useState<DriveImage[]>([]);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [statusDebug, setStatusDebug] = useState<GoogleDriveStatusDebug | null>(null);
 
   const queryMessage = useMemo(() => {
     if (searchParams.get("success")) {
@@ -56,6 +76,12 @@ export function GoogleDrivePanel() {
   }, [searchParams, isThai]);
 
   async function loadFolders() {
+    const statusResponse = await fetch("/api/google-drive/debug/status", { cache: "no-store" });
+    const statusResult = await statusResponse.json().catch(() => null);
+    if (statusResult?.ok && statusResult.data) {
+      setStatusDebug(statusResult.data);
+    }
+
     const response = await fetch("/api/google-drive/folders", { cache: "no-store" });
     const result = await response.json().catch(() => null);
     if (result.ok) {
@@ -109,6 +135,28 @@ export function GoogleDrivePanel() {
         {loading ? (isThai ? "กำลังเชื่อมต่อ..." : "Connecting...") : t("driveConnect")}
       </button>
       {message ? <p className="muted">{message}</p> : null}
+
+      {statusDebug ? (
+        <div
+          style={{
+            border: "1px solid rgba(15, 23, 42, 0.08)",
+            background: "rgba(255, 255, 255, 0.72)",
+            borderRadius: 16,
+            padding: 16,
+            display: "grid",
+            gap: 6
+          }}
+        >
+          <strong>{isThai ? "สถานะ Google Drive ของบัญชีนี้" : "Google Drive account status"}</strong>
+          <div className="muted" style={{ display: "grid", gap: 4 }}>
+            <span>{isThai ? "เชื่อมบัญชีแล้วหรือไม่" : "Connected account"}: <strong>{statusDebug.hasGoogleAccount ? (isThai ? "ใช่" : "Yes") : isThai ? "ไม่" : "No"}</strong></span>
+            <span>{isThai ? "มี refresh token หรือไม่" : "Has refresh token"}: <strong>{statusDebug.hasRefreshToken ? (isThai ? "ใช่" : "Yes") : isThai ? "ไม่" : "No"}</strong></span>
+            <span>{isThai ? "สถานะ credential" : "Credential status"}: <code>{statusDebug.credentialStatus}</code></span>
+            <span>{isThai ? "รีเฟรช token ได้หรือไม่" : "Can refresh token"}: <strong>{statusDebug.canRefreshToken ? (isThai ? "ได้" : "Yes") : isThai ? "ไม่ได้" : "No"}</strong></span>
+            <span>{isThai ? "รหัส error ล่าสุด" : "Last error code"}: <code>{statusDebug.lastErrorCode || "-"}</code></span>
+          </div>
+        </div>
+      ) : null}
 
       <label className="label">
         {isThai ? "โฟลเดอร์ในไดรฟ์ของฉัน" : t("driveFolder")}

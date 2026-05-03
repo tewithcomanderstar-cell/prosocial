@@ -24,6 +24,9 @@ const facebookConnectionSchema = new Schema(
       default: "unknown"
     },
     lastValidatedAt: { type: Date },
+    lastSyncAt: { type: Date, default: null },
+    lastErrorCode: { type: String, default: null },
+    lastErrorAt: { type: Date, default: null },
     connectedAt: { type: Date, default: Date.now },
     pages: { type: [connectedPageSchema], default: [] }
   },

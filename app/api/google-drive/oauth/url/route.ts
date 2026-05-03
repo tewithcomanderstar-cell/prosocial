@@ -19,6 +19,9 @@ function getCookieOptions() {
 export async function GET(request: Request) {
   try {
     await requireAuth();
+    if (!process.env.GOOGLE_CLIENT_ID) {
+      return jsonError("missing_google_oauth", 500, "missing_env_var");
+    }
     const state = randomUUID();
     const redirectUri = `${getRequestBaseUrl(request)}/api/google-drive/oauth/callback`;
     const store = await cookies();

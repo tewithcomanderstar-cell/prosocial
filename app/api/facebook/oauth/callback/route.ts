@@ -109,7 +109,10 @@ export async function GET(request: Request) {
         connectedAt: new Date(),
         expiresAt: tokenPayload.expires_in ? new Date(Date.now() + tokenPayload.expires_in * 1000) : null,
         tokenStatus: "healthy",
-        lastValidatedAt: new Date()
+        lastValidatedAt: new Date(),
+        lastSyncAt: new Date(),
+        lastErrorCode: null,
+        lastErrorAt: null
       },
       { upsert: true, new: true }
     );
@@ -132,6 +135,14 @@ export async function GET(request: Request) {
 
     try {
       const userId = await requireAuth();
+      await FacebookConnection.findOneAndUpdate(
+        { userId },
+        {
+          tokenStatus: "warning",
+          lastErrorCode: errorCode,
+          lastErrorAt: new Date()
+        }
+      ).catch(() => null);
       await logAction({
         userId,
         type: "error",

@@ -61,10 +61,17 @@ export async function GET(request: Request) {
         connectedAt: new Date(),
         expiresAt: tokenPayload.expires_in ? new Date(Date.now() + tokenPayload.expires_in * 1000) : null,
         tokenStatus: "healthy",
-        lastValidatedAt: new Date()
+        lastValidatedAt: new Date(),
+        lastErrorCode: null,
+        lastErrorAt: null
       },
       { upsert: true, new: true }
     );
+
+    const refreshedConnection = await GoogleDriveConnection.findOne({ userId });
+    if (!refreshedConnection?.refreshToken) {
+      return NextResponse.redirect(`${getAppUrl(request)}/connections/google-drive?error=google_refresh_token_missing`);
+    }
 
     await logAction({
       userId,
@@ -77,6 +84,14 @@ export async function GET(request: Request) {
   } catch (error) {
     try {
       const userId = await requireAuth();
+      await GoogleDriveConnection.findOneAndUpdate(
+        { userId },
+        {
+          tokenStatus: "warning",
+          lastErrorCode: "google_oauth_failed",
+          lastErrorAt: new Date()
+        }
+      ).catch(() => null);
       await logAction({
         userId,
         type: "error",

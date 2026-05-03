@@ -12,6 +12,8 @@ const googleDriveConnectionSchema = new Schema(
       default: "unknown"
     },
     lastValidatedAt: { type: Date },
+    lastErrorCode: { type: String, default: null },
+    lastErrorAt: { type: Date, default: null },
     connectedAt: { type: Date, default: Date.now }
   },
   { timestamps: true }

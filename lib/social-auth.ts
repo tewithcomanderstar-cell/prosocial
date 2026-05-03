@@ -131,16 +131,20 @@ export async function upsertSocialUser(profile: SocialProfile) {
   await connectDb();
 
   const normalizedEmail = profile.email.trim().toLowerCase();
-
-  const updatePayload: Record<string, unknown> = {
+  const emailLookup = new RegExp(`^${normalizedEmail.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i");
+  const baseUpdatePayload: Record<string, unknown> = {
     name: profile.name,
-    email: normalizedEmail,
     provider: profile.provider,
     providerId: profile.providerId
   };
+  const emailUpdatePayload: Record<string, unknown> = {
+    ...baseUpdatePayload,
+    email: normalizedEmail
+  };
 
   if (profile.avatar) {
-    updatePayload.avatar = profile.avatar;
+    baseUpdatePayload.avatar = profile.avatar;
+    emailUpdatePayload.avatar = profile.avatar;
   }
 
   try {
@@ -150,34 +154,35 @@ export async function upsertSocialUser(profile: SocialProfile) {
     });
 
     const emailUser = await User.findOne({
-      email: normalizedEmail
+      email: emailLookup
     });
 
     if (providerUser) {
-      const targetUser =
-        emailUser && String(emailUser._id) !== String(providerUser._id)
-          ? emailUser
-          : providerUser;
+      try {
+        const updatedProviderUser = await User.findByIdAndUpdate(
+          providerUser._id,
+          {
+            $set:
+              emailUser && String(emailUser._id) !== String(providerUser._id)
+                ? baseUpdatePayload
+                : emailUpdatePayload
+          },
+          { new: true }
+        );
 
-      if (emailUser && String(emailUser._id) !== String(providerUser._id)) {
-        await User.findByIdAndUpdate(providerUser._id, {
-          $unset: {
-            provider: 1,
-            providerId: 1
-          }
-        });
-      }
+        if (updatedProviderUser) {
+          return updatedProviderUser;
+        }
+      } catch (providerUpdateError) {
+        const duplicateKey =
+          typeof providerUpdateError === "object" &&
+          providerUpdateError !== null &&
+          "code" in providerUpdateError &&
+          (providerUpdateError as { code?: number }).code === 11000;
 
-      const updatedUser = await User.findByIdAndUpdate(
-        targetUser._id,
-        {
-          $set: updatePayload
-        },
-        { new: true }
-      );
-
-      if (updatedUser) {
-        return updatedUser;
+        if (!duplicateKey) {
+          throw providerUpdateError;
+        }
       }
     }
 
@@ -185,7 +190,7 @@ export async function upsertSocialUser(profile: SocialProfile) {
       const updatedUser = await User.findByIdAndUpdate(
         emailUser._id,
         {
-          $set: updatePayload
+          $set: emailUpdatePayload
         },
         { new: true }
       );
@@ -209,18 +214,22 @@ export async function upsertSocialUser(profile: SocialProfile) {
   } catch (error) {
     const duplicateKey = typeof error === "object" && error !== null && "code" in error && (error as { code?: number }).code === 11000;
     if (duplicateKey) {
-      const existingUser = await User.findOne({
-        $or: [
-          { provider: profile.provider, providerId: profile.providerId },
-          { email: normalizedEmail }
-        ]
-      });
+    const existingUser = await User.findOne({
+      $or: [
+        { provider: profile.provider, providerId: profile.providerId },
+        { email: emailLookup }
+      ]
+    });
       if (existingUser) {
         try {
           const updatedUser = await User.findByIdAndUpdate(
             existingUser._id,
             {
-              $set: updatePayload
+              $set:
+                existingUser.provider === profile.provider &&
+                existingUser.providerId === profile.providerId
+                  ? emailUpdatePayload
+                  : baseUpdatePayload
             },
             { new: true }
           );
@@ -242,7 +251,7 @@ export async function upsertSocialUser(profile: SocialProfile) {
     }
 
     const emailUser = await User.findOne({
-      email: normalizedEmail
+      email: emailLookup
     });
     if (emailUser) {
       return emailUser;

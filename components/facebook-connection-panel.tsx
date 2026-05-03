@@ -37,6 +37,18 @@ type FacebookOAuthDebug = {
   oauthDialogRedirectUri: string | null;
 };
 
+type FacebookStatusDebug = {
+  hasUserFacebookAccount: boolean;
+  facebookAccountStatus: string;
+  connectedPageCount: number;
+  validPageTokenCount: number;
+  expiredCredentialCount: number;
+  missingScopeList: string[];
+  lastSyncAt: string | null;
+  lastErrorCode: string | null;
+  lastValidatedAt: string | null;
+};
+
 function mapFacebookMessage(code: string, isThai: boolean) {
   const messages: Record<string, string> = {
     missing_code: isThai
@@ -108,6 +120,7 @@ export function FacebookConnectionPanel() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authResolved, setAuthResolved] = useState(false);
   const [oauthDebug, setOauthDebug] = useState<FacebookOAuthDebug | null>(null);
+  const [statusDebug, setStatusDebug] = useState<FacebookStatusDebug | null>(null);
 
   const queryMessage = useMemo(() => {
     if (searchParams.get("success")) {
@@ -159,15 +172,31 @@ export function FacebookConnectionPanel() {
         if (debugResult?.ok && debugResult.data) {
           setOauthDebug(debugResult.data);
         }
+
+        const statusResponse = await fetch("/api/facebook/debug/status", {
+          cache: "no-store",
+          credentials: "include"
+        });
+        const statusResult = await statusResponse.json().catch(() => null);
+
+        if (!active) {
+          return;
+        }
+
+        if (statusResult?.ok && statusResult.data) {
+          setStatusDebug(statusResult.data);
+        }
       } else if (meResult?.message === "Unauthorized") {
         setAuthUser(null);
         setPages([]);
         setMessage(mapFacebookMessage("login_required", isThai));
         setOauthDebug(null);
+        setStatusDebug(null);
       } else {
         setAuthUser(null);
         setPages([]);
         setOauthDebug(null);
+        setStatusDebug(null);
         setMessage(
           meResult?.message ||
             (isThai ? "ยังตรวจสอบ session ของผู้ใช้ไม่สำเร็จ" : "Unable to verify the current user session.")
@@ -269,6 +298,29 @@ export function FacebookConnectionPanel() {
           <Link className="button" href="/login?next=%2Fconnections%2Ffacebook">
             {isThai ? "เข้าสู่ระบบ" : "Sign in"}
           </Link>
+        </div>
+      ) : null}
+
+      {statusDebug ? (
+        <div
+          style={{
+            border: "1px solid rgba(15, 23, 42, 0.08)",
+            background: "rgba(255, 255, 255, 0.72)",
+            borderRadius: 16,
+            padding: 16,
+            display: "grid",
+            gap: 6
+          }}
+        >
+          <strong>{isThai ? "สถานะ Facebook ของบัญชีนี้" : "Facebook account status"}</strong>
+          <div className="muted" style={{ display: "grid", gap: 4 }}>
+            <span>{isThai ? "เชื่อม Facebook Login แล้วหรือไม่" : "Has Facebook login"}: <strong>{statusDebug.hasUserFacebookAccount ? (isThai ? "ใช่" : "Yes") : isThai ? "ไม่" : "No"}</strong></span>
+            <span>{isThai ? "สถานะ token" : "Token status"}: <code>{statusDebug.facebookAccountStatus}</code></span>
+            <span>{isThai ? "จำนวนเพจที่เชื่อม" : "Connected pages"}: <code>{statusDebug.connectedPageCount}</code></span>
+            <span>{isThai ? "จำนวนเพจที่มี page token" : "Pages with page token"}: <code>{statusDebug.validPageTokenCount}</code></span>
+            <span>{isThai ? "สิทธิ์ที่ยังขาด" : "Missing scopes"}: <code>{statusDebug.missingScopeList.join(", ") || "-"}</code></span>
+            <span>{isThai ? "รหัส error ล่าสุด" : "Last error code"}: <code>{statusDebug.lastErrorCode || "-"}</code></span>
+          </div>
         </div>
       ) : null}
 

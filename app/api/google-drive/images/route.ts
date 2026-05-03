@@ -23,6 +23,12 @@ export async function GET(request: Request) {
     return jsonOk({ images: payload.files, tokenStatus: connection.tokenStatus ?? "healthy" });
   } catch (error) {
     const normalized = normalizeRouteError(error, "Unable to fetch Google Drive images right now.");
-    return jsonError(normalized.message, normalized.status, normalized.code);
+    const code =
+      normalized.code === "reconnect_required"
+        ? "google_reconnect_required"
+        : normalized.code === "provider_not_connected"
+          ? "google_provider_not_connected"
+          : normalized.code;
+    return jsonError(normalized.message, normalized.status, code);
   }
 }
