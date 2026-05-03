@@ -42,11 +42,14 @@ type FacebookStatusDebug = {
   facebookAccountStatus: string;
   connectedPageCount: number;
   validPageTokenCount: number;
+  pagesReturnedByListEndpoint: number;
   expiredCredentialCount: number;
   missingScopeList: string[];
   lastSyncAt: string | null;
   lastErrorCode: string | null;
   lastValidatedAt: string | null;
+  workspaceIdPresent: boolean;
+  userIdPresent: boolean;
 };
 
 function mapFacebookMessage(code: string, isThai: boolean) {
@@ -75,6 +78,15 @@ function mapFacebookMessage(code: string, isThai: boolean) {
     login_required: isThai ? "กรุณาเข้าสู่ระบบก่อนเชื่อม Facebook" : "Please sign in before connecting Facebook.",
     facebook_not_connected: isThai ? "Workspace นี้ยังไม่ได้เชื่อม Facebook" : "Facebook is not connected to this workspace yet.",
     token_expired: isThai ? "Facebook token หมดอายุแล้ว กรุณาเชื่อมใหม่อีกครั้ง" : "Facebook token expired. Please reconnect your account.",
+    reconnect_required: isThai
+      ? "Facebook token ต้องเชื่อมใหม่อีกครั้ง ระบบจะแสดง cached pages ที่มีอยู่ให้ก่อน"
+      : "Facebook needs to be reconnected. Cached pages are shown for now.",
+    provider_unavailable: isThai
+      ? "ตอนนี้ระบบติดต่อ Facebook ไม่ได้ชั่วคราว ระบบจะแสดง cached pages ที่มีอยู่ให้ก่อน"
+      : "Facebook is temporarily unavailable. Cached pages are shown for now.",
+    destination_disconnected: isThai
+      ? "ยังไม่พบเพจที่เชื่อมไว้ในระบบนี้"
+      : "No connected Facebook Pages were found for this account.",
     success: isThai ? "เชื่อม Facebook Pages สำเร็จแล้ว" : "Facebook Pages connected successfully."
   };
 
@@ -155,7 +167,10 @@ export function FacebookConnectionPanel() {
 
         if (pagesResult?.ok) {
           setPages(pagesResult.data.pages);
-        } else if (pagesResult?.message) {
+          if (pagesResult.data?.warningCode) {
+            setMessage(mapFacebookMessage(pagesResult.data.warningCode, isThai));
+          }
+        } else if (pagesResult?.message && !(pagesResult?.data?.pages?.length > 0)) {
           setMessage(mapFacebookMessage(pagesResult.message, isThai));
         }
 
@@ -318,8 +333,11 @@ export function FacebookConnectionPanel() {
             <span>{isThai ? "สถานะ token" : "Token status"}: <code>{statusDebug.facebookAccountStatus}</code></span>
             <span>{isThai ? "จำนวนเพจที่เชื่อม" : "Connected pages"}: <code>{statusDebug.connectedPageCount}</code></span>
             <span>{isThai ? "จำนวนเพจที่มี page token" : "Pages with page token"}: <code>{statusDebug.validPageTokenCount}</code></span>
+            <span>{isThai ? "จำนวนเพจที่ pages endpoint ส่งกลับ" : "Pages returned by pages endpoint"}: <code>{statusDebug.pagesReturnedByListEndpoint}</code></span>
             <span>{isThai ? "สิทธิ์ที่ยังขาด" : "Missing scopes"}: <code>{statusDebug.missingScopeList.join(", ") || "-"}</code></span>
             <span>{isThai ? "รหัส error ล่าสุด" : "Last error code"}: <code>{statusDebug.lastErrorCode || "-"}</code></span>
+            <span>{isThai ? "มี workspace หรือไม่" : "Workspace present"}: <strong>{statusDebug.workspaceIdPresent ? (isThai ? "มี" : "Yes") : isThai ? "ไม่มี" : "No"}</strong></span>
+            <span>{isThai ? "มี userId หรือไม่" : "UserId present"}: <strong>{statusDebug.userIdPresent ? (isThai ? "มี" : "Yes") : isThai ? "ไม่มี" : "No"}</strong></span>
           </div>
         </div>
       ) : null}

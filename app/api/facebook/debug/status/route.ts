@@ -3,6 +3,7 @@ import { connectDb } from "@/lib/db";
 import { User } from "@/models/User";
 import { FacebookConnection } from "@/models/FacebookConnection";
 import { fetchWithRetry } from "@/lib/services/http";
+import { TeamMember } from "@/models/TeamMember";
 
 const REQUIRED_PAGE_SCOPES = [
   "pages_show_list",
@@ -14,9 +15,10 @@ export async function GET() {
   try {
     await connectDb();
     const userId = await requireAuth();
-    const [user, connection] = await Promise.all([
+    const [user, connection, teamMember] = await Promise.all([
       User.findById(userId),
-      FacebookConnection.findOne({ userId })
+      FacebookConnection.findOne({ userId }),
+      TeamMember.findOne({ userId })
     ]);
 
     let missingScopeList = [...REQUIRED_PAGE_SCOPES];
@@ -40,16 +42,21 @@ export async function GET() {
       } catch {}
     }
 
+    const pagesReturnedByListEndpoint = connection?.pages?.length ?? 0;
+
     return jsonOk({
       hasUserFacebookAccount: Boolean(user?.provider === "facebook" && user?.providerId),
       facebookAccountStatus: connection?.tokenStatus ?? "not_connected",
       connectedPageCount: connection?.pages?.length ?? 0,
       validPageTokenCount: (connection?.pages ?? []).filter((page: { pageAccessToken?: string }) => Boolean(page.pageAccessToken)).length,
+      pagesReturnedByListEndpoint,
       expiredCredentialCount: connection?.tokenStatus === "expired" ? 1 : 0,
       missingScopeList,
       lastSyncAt: connection?.lastSyncAt ?? connection?.updatedAt ?? connection?.connectedAt ?? null,
       lastErrorCode: connection?.lastErrorCode ?? null,
-      lastValidatedAt: connection?.lastValidatedAt ?? null
+      lastValidatedAt: connection?.lastValidatedAt ?? null,
+      workspaceIdPresent: Boolean(teamMember?.workspaceId),
+      userIdPresent: Boolean(userId)
     });
   } catch (error) {
     const normalized = normalizeRouteError(error, "Unable to inspect Facebook status right now.");

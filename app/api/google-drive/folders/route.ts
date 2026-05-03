@@ -1,5 +1,5 @@
 import { jsonError, jsonOk, normalizeRouteError, requireAuth } from "@/lib/api";
-import { fetchDriveFolders } from "@/lib/services/google-drive";
+import { fetchDriveFolders, GoogleDriveServiceError } from "@/lib/services/google-drive";
 import { ensureValidGoogleDriveConnection } from "@/lib/services/integration-auth";
 
 export async function GET() {
@@ -15,11 +15,13 @@ export async function GET() {
       "Unable to verify Google Drive right now. Please try again shortly."
     );
     const code =
-      normalized.code === "reconnect_required"
-        ? "google_reconnect_required"
-        : normalized.code === "provider_not_connected"
-          ? "google_provider_not_connected"
-          : normalized.code;
+      error instanceof GoogleDriveServiceError
+        ? error.code
+        : normalized.code === "reconnect_required"
+          ? "google_reconnect_required"
+          : normalized.code === "provider_not_connected"
+            ? "google_provider_not_connected"
+            : normalized.code;
     return jsonError(normalized.message, normalized.status, code);
   }
 }

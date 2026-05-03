@@ -1,5 +1,5 @@
 import { jsonError, jsonOk, normalizeRouteError, requireAuth } from "@/lib/api";
-import { fetchDriveFolders, fetchImagesFromFolder } from "@/lib/services/google-drive";
+import { fetchDriveFolders, fetchImagesFromFolder, GoogleDriveServiceError } from "@/lib/services/google-drive";
 import { ensureValidGoogleDriveConnection } from "@/lib/services/integration-auth";
 
 export async function GET(request: Request) {
@@ -24,11 +24,13 @@ export async function GET(request: Request) {
   } catch (error) {
     const normalized = normalizeRouteError(error, "Unable to fetch Google Drive images right now.");
     const code =
-      normalized.code === "reconnect_required"
-        ? "google_reconnect_required"
-        : normalized.code === "provider_not_connected"
-          ? "google_provider_not_connected"
-          : normalized.code;
+      error instanceof GoogleDriveServiceError
+        ? error.code
+        : normalized.code === "reconnect_required"
+          ? "google_reconnect_required"
+          : normalized.code === "provider_not_connected"
+            ? "google_provider_not_connected"
+            : normalized.code;
     return jsonError(normalized.message, normalized.status, code);
   }
 }
