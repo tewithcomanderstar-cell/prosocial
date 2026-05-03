@@ -9,17 +9,35 @@ export async function GET(request: Request) {
     const userId = await requireAuth();
     const connection = await GoogleDriveConnection.findOne({ userId });
     const oauthDebug = getOAuthConfigDebug(request);
+    const connected = Boolean(connection?.accessToken || connection?.refreshToken);
+    const hasRefreshToken = Boolean(connection?.refreshToken);
+    const credentialStatus = !connection
+      ? "disconnected"
+      : hasRefreshToken
+        ? connection.tokenStatus ?? "healthy"
+        : "needs_reconnect";
+    const canRefreshToken = Boolean(
+      hasRefreshToken && process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+    );
+    const failingEndpoint =
+      connection?.lastErrorCode?.startsWith("google_token") || connection?.lastErrorCode?.includes("redirect")
+        ? "oauth_callback"
+        : connection?.lastErrorCode?.includes("fetch")
+          ? "drive_list"
+          : connection?.lastErrorCode?.includes("refresh")
+            ? "token_refresh"
+            : null;
 
     return jsonOk({
-      hasGoogleAccount: Boolean(connection),
-      hasRefreshToken: Boolean(connection?.refreshToken),
-      credentialStatus: connection?.tokenStatus ?? "not_connected",
+      connected,
+      hasGoogleAccount: connected,
+      hasRefreshToken,
+      credentialStatus,
       tokenExpiresAt: connection?.expiresAt ?? null,
-      canRefreshToken: Boolean(
-        connection?.refreshToken && process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
-      ),
+      canRefreshToken,
       lastVerifiedAt: connection?.lastValidatedAt ?? null,
       lastErrorCode: connection?.lastErrorCode ?? null,
+      failingEndpoint,
       googleRedirectUri: oauthDebug.googleDriveRedirectUri,
       hasGoogleClientId: oauthDebug.hasGoogleClientId,
       hasGoogleClientSecret: oauthDebug.hasGoogleClientSecret

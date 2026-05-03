@@ -9,6 +9,7 @@ type ConnectedPage = {
   pageId: string;
   name: string;
   category?: string;
+  profilePictureUrl?: string | null;
 };
 
 type AuthUser = {
@@ -43,14 +44,52 @@ type FacebookStatusDebug = {
   connectedPageCount: number;
   validPageTokenCount: number;
   pagesReturnedByListEndpoint: number;
+  responseShape: string;
   expiredCredentialCount: number;
   missingScopeList: string[];
   lastSyncAt: string | null;
   lastErrorCode: string | null;
+  lastPagesErrorCode: string | null;
   lastValidatedAt: string | null;
   workspaceIdPresent: boolean;
   userIdPresent: boolean;
 };
+
+function extractFacebookPagesPayload(result: any): {
+  pages: ConnectedPage[];
+  count: number;
+  warning: string | null;
+  source: string | null;
+  responseKeys: string[];
+} {
+  const responseKeys = result && typeof result === "object" ? Object.keys(result) : [];
+  const data = result?.data && typeof result.data === "object" ? result.data : result;
+  const rawPages = Array.isArray(data?.pages)
+    ? data.pages
+    : Array.isArray(data?.destinations)
+      ? data.destinations
+      : Array.isArray(result?.pages)
+        ? result.pages
+        : [];
+
+  const pages = rawPages
+    .filter((page: any) => page && typeof page === "object")
+    .map((page: any) => ({
+      pageId: String(page.pageId ?? page.id ?? ""),
+      name: String(page.name ?? ""),
+      category: page.category ? String(page.category) : undefined,
+      profilePictureUrl: page.profilePictureUrl ?? null
+    }))
+    .filter((page: ConnectedPage) => page.pageId && page.name);
+
+  return {
+    pages,
+    count: Number(data?.count ?? pages.length),
+    warning: typeof data?.warning === "string" ? data.warning : typeof data?.warningCode === "string" ? data.warningCode : null,
+    source: typeof data?.source === "string" ? data.source : null,
+    responseKeys
+  };
+}
 
 function mapFacebookMessage(code: string, isThai: boolean) {
   const messages: Record<string, string> = {
@@ -166,12 +205,21 @@ export function FacebookConnectionPanel() {
         }
 
         if (pagesResult?.ok) {
-          setPages(pagesResult.data.pages);
-          if (pagesResult.data?.warningCode) {
-            setMessage(mapFacebookMessage(pagesResult.data.warningCode, isThai));
+          const parsed = extractFacebookPagesPayload(pagesResult);
+          setPages(parsed.pages);
+          if (parsed.warning) {
+            setMessage(mapFacebookMessage(parsed.warning, isThai));
           }
-        } else if (pagesResult?.message && !(pagesResult?.data?.pages?.length > 0)) {
+        } else if (pagesResult?.message) {
+          const parsed = extractFacebookPagesPayload(pagesResult);
+          if (parsed.pages.length > 0) {
+            setPages(parsed.pages);
+            if (parsed.warning || pagesResult?.code || pagesResult?.message) {
+              setMessage(mapFacebookMessage(parsed.warning || pagesResult.code || pagesResult.message, isThai));
+            }
+          } else {
           setMessage(mapFacebookMessage(pagesResult.message, isThai));
+          }
         }
 
         const debugResponse = await fetch("/api/facebook/oauth/debug", {
@@ -334,8 +382,10 @@ export function FacebookConnectionPanel() {
             <span>{isThai ? "จำนวนเพจที่เชื่อม" : "Connected pages"}: <code>{statusDebug.connectedPageCount}</code></span>
             <span>{isThai ? "จำนวนเพจที่มี page token" : "Pages with page token"}: <code>{statusDebug.validPageTokenCount}</code></span>
             <span>{isThai ? "จำนวนเพจที่ pages endpoint ส่งกลับ" : "Pages returned by pages endpoint"}: <code>{statusDebug.pagesReturnedByListEndpoint}</code></span>
+            <span>{isThai ? "response shape ของ pages endpoint" : "Pages endpoint response shape"}: <code>{statusDebug.responseShape}</code></span>
             <span>{isThai ? "สิทธิ์ที่ยังขาด" : "Missing scopes"}: <code>{statusDebug.missingScopeList.join(", ") || "-"}</code></span>
             <span>{isThai ? "รหัส error ล่าสุด" : "Last error code"}: <code>{statusDebug.lastErrorCode || "-"}</code></span>
+            <span>{isThai ? "รหัส error ล่าสุดของ pages endpoint" : "Last pages error code"}: <code>{statusDebug.lastPagesErrorCode || "-"}</code></span>
             <span>{isThai ? "มี workspace หรือไม่" : "Workspace present"}: <strong>{statusDebug.workspaceIdPresent ? (isThai ? "มี" : "Yes") : isThai ? "ไม่มี" : "No"}</strong></span>
             <span>{isThai ? "มี userId หรือไม่" : "UserId present"}: <strong>{statusDebug.userIdPresent ? (isThai ? "มี" : "Yes") : isThai ? "ไม่มี" : "No"}</strong></span>
           </div>

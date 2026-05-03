@@ -65,16 +65,21 @@ export async function GET() {
         facebookAccountPresent: true,
         connectedPageCount: storedConnection.pages?.length ?? 0,
         pagesReturnedCount: pages.length,
+        responseKeys: ["pages", "count", "warning", "source", "tokenStatus"],
         fallbackToCachedPages,
-        warningCode,
+        warning: warningCode,
+        errorCode: warningCode,
         queryFilter: { userId }
       }
     });
 
     return jsonOk({
       pages,
+      count: pages.length,
       tokenStatus: connection?.tokenStatus ?? "unknown",
+      warning: warningCode,
       warningCode,
+      source: fallbackToCachedPages ? "database_cache" : "validated_connection",
       fallbackToCachedPages
     });
   } catch (error) {

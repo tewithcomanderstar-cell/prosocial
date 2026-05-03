@@ -20,7 +20,7 @@ export async function GET() {
         : normalized.code === "reconnect_required"
           ? "google_reconnect_required"
           : normalized.code === "provider_not_connected"
-            ? "google_provider_not_connected"
+            ? "google_drive_not_connected"
             : normalized.code;
     return jsonError(normalized.message, normalized.status, code);
   }

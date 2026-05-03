@@ -50,10 +50,12 @@ export async function GET() {
       connectedPageCount: connection?.pages?.length ?? 0,
       validPageTokenCount: (connection?.pages ?? []).filter((page: { pageAccessToken?: string }) => Boolean(page.pageAccessToken)).length,
       pagesReturnedByListEndpoint,
+      responseShape: "data.pages",
       expiredCredentialCount: connection?.tokenStatus === "expired" ? 1 : 0,
       missingScopeList,
       lastSyncAt: connection?.lastSyncAt ?? connection?.updatedAt ?? connection?.connectedAt ?? null,
       lastErrorCode: connection?.lastErrorCode ?? null,
+      lastPagesErrorCode: connection?.lastErrorCode ?? null,
       lastValidatedAt: connection?.lastValidatedAt ?? null,
       workspaceIdPresent: Boolean(teamMember?.workspaceId),
       userIdPresent: Boolean(userId)

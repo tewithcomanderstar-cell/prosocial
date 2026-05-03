@@ -18,6 +18,7 @@ type DriveImage = {
 };
 
 type GoogleDriveStatusDebug = {
+  connected: boolean;
   hasGoogleAccount: boolean;
   hasRefreshToken: boolean;
   credentialStatus: string;
@@ -25,6 +26,7 @@ type GoogleDriveStatusDebug = {
   canRefreshToken: boolean;
   lastVerifiedAt: string | null;
   lastErrorCode: string | null;
+  failingEndpoint: string | null;
   googleRedirectUri: string | null;
   hasGoogleClientId: boolean;
   hasGoogleClientSecret: boolean;
@@ -53,6 +55,9 @@ function mapGoogleDriveMessage(code: string, isThai: boolean) {
       ? "ยังไม่ได้เชื่อม Google Drive กับระบบนี้"
       : "Google Drive is not connected to this workspace yet.",
     google_provider_not_connected: isThai
+      ? "ยังไม่ได้เชื่อม Google Drive กับระบบนี้"
+      : "Google Drive is not connected to this workspace yet.",
+    google_drive_not_connected: isThai
       ? "ยังไม่ได้เชื่อม Google Drive กับระบบนี้"
       : "Google Drive is not connected to this workspace yet.",
     google_refresh_token_missing: isThai
@@ -107,6 +112,12 @@ export function GoogleDrivePanel() {
     const statusResult = await statusResponse.json().catch(() => null);
     if (statusResult?.ok && statusResult.data) {
       setStatusDebug(statusResult.data);
+      if (!statusResult.data.connected) {
+        setFolders([]);
+        setImages([]);
+        setMessage(mapGoogleDriveMessage("google_drive_not_connected", isThai));
+        return false;
+      }
     }
 
     const response = await fetch("/api/google-drive/folders", { cache: "no-store" });
@@ -182,6 +193,7 @@ export function GoogleDrivePanel() {
             <span>{isThai ? "มี refresh token หรือไม่" : "Has refresh token"}: <strong>{statusDebug.hasRefreshToken ? (isThai ? "ใช่" : "Yes") : isThai ? "ไม่" : "No"}</strong></span>
             <span>{isThai ? "สถานะ credential" : "Credential status"}: <code>{statusDebug.credentialStatus}</code></span>
             <span>{isThai ? "รีเฟรช token ได้หรือไม่" : "Can refresh token"}: <strong>{statusDebug.canRefreshToken ? (isThai ? "ได้" : "Yes") : isThai ? "ไม่ได้" : "No"}</strong></span>
+            <span>{isThai ? "endpoint ที่ล้มล่าสุด" : "Last failing endpoint"}: <code>{statusDebug.failingEndpoint || "-"}</code></span>
             <span>{isThai ? "Google redirect URI ที่ใช้อยู่" : "Google redirect URI"}: <code>{statusDebug.googleRedirectUri || "-"}</code></span>
             <span>{isThai ? "มี GOOGLE_CLIENT_ID หรือไม่" : "Has GOOGLE_CLIENT_ID"}: <strong>{statusDebug.hasGoogleClientId ? (isThai ? "ใช่" : "Yes") : isThai ? "ไม่" : "No"}</strong></span>
             <span>{isThai ? "มี GOOGLE_CLIENT_SECRET หรือไม่" : "Has GOOGLE_CLIENT_SECRET"}: <strong>{statusDebug.hasGoogleClientSecret ? (isThai ? "ใช่" : "Yes") : isThai ? "ไม่" : "No"}</strong></span>
