@@ -134,6 +134,10 @@ export function GoogleDrivePanel() {
     const result = await response.json().catch(() => null);
     if (result?.ok) {
       setFolders(result.data.folders);
+      setMessage("");
+      if (searchParams.get("error")) {
+        window.history.replaceState(null, "", window.location.pathname);
+      }
       return true;
     }
 

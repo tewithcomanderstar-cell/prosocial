@@ -227,6 +227,9 @@ export function FacebookConnectionPanel() {
           setPages(parsed.pages);
           if (parsed.pages.length > 0) {
             setMessage("");
+            if (searchParams.get("error")) {
+              window.history.replaceState(null, "", window.location.pathname);
+            }
           } else if (!queryMessage) {
             setMessage(mapFacebookMessage("destination_disconnected", isThai));
           }
@@ -240,6 +243,9 @@ export function FacebookConnectionPanel() {
           if (parsed.pages.length > 0) {
             setPages(parsed.pages);
             setMessage("");
+            if (searchParams.get("error")) {
+              window.history.replaceState(null, "", window.location.pathname);
+            }
             setPagesWarning(mapFacebookMessage(parsed.warning || pagesResult.code || pagesResult.message, isThai));
           } else {
             setPages([]);
@@ -251,6 +257,9 @@ export function FacebookConnectionPanel() {
           if (parsed.pages.length > 0) {
             setPages(parsed.pages);
             setMessage("");
+            if (searchParams.get("error")) {
+              window.history.replaceState(null, "", window.location.pathname);
+            }
             if (parsed.warning) {
               setPagesWarning(mapFacebookMessage(parsed.warning, isThai));
             } else {

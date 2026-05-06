@@ -6,7 +6,7 @@ import { resolveCurrentWorkspaceOrCreate } from "@/lib/services/workspace";
 export async function GET(request: Request) {
   try {
     const userId = await requireAuth();
-    await resolveCurrentWorkspaceOrCreate(userId);
+    await resolveCurrentWorkspaceOrCreate(userId).catch(() => null);
     const connection = await ensureValidGoogleDriveConnection(userId);
 
     const url = new URL(request.url);

@@ -45,7 +45,7 @@ export async function GET(request: Request) {
   try {
     await connectDb();
     const userId = await requireAuth();
-    const workspace = await resolveCurrentWorkspaceOrCreate(userId);
+    const workspace = await resolveCurrentWorkspaceOrCreate(userId).catch(() => null);
     const url = new URL(request.url);
     const code = url.searchParams.get("code");
     const returnedState = url.searchParams.get("state");
@@ -67,7 +67,7 @@ export async function GET(request: Request) {
         { userId },
         {
           userId,
-          workspaceId: workspace._id,
+          ...(workspace?._id ? { workspaceId: workspace._id } : {}),
           accessToken: tokenPayload.access_token,
           refreshToken: tokenPayload.refresh_token || existingConnection?.refreshToken || undefined,
           connectedAt: new Date(),

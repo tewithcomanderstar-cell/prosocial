@@ -6,7 +6,7 @@ import { resolveCurrentWorkspaceOrCreate } from "@/lib/services/workspace";
 export async function GET() {
   try {
     const userId = await requireAuth();
-    await resolveCurrentWorkspaceOrCreate(userId);
+    await resolveCurrentWorkspaceOrCreate(userId).catch(() => null);
     const connection = await ensureValidGoogleDriveConnection(userId);
     const payload = await fetchDriveFolders(connection.accessToken, "root");
     const folders = [{ id: "root", name: "My Drive" }, ...payload.files];

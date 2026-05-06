@@ -21,7 +21,7 @@ function getCookieOptions() {
 export async function GET(request: Request) {
   try {
     const userId = await requireAuth();
-    await resolveCurrentWorkspaceOrCreate(userId);
+    await resolveCurrentWorkspaceOrCreate(userId).catch(() => null);
     const state = randomUUID();
     const redirectUri = `${getRequestBaseUrl(request)}/api/google-drive/oauth/callback`;
     const store = await cookies();
