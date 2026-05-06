@@ -61,16 +61,21 @@ function extractFacebookPagesPayload(result: any): {
   warning: string | null;
   source: string | null;
   responseKeys: string[];
+  responseShape: string;
 } {
   const responseKeys = result && typeof result === "object" ? Object.keys(result) : [];
   const data = result?.data && typeof result.data === "object" ? result.data : result;
-  const rawPages = Array.isArray(data?.pages)
+  const rawPages = Array.isArray(result)
+    ? result
+    : Array.isArray(data?.pages)
     ? data.pages
     : Array.isArray(data?.destinations)
       ? data.destinations
       : Array.isArray(result?.pages)
         ? result.pages
-        : [];
+        : Array.isArray(result?.destinations)
+          ? result.destinations
+          : [];
 
   const pages = rawPages
     .filter((page: any) => page && typeof page === "object")
@@ -87,7 +92,18 @@ function extractFacebookPagesPayload(result: any): {
     count: Number(data?.count ?? pages.length),
     warning: typeof data?.warning === "string" ? data.warning : typeof data?.warningCode === "string" ? data.warningCode : null,
     source: typeof data?.source === "string" ? data.source : null,
-    responseKeys
+    responseKeys,
+    responseShape: Array.isArray(result)
+      ? "array"
+      : Array.isArray(data?.pages)
+        ? "data.pages"
+        : Array.isArray(data?.destinations)
+          ? "data.destinations"
+          : Array.isArray(result?.pages)
+            ? "pages"
+            : Array.isArray(result?.destinations)
+              ? "destinations"
+              : "unknown"
   };
 }
 
@@ -172,6 +188,7 @@ export function FacebookConnectionPanel() {
   const [authResolved, setAuthResolved] = useState(false);
   const [oauthDebug, setOauthDebug] = useState<FacebookOAuthDebug | null>(null);
   const [statusDebug, setStatusDebug] = useState<FacebookStatusDebug | null>(null);
+  const [pagesWarning, setPagesWarning] = useState("");
 
   const queryMessage = useMemo(() => {
     if (searchParams.get("success")) {
@@ -196,6 +213,7 @@ export function FacebookConnectionPanel() {
       if (meResult?.ok && meResult.data?.user) {
         setAuthUser(meResult.data.user);
         setMessage(queryMessage);
+        setPagesWarning("");
 
         const pagesResponse = await fetch("/api/facebook/pages", { cache: "no-store", credentials: "include" });
         const pagesResult = await pagesResponse.json().catch(() => null);
@@ -208,17 +226,24 @@ export function FacebookConnectionPanel() {
           const parsed = extractFacebookPagesPayload(pagesResult);
           setPages(parsed.pages);
           if (parsed.warning) {
-            setMessage(mapFacebookMessage(parsed.warning, isThai));
+            setPagesWarning(mapFacebookMessage(parsed.warning, isThai));
           }
         } else if (pagesResult?.message) {
           const parsed = extractFacebookPagesPayload(pagesResult);
           if (parsed.pages.length > 0) {
             setPages(parsed.pages);
-            if (parsed.warning || pagesResult?.code || pagesResult?.message) {
-              setMessage(mapFacebookMessage(parsed.warning || pagesResult.code || pagesResult.message, isThai));
-            }
+            setPagesWarning(mapFacebookMessage(parsed.warning || pagesResult.code || pagesResult.message, isThai));
           } else {
-          setMessage(mapFacebookMessage(pagesResult.message, isThai));
+            setPagesWarning("");
+            setMessage(mapFacebookMessage(pagesResult.message, isThai));
+          }
+        } else {
+          const parsed = extractFacebookPagesPayload(pagesResult);
+          if (parsed.pages.length > 0) {
+            setPages(parsed.pages);
+            if (parsed.warning) {
+              setPagesWarning(mapFacebookMessage(parsed.warning, isThai));
+            }
           }
         }
 
@@ -252,12 +277,14 @@ export function FacebookConnectionPanel() {
       } else if (meResult?.message === "Unauthorized") {
         setAuthUser(null);
         setPages([]);
+        setPagesWarning("");
         setMessage(mapFacebookMessage("login_required", isThai));
         setOauthDebug(null);
         setStatusDebug(null);
       } else {
         setAuthUser(null);
         setPages([]);
+        setPagesWarning("");
         setOauthDebug(null);
         setStatusDebug(null);
         setMessage(
@@ -266,7 +293,9 @@ export function FacebookConnectionPanel() {
         );
       }
 
-      setAuthResolved(true);
+      if (active) {
+        setAuthResolved(true);
+      }
     }
 
     load();
@@ -396,7 +425,8 @@ export function FacebookConnectionPanel() {
         {loading ? (isThai ? "กำลังเชื่อม..." : "Connecting...") : t("facebookConnect")}
       </button>
 
-      {message ? <p className="muted">{message}</p> : null}
+      {message && pages.length === 0 ? <p className="muted">{message}</p> : null}
+      {pagesWarning ? <p className="muted">{pagesWarning}</p> : null}
 
       {showResetConnection ? (
         <button

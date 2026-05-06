@@ -10,6 +10,7 @@ import {
   subscribePageToWebhook
 } from "@/lib/services/facebook";
 import { logAction } from "@/lib/services/logging";
+import { resolveCurrentWorkspaceOrCreate } from "@/lib/services/workspace";
 
 const FACEBOOK_PAGE_STATE_COOKIE = "facebook_pages_oauth_state";
 const FACEBOOK_PAGE_REDIRECT_COOKIE = "facebook_pages_redirect_uri";
@@ -70,6 +71,7 @@ export async function GET(request: Request) {
   try {
     await connectDb();
     const userId = await requireAuth();
+    const workspace = await resolveCurrentWorkspaceOrCreate(userId);
     const url = new URL(request.url);
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || url.origin;
     const code = url.searchParams.get("code");
@@ -104,6 +106,7 @@ export async function GET(request: Request) {
       { userId },
       {
         userId,
+        workspaceId: workspace._id,
         accessToken: tokenPayload.access_token,
         pages,
         connectedAt: new Date(),

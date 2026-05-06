@@ -1,10 +1,12 @@
 import { jsonError, jsonOk, normalizeRouteError, requireAuth } from "@/lib/api";
 import { fetchDriveFolders, fetchImagesFromFolder, GoogleDriveServiceError } from "@/lib/services/google-drive";
 import { ensureValidGoogleDriveConnection } from "@/lib/services/integration-auth";
+import { resolveCurrentWorkspaceOrCreate } from "@/lib/services/workspace";
 
 export async function GET(request: Request) {
   try {
     const userId = await requireAuth();
+    await resolveCurrentWorkspaceOrCreate(userId);
     const connection = await ensureValidGoogleDriveConnection(userId);
 
     const url = new URL(request.url);

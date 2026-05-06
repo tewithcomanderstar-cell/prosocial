@@ -5,6 +5,7 @@ import { connectDb } from "@/lib/db";
 import { GoogleDriveConnection } from "@/models/GoogleDriveConnection";
 import { exchangeGoogleCode, GoogleDriveServiceError } from "@/lib/services/google-drive";
 import { logAction } from "@/lib/services/logging";
+import { resolveCurrentWorkspaceOrCreate } from "@/lib/services/workspace";
 
 const GOOGLE_DRIVE_STATE_COOKIE = "google_drive_oauth_state";
 const GOOGLE_DRIVE_REDIRECT_COOKIE = "google_drive_redirect_uri";
@@ -44,6 +45,7 @@ export async function GET(request: Request) {
   try {
     await connectDb();
     const userId = await requireAuth();
+    const workspace = await resolveCurrentWorkspaceOrCreate(userId);
     const url = new URL(request.url);
     const code = url.searchParams.get("code");
     const returnedState = url.searchParams.get("state");
@@ -65,6 +67,7 @@ export async function GET(request: Request) {
         { userId },
         {
           userId,
+          workspaceId: workspace._id,
           accessToken: tokenPayload.access_token,
           refreshToken: tokenPayload.refresh_token || existingConnection?.refreshToken || undefined,
           connectedAt: new Date(),

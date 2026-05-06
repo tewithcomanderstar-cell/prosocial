@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { jsonError, jsonOk, normalizeRouteError, requireAuth } from "@/lib/api";
 import { getRequestBaseUrl } from "@/lib/social-auth";
 import { getGoogleOAuthUrl } from "@/lib/services/google-drive";
+import { resolveCurrentWorkspaceOrCreate } from "@/lib/services/workspace";
 
 const GOOGLE_DRIVE_STATE_COOKIE = "google_drive_oauth_state";
 const GOOGLE_DRIVE_REDIRECT_COOKIE = "google_drive_redirect_uri";
@@ -19,7 +20,8 @@ function getCookieOptions() {
 
 export async function GET(request: Request) {
   try {
-    await requireAuth();
+    const userId = await requireAuth();
+    await resolveCurrentWorkspaceOrCreate(userId);
     const state = randomUUID();
     const redirectUri = `${getRequestBaseUrl(request)}/api/google-drive/oauth/callback`;
     const store = await cookies();

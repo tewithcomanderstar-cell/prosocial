@@ -15,6 +15,7 @@ const connectedPageSchema = new Schema(
 const facebookConnectionSchema = new Schema(
   {
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    workspaceId: { type: Schema.Types.ObjectId, ref: "Workspace", default: null, index: true },
     accessToken: { type: String, required: true },
     refreshToken: { type: String },
     expiresAt: { type: Date },

@@ -3,7 +3,8 @@ import { connectDb } from "@/lib/db";
 import { User } from "@/models/User";
 import { FacebookConnection } from "@/models/FacebookConnection";
 import { fetchWithRetry } from "@/lib/services/http";
-import { TeamMember } from "@/models/TeamMember";
+import { resolveCurrentWorkspaceOrCreate } from "@/lib/services/workspace";
+import { getResolvedFacebookPagesState } from "@/lib/services/facebook-pages-state";
 
 const REQUIRED_PAGE_SCOPES = [
   "pages_show_list",
@@ -15,10 +16,11 @@ export async function GET() {
   try {
     await connectDb();
     const userId = await requireAuth();
-    const [user, connection, teamMember] = await Promise.all([
+    const workspace = await resolveCurrentWorkspaceOrCreate(userId);
+    const [user, connection, pagesState] = await Promise.all([
       User.findById(userId),
       FacebookConnection.findOne({ userId }),
-      TeamMember.findOne({ userId })
+      getResolvedFacebookPagesState(userId).catch(() => null)
     ]);
 
     let missingScopeList = [...REQUIRED_PAGE_SCOPES];
@@ -42,7 +44,7 @@ export async function GET() {
       } catch {}
     }
 
-    const pagesReturnedByListEndpoint = connection?.pages?.length ?? 0;
+    const pagesReturnedByListEndpoint = pagesState?.count ?? 0;
 
     return jsonOk({
       hasUserFacebookAccount: Boolean(user?.provider === "facebook" && user?.providerId),
@@ -50,14 +52,14 @@ export async function GET() {
       connectedPageCount: connection?.pages?.length ?? 0,
       validPageTokenCount: (connection?.pages ?? []).filter((page: { pageAccessToken?: string }) => Boolean(page.pageAccessToken)).length,
       pagesReturnedByListEndpoint,
-      responseShape: "data.pages",
+      responseShape: pagesState?.responseShape ?? "data.pages",
       expiredCredentialCount: connection?.tokenStatus === "expired" ? 1 : 0,
       missingScopeList,
       lastSyncAt: connection?.lastSyncAt ?? connection?.updatedAt ?? connection?.connectedAt ?? null,
       lastErrorCode: connection?.lastErrorCode ?? null,
-      lastPagesErrorCode: connection?.lastErrorCode ?? null,
+      lastPagesErrorCode: pagesState?.lastPagesErrorCode ?? connection?.lastErrorCode ?? null,
       lastValidatedAt: connection?.lastValidatedAt ?? null,
-      workspaceIdPresent: Boolean(teamMember?.workspaceId),
+      workspaceIdPresent: Boolean(workspace?._id),
       userIdPresent: Boolean(userId)
     });
   } catch (error) {

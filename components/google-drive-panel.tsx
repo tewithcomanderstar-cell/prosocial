@@ -30,6 +30,7 @@ type GoogleDriveStatusDebug = {
   googleRedirectUri: string | null;
   hasGoogleClientId: boolean;
   hasGoogleClientSecret: boolean;
+  workspaceIdPresent?: boolean;
 };
 
 function mapGoogleDriveMessage(code: string, isThai: boolean) {
@@ -118,6 +119,9 @@ export function GoogleDrivePanel() {
         setMessage(mapGoogleDriveMessage("google_drive_not_connected", isThai));
         return false;
       }
+    } else if (statusResult?.code || statusResult?.message) {
+      setMessage(mapGoogleDriveMessage(statusResult.code || statusResult.message, isThai));
+      return false;
     }
 
     const response = await fetch("/api/google-drive/folders", { cache: "no-store" });
@@ -197,6 +201,7 @@ export function GoogleDrivePanel() {
             <span>{isThai ? "Google redirect URI ที่ใช้อยู่" : "Google redirect URI"}: <code>{statusDebug.googleRedirectUri || "-"}</code></span>
             <span>{isThai ? "มี GOOGLE_CLIENT_ID หรือไม่" : "Has GOOGLE_CLIENT_ID"}: <strong>{statusDebug.hasGoogleClientId ? (isThai ? "ใช่" : "Yes") : isThai ? "ไม่" : "No"}</strong></span>
             <span>{isThai ? "มี GOOGLE_CLIENT_SECRET หรือไม่" : "Has GOOGLE_CLIENT_SECRET"}: <strong>{statusDebug.hasGoogleClientSecret ? (isThai ? "ใช่" : "Yes") : isThai ? "ไม่" : "No"}</strong></span>
+            <span>{isThai ? "มี workspace หรือไม่" : "Workspace present"}: <strong>{statusDebug.workspaceIdPresent ? (isThai ? "มี" : "Yes") : isThai ? "ไม่มี" : "No"}</strong></span>
             <span>{isThai ? "รหัส error ล่าสุด" : "Last error code"}: <code>{statusDebug.lastErrorCode || "-"}</code></span>
           </div>
         </div>
