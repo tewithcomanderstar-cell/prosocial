@@ -14,6 +14,7 @@ export class IntegrationConnectionError extends RouteError {
       | "provider_not_connected"
       | "credential_invalid"
       | "reconnect_required"
+      | "google_refresh_token_missing"
       | "destination_disconnected"
       | "provider_unavailable",
     status = 400
@@ -202,8 +203,20 @@ export async function ensureValidGoogleDriveConnection(userId: string) {
     throw new IntegrationConnectionError("Google Drive is not connected.", "provider_not_connected", 404);
   }
 
+  if (!connection.refreshToken) {
+    await markProviderStatus(userId, "google-drive", "warning", {
+      source: "google-missing-refresh-token",
+      errorCode: "google_refresh_token_missing"
+    });
+    throw new IntegrationConnectionError(
+      "Google Drive needs a refresh token. Please reconnect Google Drive.",
+      "google_refresh_token_missing",
+      409
+    );
+  }
+
   const expiresAtMs = connection.expiresAt ? new Date(connection.expiresAt).getTime() : null;
-  const needsRefresh = Boolean(expiresAtMs && expiresAtMs - Date.now() <= 5 * 60 * 1000);
+  const needsRefresh = !connection.accessToken || Boolean(expiresAtMs && expiresAtMs - Date.now() <= 5 * 60 * 1000);
 
   if (needsRefresh) {
     if (!connection.refreshToken) {

@@ -80,8 +80,8 @@ function extractFacebookPagesPayload(result: any): {
   const pages = rawPages
     .filter((page: any) => page && typeof page === "object")
     .map((page: any) => ({
-      pageId: String(page.pageId ?? page.id ?? ""),
-      name: String(page.name ?? ""),
+      pageId: String(page.pageId ?? page.externalPageId ?? page.externalId ?? page.id ?? ""),
+      name: String(page.name ?? page.pageName ?? page.displayName ?? ""),
       category: page.category ? String(page.category) : undefined,
       profilePictureUrl: page.profilePictureUrl ?? null
     }))
@@ -225,15 +225,24 @@ export function FacebookConnectionPanel() {
         if (pagesResult?.ok) {
           const parsed = extractFacebookPagesPayload(pagesResult);
           setPages(parsed.pages);
+          if (parsed.pages.length > 0) {
+            setMessage("");
+          } else if (!queryMessage) {
+            setMessage(mapFacebookMessage("destination_disconnected", isThai));
+          }
           if (parsed.warning) {
             setPagesWarning(mapFacebookMessage(parsed.warning, isThai));
+          } else {
+            setPagesWarning("");
           }
         } else if (pagesResult?.message) {
           const parsed = extractFacebookPagesPayload(pagesResult);
           if (parsed.pages.length > 0) {
             setPages(parsed.pages);
+            setMessage("");
             setPagesWarning(mapFacebookMessage(parsed.warning || pagesResult.code || pagesResult.message, isThai));
           } else {
+            setPages([]);
             setPagesWarning("");
             setMessage(mapFacebookMessage(pagesResult.message, isThai));
           }
@@ -241,9 +250,14 @@ export function FacebookConnectionPanel() {
           const parsed = extractFacebookPagesPayload(pagesResult);
           if (parsed.pages.length > 0) {
             setPages(parsed.pages);
+            setMessage("");
             if (parsed.warning) {
               setPagesWarning(mapFacebookMessage(parsed.warning, isThai));
+            } else {
+              setPagesWarning("");
             }
+          } else {
+            setPages([]);
           }
         }
 

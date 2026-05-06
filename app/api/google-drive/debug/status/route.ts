@@ -8,17 +8,17 @@ export async function GET(request: Request) {
   try {
     await connectDb();
     const userId = await requireAuth();
-    const workspace = await resolveCurrentWorkspaceOrCreate(userId);
+    const workspace = await resolveCurrentWorkspaceOrCreate(userId).catch(() => null);
     const connection = await GoogleDriveConnection.findOne({ userId });
     const oauthDebug = getOAuthConfigDebug(request);
-    const connected = Boolean(connection);
     const hasRefreshToken = Boolean(connection?.refreshToken);
     const hasUsableAccessToken = Boolean(connection?.accessToken);
+    const connected = Boolean(connection && hasRefreshToken);
     const credentialStatus = !connection
       ? "disconnected"
-      : !hasRefreshToken && !hasUsableAccessToken
-        ? "disconnected"
-        : !hasRefreshToken
+      : !hasRefreshToken
+        ? "needs_reconnect"
+        : !hasUsableAccessToken
           ? "needs_reconnect"
           : connection.tokenStatus && connection.tokenStatus !== "unknown"
             ? connection.tokenStatus
@@ -37,7 +37,7 @@ export async function GET(request: Request) {
 
     return jsonOk({
       connected,
-      hasGoogleAccount: connected,
+      hasGoogleAccount: Boolean(connection),
       hasRefreshToken,
       credentialStatus,
       tokenExpiresAt: connection?.expiresAt ?? null,
@@ -48,7 +48,8 @@ export async function GET(request: Request) {
       googleRedirectUri: oauthDebug.googleDriveRedirectUri,
       hasGoogleClientId: oauthDebug.hasGoogleClientId,
       hasGoogleClientSecret: oauthDebug.hasGoogleClientSecret,
-      workspaceIdPresent: Boolean(workspace?._id)
+      workspaceIdPresent: Boolean(workspace?._id),
+      workspaceErrorCode: workspace ? null : "workspace_not_found"
     });
   } catch (error) {
     const normalized = normalizeRouteError(error, "Unable to inspect Google Drive status right now.");

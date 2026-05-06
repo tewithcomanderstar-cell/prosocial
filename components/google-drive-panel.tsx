@@ -82,6 +82,12 @@ function mapGoogleDriveMessage(code: string, isThai: boolean) {
     google_drive_scope_missing: isThai
       ? "สิทธิ์ของ Google Drive ยังไม่พอสำหรับการอ่านโฟลเดอร์หรือรูปภาพ กรุณาเชื่อมใหม่อีกครั้ง"
       : "The granted Google Drive scopes are not sufficient to read folders or images.",
+    internal_error: isThai
+      ? "ยังตรวจสอบ Google Drive ไม่สำเร็จ กรุณากดเชื่อม Google Drive ใหม่อีกครั้ง"
+      : "Google Drive could not be verified. Please reconnect Google Drive.",
+    workspace_not_found: isThai
+      ? "ระบบยังสร้าง workspace สำหรับบัญชีนี้ไม่สำเร็จ กรุณาลองรีเฟรชหน้าแล้วเชื่อมใหม่อีกครั้ง"
+      : "The workspace for this account is not ready yet. Refresh and try connecting again.",
     success: isThai ? "เชื่อมต่อ Google Drive แล้ว" : "Google Drive connected successfully."
   };
 
@@ -109,7 +115,7 @@ export function GoogleDrivePanel() {
   }, [searchParams, isThai]);
 
   async function loadFolders() {
-    const statusResponse = await fetch("/api/google-drive/debug/status", { cache: "no-store" });
+    const statusResponse = await fetch("/api/google-drive/debug/status", { cache: "no-store", credentials: "include" });
     const statusResult = await statusResponse.json().catch(() => null);
     if (statusResult?.ok && statusResult.data) {
       setStatusDebug(statusResult.data);
@@ -124,7 +130,7 @@ export function GoogleDrivePanel() {
       return false;
     }
 
-    const response = await fetch("/api/google-drive/folders", { cache: "no-store" });
+    const response = await fetch("/api/google-drive/folders", { cache: "no-store", credentials: "include" });
     const result = await response.json().catch(() => null);
     if (result?.ok) {
       setFolders(result.data.folders);
@@ -141,7 +147,7 @@ export function GoogleDrivePanel() {
 
   async function loadImages(folderId: string) {
     setSelectedFolder(folderId);
-    const response = await fetch(`/api/google-drive/images?folderId=${folderId}`, { cache: "no-store" });
+    const response = await fetch(`/api/google-drive/images?folderId=${folderId}`, { cache: "no-store", credentials: "include" });
     const result = await response.json().catch(() => null);
     if (result?.ok) {
       setImages(result.data.images);
@@ -162,9 +168,9 @@ export function GoogleDrivePanel() {
 
   async function connect() {
     setLoading(true);
-    const response = await fetch("/api/google-drive/oauth/url");
+    const response = await fetch("/api/google-drive/oauth/url", { cache: "no-store", credentials: "include" });
     const result = await response.json().catch(() => null);
-    if (result.ok && result.data.url) {
+    if (result?.ok && result.data?.url) {
       window.location.href = result.data.url;
       return;
     }
