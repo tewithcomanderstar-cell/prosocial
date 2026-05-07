@@ -4,6 +4,20 @@ import { ensureValidGoogleDriveConnection, refreshGoogleDriveToken } from "@/lib
 import { resolveCurrentWorkspaceOrCreate } from "@/lib/services/workspace";
 import { GoogleDriveConnection } from "@/models/GoogleDriveConnection";
 
+async function recordDriveImageWarning(userId: string, error: GoogleDriveServiceError) {
+  await GoogleDriveConnection.findOneAndUpdate(
+    { userId },
+    {
+      tokenStatus:
+        error.code === "google_drive_scope_missing" || error.code === "google_drive_fetch_failed"
+          ? "warning"
+          : "expired",
+      lastErrorCode: error.code,
+      lastErrorAt: new Date()
+    }
+  ).catch(() => null);
+}
+
 export async function GET(request: Request) {
   try {
     const userId = await requireAuth();
@@ -35,20 +49,28 @@ export async function GET(request: Request) {
         if (!refreshed?.accessToken) {
           throw driveError;
         }
-        payload = await fetchImagesFromFolder(refreshed.accessToken, folderId);
+        try {
+          payload = await fetchImagesFromFolder(refreshed.accessToken, folderId);
+        } catch (retryError) {
+          if (
+            retryError instanceof GoogleDriveServiceError &&
+            retryError.code === "google_drive_fetch_failed"
+          ) {
+            await recordDriveImageWarning(userId, retryError);
+            return jsonOk(
+              {
+                images: [],
+                tokenStatus: "warning",
+                warning: retryError.code
+              },
+              "Google Drive is connected, but image listing is temporarily unavailable."
+            );
+          }
+          throw retryError;
+        }
       } else {
         if (driveError instanceof GoogleDriveServiceError) {
-          await GoogleDriveConnection.findOneAndUpdate(
-            { userId },
-            {
-              tokenStatus:
-                driveError.code === "google_drive_scope_missing" || driveError.code === "google_drive_fetch_failed"
-                  ? "warning"
-                  : "expired",
-              lastErrorCode: driveError.code,
-              lastErrorAt: new Date()
-            }
-          ).catch(() => null);
+          await recordDriveImageWarning(userId, driveError);
         }
         throw driveError;
       }

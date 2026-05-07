@@ -4,6 +4,20 @@ import { ensureValidGoogleDriveConnection, refreshGoogleDriveToken } from "@/lib
 import { resolveCurrentWorkspaceOrCreate } from "@/lib/services/workspace";
 import { GoogleDriveConnection } from "@/models/GoogleDriveConnection";
 
+async function recordDriveListWarning(userId: string, error: GoogleDriveServiceError) {
+  await GoogleDriveConnection.findOneAndUpdate(
+    { userId },
+    {
+      tokenStatus:
+        error.code === "google_drive_scope_missing" || error.code === "google_drive_fetch_failed"
+          ? "warning"
+          : "expired",
+      lastErrorCode: error.code,
+      lastErrorAt: new Date()
+    }
+  ).catch(() => null);
+}
+
 export async function GET() {
   try {
     const userId = await requireAuth();
@@ -22,20 +36,28 @@ export async function GET() {
         if (!refreshed?.accessToken) {
           throw driveError;
         }
-        payload = await fetchDriveFolders(refreshed.accessToken, "root");
+        try {
+          payload = await fetchDriveFolders(refreshed.accessToken, "root");
+        } catch (retryError) {
+          if (
+            retryError instanceof GoogleDriveServiceError &&
+            retryError.code === "google_drive_fetch_failed"
+          ) {
+            await recordDriveListWarning(userId, retryError);
+            return jsonOk(
+              {
+                folders: [{ id: "root", name: "My Drive" }],
+                tokenStatus: "warning",
+                warning: retryError.code
+              },
+              "Google Drive is connected, but folder listing is temporarily unavailable."
+            );
+          }
+          throw retryError;
+        }
       } else {
         if (driveError instanceof GoogleDriveServiceError) {
-          await GoogleDriveConnection.findOneAndUpdate(
-            { userId },
-            {
-              tokenStatus:
-                driveError.code === "google_drive_scope_missing" || driveError.code === "google_drive_fetch_failed"
-                  ? "warning"
-                  : "expired",
-              lastErrorCode: driveError.code,
-              lastErrorAt: new Date()
-            }
-          ).catch(() => null);
+          await recordDriveListWarning(userId, driveError);
 
           if (driveError.code === "google_drive_fetch_failed") {
             return jsonOk(
