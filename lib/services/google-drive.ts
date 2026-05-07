@@ -2,7 +2,14 @@ import { RouteError } from "@/lib/api";
 import { fetchWithRetry } from "@/lib/services/http";
 
 type GoogleErrorPayload = {
-  error?: string;
+  error?:
+    | string
+    | {
+        code?: number;
+        message?: string;
+        status?: string;
+        errors?: Array<{ message?: string; reason?: string }>;
+      };
   error_description?: string;
   error_uri?: string;
 };
@@ -46,7 +53,7 @@ function assertGoogleOAuthConfig(redirectUri?: string | null) {
 }
 
 function classifyGoogleOAuthError(payload: GoogleErrorPayload, fallbackMessage: string) {
-  const description = String(payload.error_description || payload.error || fallbackMessage).toLowerCase();
+  const description = getGoogleErrorDescription(payload, fallbackMessage).toLowerCase();
 
   if (description.includes("redirect_uri") || description.includes("mismatch")) {
     return new GoogleDriveServiceError(
@@ -65,8 +72,27 @@ function classifyGoogleOAuthError(payload: GoogleErrorPayload, fallbackMessage: 
   );
 }
 
+function getGoogleErrorDescription(payload: GoogleErrorPayload | null, fallbackMessage: string) {
+  if (!payload) {
+    return fallbackMessage;
+  }
+
+  if (typeof payload.error === "object" && payload.error !== null) {
+    const nestedParts = [
+      payload.error.message,
+      payload.error.status,
+      ...(payload.error.errors ?? []).flatMap((item) => [item.reason, item.message])
+    ].filter(Boolean);
+    if (nestedParts.length > 0) {
+      return nestedParts.join(" ");
+    }
+  }
+
+  return String(payload.error_description || payload.error || fallbackMessage);
+}
+
 function classifyGoogleDriveFetchError(payload: GoogleErrorPayload | null, fallbackMessage: string) {
-  const description = String(payload?.error_description || payload?.error || fallbackMessage).toLowerCase();
+  const description = getGoogleErrorDescription(payload, fallbackMessage).toLowerCase();
 
   if (
     description.includes("invalid credentials") ||
@@ -97,6 +123,33 @@ function classifyGoogleDriveFetchError(payload: GoogleErrorPayload | null, fallb
     502,
     payload
   );
+}
+
+async function fetchGoogleDriveJson<T>(url: URL, accessToken: string, fallbackMessage: string) {
+  let response: Response;
+
+  try {
+    response = await fetchWithRetry(url.toString(), {
+      headers: {
+        Authorization: `Bearer ${accessToken}`
+      },
+      cache: "no-store"
+    });
+  } catch (error) {
+    throw new GoogleDriveServiceError(
+      fallbackMessage,
+      "google_drive_fetch_failed",
+      502,
+      error instanceof Error ? error.message : "Google Drive request failed"
+    );
+  }
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as GoogleErrorPayload | null;
+    throw classifyGoogleDriveFetchError(payload, fallbackMessage);
+  }
+
+  return response.json() as Promise<T>;
 }
 
 export function getGoogleOAuthUrl(options?: { redirectUri?: string | null; state?: string | null }) {
@@ -149,21 +202,12 @@ export async function fetchDriveFolders(accessToken: string, parentId = "root") 
   );
   url.searchParams.set("fields", "files(id,name)");
   url.searchParams.set("pageSize", "100");
-  url.searchParams.set("orderBy", "folder,name_natural");
 
-  const response = await fetchWithRetry(url.toString(), {
-    headers: {
-      Authorization: `Bearer ${accessToken}`
-    },
-    cache: "no-store"
-  });
-
-  if (!response.ok) {
-    const payload = (await response.json().catch(() => null)) as GoogleErrorPayload | null;
-    throw classifyGoogleDriveFetchError(payload, "Failed to fetch Google Drive folders");
-  }
-
-  return response.json() as Promise<{ files: Array<{ id: string; name: string }> }>;
+  return fetchGoogleDriveJson<{ files: Array<{ id: string; name: string }> }>(
+    url,
+    accessToken,
+    "Failed to fetch Google Drive folders"
+  );
 }
 
 export async function fetchImagesFromFolder(accessToken: string, folderId: string, maxFiles = 200) {
@@ -196,19 +240,7 @@ export async function fetchImagesFromFolder(accessToken: string, folderId: strin
       url.searchParams.set("pageToken", nextPageToken);
     }
 
-    const response = await fetchWithRetry(url.toString(), {
-      headers: {
-        Authorization: `Bearer ${accessToken}`
-      },
-      cache: "no-store"
-    });
-
-    if (!response.ok) {
-      const payload = (await response.json().catch(() => null)) as GoogleErrorPayload | null;
-      throw classifyGoogleDriveFetchError(payload, "Failed to fetch Google Drive images");
-    }
-
-    const payload = (await response.json()) as {
+    const payload = await fetchGoogleDriveJson<{
       nextPageToken?: string;
       files?: Array<{
         id: string;
@@ -218,7 +250,7 @@ export async function fetchImagesFromFolder(accessToken: string, folderId: strin
         webContentLink?: string;
         webViewLink?: string;
       }>;
-    };
+    }>(url, accessToken, "Failed to fetch Google Drive images");
 
     files.push(...(payload.files ?? []));
     nextPageToken = files.length >= maxFiles ? undefined : payload.nextPageToken;
@@ -228,12 +260,23 @@ export async function fetchImagesFromFolder(accessToken: string, folderId: strin
 }
 
 export async function fetchDriveImageBinary(accessToken: string, fileId: string) {
-  const response = await fetchWithRetry(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`
-    },
-    cache: "no-store"
-  });
+  let response: Response;
+
+  try {
+    response = await fetchWithRetry(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`
+      },
+      cache: "no-store"
+    });
+  } catch (error) {
+    throw new GoogleDriveServiceError(
+      "Failed to download Google Drive image",
+      "google_drive_fetch_failed",
+      502,
+      error instanceof Error ? error.message : "Google Drive image request failed"
+    );
+  }
 
   if (!response.ok) {
     const payload = (await response.json().catch(() => null)) as GoogleErrorPayload | null;

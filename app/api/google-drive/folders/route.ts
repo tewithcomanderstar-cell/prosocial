@@ -28,11 +28,25 @@ export async function GET() {
           await GoogleDriveConnection.findOneAndUpdate(
             { userId },
             {
-              tokenStatus: driveError.code === "google_drive_scope_missing" ? "warning" : "expired",
+              tokenStatus:
+                driveError.code === "google_drive_scope_missing" || driveError.code === "google_drive_fetch_failed"
+                  ? "warning"
+                  : "expired",
               lastErrorCode: driveError.code,
               lastErrorAt: new Date()
             }
           ).catch(() => null);
+
+          if (driveError.code === "google_drive_fetch_failed") {
+            return jsonOk(
+              {
+                folders: [{ id: "root", name: "My Drive" }],
+                tokenStatus: "warning",
+                warning: driveError.code
+              },
+              "Google Drive is connected, but folder listing is temporarily unavailable."
+            );
+          }
         }
         throw driveError;
       }
@@ -51,9 +65,11 @@ export async function GET() {
           ? "google_reconnect_required"
         : normalized.code === "provider_not_connected"
           ? "google_drive_not_connected"
-          : normalized.code === "google_refresh_token_missing"
-            ? "google_refresh_token_missing"
-            : normalized.code;
+        : normalized.code === "google_refresh_token_missing"
+          ? "google_refresh_token_missing"
+            : normalized.code === "internal_error"
+              ? "google_drive_fetch_failed"
+              : normalized.code;
     return jsonError(normalized.message, normalized.status, code);
   }
 }
