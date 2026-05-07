@@ -166,7 +166,7 @@ export async function fetchDriveFolders(accessToken: string, parentId = "root") 
   return response.json() as Promise<{ files: Array<{ id: string; name: string }> }>;
 }
 
-export async function fetchImagesFromFolder(accessToken: string, folderId: string) {
+export async function fetchImagesFromFolder(accessToken: string, folderId: string, maxFiles = 200) {
   const rootQuery =
     folderId === "root"
       ? "'root' in parents and mimeType contains 'image/' and trashed = false"
@@ -189,7 +189,7 @@ export async function fetchImagesFromFolder(accessToken: string, folderId: strin
       "fields",
       "nextPageToken,files(id,name,mimeType,thumbnailLink,webContentLink,webViewLink)"
     );
-    url.searchParams.set("pageSize", "1000");
+    url.searchParams.set("pageSize", "100");
     url.searchParams.set("orderBy", "createdTime desc,name_natural");
 
     if (nextPageToken) {
@@ -221,10 +221,10 @@ export async function fetchImagesFromFolder(accessToken: string, folderId: strin
     };
 
     files.push(...(payload.files ?? []));
-    nextPageToken = payload.nextPageToken;
+    nextPageToken = files.length >= maxFiles ? undefined : payload.nextPageToken;
   } while (nextPageToken);
 
-  return { files };
+  return { files: files.slice(0, maxFiles) };
 }
 
 export async function fetchDriveImageBinary(accessToken: string, fileId: string) {

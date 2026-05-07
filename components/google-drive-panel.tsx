@@ -105,6 +105,7 @@ export function GoogleDrivePanel() {
   const [selectedFolder, setSelectedFolder] = useState("root");
   const [images, setImages] = useState<DriveImage[]>([]);
   const [message, setMessage] = useState("");
+  const [imageMessage, setImageMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [statusDebug, setStatusDebug] = useState<GoogleDriveStatusDebug | null>(null);
 
@@ -126,6 +127,7 @@ export function GoogleDrivePanel() {
       if (!hasUsableGoogleCredential) {
         setFolders([]);
         setImages([]);
+        setImageMessage("");
         setMessage(
           mapGoogleDriveMessage(
             statusResult.data.hasGoogleAccount && !statusResult.data.hasRefreshToken
@@ -150,6 +152,7 @@ export function GoogleDrivePanel() {
     if (result?.ok) {
       setFolders(result.data.folders);
       setMessage("");
+      setImageMessage("");
       if (searchParams.get("error")) {
         window.history.replaceState(null, "", window.location.pathname);
       }
@@ -170,19 +173,17 @@ export function GoogleDrivePanel() {
     const result = await response.json().catch(() => null);
     if (result?.ok) {
       setImages(result.data.images);
+      setImageMessage("");
     } else {
-      setMessage(mapGoogleDriveMessage(result?.code || result?.message || t("commonRequestFailed"), isThai));
+      setImageMessage(mapGoogleDriveMessage(result?.code || result?.message || "google_drive_fetch_failed", isThai));
       setImages([]);
     }
   }
 
   useEffect(() => {
     setMessage(queryMessage);
-    loadFolders().then((ok) => {
-      if (ok) {
-        loadImages("root");
-      }
-    });
+    setImageMessage("");
+    loadFolders();
   }, [queryMessage]);
 
   async function connect() {
@@ -243,6 +244,7 @@ export function GoogleDrivePanel() {
           ))}
         </select>
       </label>
+      {imageMessage ? <p className="muted">{imageMessage}</p> : null}
 
       <div className="grid cols-3">
         {images.map((image) => (
