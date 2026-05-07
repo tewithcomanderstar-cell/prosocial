@@ -79,6 +79,9 @@ function mapGoogleDriveMessage(code: string, isThai: boolean) {
     google_drive_fetch_failed: isThai
       ? "เชื่อม Google Drive แล้ว แต่ดึงโฟลเดอร์หรือรูปภาพไม่สำเร็จ กรุณาลองใหม่อีกครั้ง"
       : "Google Drive is connected, but folders or images could not be loaded.",
+    google_drive_token_invalid: isThai
+      ? "Google Drive token เก่าถูกปฏิเสธ ระบบพยายามรีเฟรชแล้ว กรุณากดเชื่อม Google Drive ใหม่อีกครั้ง"
+      : "Google Drive rejected the old token. Please reconnect Google Drive.",
     google_drive_scope_missing: isThai
       ? "สิทธิ์ของ Google Drive ยังไม่พอสำหรับการอ่านโฟลเดอร์หรือรูปภาพ กรุณาเชื่อมใหม่อีกครั้ง"
       : "The granted Google Drive scopes are not sufficient to read folders or images.",
@@ -132,6 +135,10 @@ export function GoogleDrivePanel() {
           )
         );
         return false;
+      }
+      setMessage("");
+      if (searchParams.get("error")) {
+        window.history.replaceState(null, "", window.location.pathname);
       }
     } else if (statusResult?.code || statusResult?.message) {
       setMessage(mapGoogleDriveMessage(statusResult.code || statusResult.message, isThai));

@@ -1,7 +1,8 @@
 import { jsonError, jsonOk, normalizeRouteError, requireAuth } from "@/lib/api";
 import { fetchDriveFolders, fetchImagesFromFolder, GoogleDriveServiceError } from "@/lib/services/google-drive";
-import { ensureValidGoogleDriveConnection } from "@/lib/services/integration-auth";
+import { ensureValidGoogleDriveConnection, refreshGoogleDriveToken } from "@/lib/services/integration-auth";
 import { resolveCurrentWorkspaceOrCreate } from "@/lib/services/workspace";
+import { GoogleDriveConnection } from "@/models/GoogleDriveConnection";
 
 export async function GET(request: Request) {
   try {
@@ -21,7 +22,34 @@ export async function GET(request: Request) {
       return jsonOk({ images: [] }, "No image folder found");
     }
 
-    const payload = await fetchImagesFromFolder(connection.accessToken, folderId);
+    let payload;
+    try {
+      payload = await fetchImagesFromFolder(connection.accessToken, folderId);
+    } catch (driveError) {
+      if (
+        driveError instanceof GoogleDriveServiceError &&
+        driveError.code === "google_drive_token_invalid" &&
+        connection.refreshToken
+      ) {
+        const refreshed = await refreshGoogleDriveToken(userId, connection.refreshToken);
+        if (!refreshed?.accessToken) {
+          throw driveError;
+        }
+        payload = await fetchImagesFromFolder(refreshed.accessToken, folderId);
+      } else {
+        if (driveError instanceof GoogleDriveServiceError) {
+          await GoogleDriveConnection.findOneAndUpdate(
+            { userId },
+            {
+              tokenStatus: driveError.code === "google_drive_scope_missing" ? "warning" : "expired",
+              lastErrorCode: driveError.code,
+              lastErrorAt: new Date()
+            }
+          ).catch(() => null);
+        }
+        throw driveError;
+      }
+    }
     return jsonOk({ images: payload.files, tokenStatus: connection.tokenStatus ?? "healthy" });
   } catch (error) {
     const normalized = normalizeRouteError(error, "Unable to fetch Google Drive images right now.");

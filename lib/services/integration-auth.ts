@@ -159,7 +159,7 @@ export async function getStoredFacebookConnection(userId: string) {
   return connection;
 }
 
-async function refreshGoogleDriveToken(userId: string, refreshToken: string) {
+export async function refreshGoogleDriveToken(userId: string, refreshToken: string) {
   const response = await fetchWithRetry("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },

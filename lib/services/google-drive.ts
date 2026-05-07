@@ -15,7 +15,8 @@ export class GoogleDriveServiceError extends RouteError {
       | "google_redirect_uri_mismatch"
       | "google_token_exchange_failed"
       | "google_drive_scope_missing"
-      | "google_drive_fetch_failed",
+      | "google_drive_fetch_failed"
+      | "google_drive_token_invalid",
     status = 500,
     public readonly details?: GoogleErrorPayload | string | null
   ) {
@@ -66,6 +67,20 @@ function classifyGoogleOAuthError(payload: GoogleErrorPayload, fallbackMessage: 
 
 function classifyGoogleDriveFetchError(payload: GoogleErrorPayload | null, fallbackMessage: string) {
   const description = String(payload?.error_description || payload?.error || fallbackMessage).toLowerCase();
+
+  if (
+    description.includes("invalid credentials") ||
+    description.includes("invalid_token") ||
+    description.includes("token") ||
+    description.includes("auth")
+  ) {
+    return new GoogleDriveServiceError(
+      "Google Drive access token is invalid.",
+      "google_drive_token_invalid",
+      401,
+      payload
+    );
+  }
 
   if (description.includes("insufficient") || description.includes("scope") || description.includes("permission")) {
     return new GoogleDriveServiceError(
