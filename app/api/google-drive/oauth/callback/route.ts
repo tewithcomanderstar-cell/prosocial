@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { Types } from "mongoose";
 import { requireAuth } from "@/lib/api";
 import { connectDb } from "@/lib/db";
 import { GoogleDriveConnection } from "@/models/GoogleDriveConnection";
@@ -41,6 +42,71 @@ function mapGoogleCallbackError(error: unknown) {
   return "google_token_exchange_failed";
 }
 
+async function saveGoogleDriveCredential(input: {
+  userId: string;
+  workspaceId?: unknown;
+  accessToken: string;
+  refreshToken?: string | null;
+  expiresIn?: number | null;
+}) {
+  const now = new Date();
+  const expiresAt = input.expiresIn ? new Date(Date.now() + input.expiresIn * 1000) : null;
+  const setPayload: Record<string, unknown> = {
+    userId: input.userId,
+    accessToken: input.accessToken,
+    connectedAt: now,
+    expiresAt,
+    tokenStatus: "healthy",
+    lastValidatedAt: now,
+    lastErrorCode: null,
+    lastErrorAt: null
+  };
+
+  if (input.workspaceId) {
+    setPayload.workspaceId = input.workspaceId;
+  }
+
+  if (input.refreshToken) {
+    setPayload.refreshToken = input.refreshToken;
+  }
+
+  try {
+    return await GoogleDriveConnection.findOneAndUpdate(
+      { userId: input.userId },
+      { $set: setPayload },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+  } catch (primaryError) {
+    const castUserId = Types.ObjectId.isValid(input.userId) ? new Types.ObjectId(input.userId) : input.userId;
+    await GoogleDriveConnection.collection.updateOne(
+      { userId: castUserId },
+      {
+        $set: {
+          ...setPayload,
+          userId: castUserId
+        },
+        $setOnInsert: {
+          createdAt: now
+        }
+      },
+      { upsert: true }
+    );
+
+    await logAction({
+      userId: input.userId,
+      type: "auth",
+      level: "warn",
+      message: "Google Drive credential saved through raw fallback",
+      metadata: {
+        errorName: primaryError instanceof Error ? primaryError.name : "unknown",
+        errorMessage: primaryError instanceof Error ? primaryError.message : "unknown"
+      }
+    }).catch(() => null);
+
+    return GoogleDriveConnection.findOne({ userId: input.userId });
+  }
+}
+
 export async function GET(request: Request) {
   try {
     await connectDb();
@@ -63,23 +129,14 @@ export async function GET(request: Request) {
     const tokenPayload = await exchangeGoogleCode(code, redirectUri ?? undefined);
 
     try {
-      await GoogleDriveConnection.findOneAndUpdate(
-        { userId },
-        {
-          userId,
-          ...(workspace?._id ? { workspaceId: workspace._id } : {}),
-          accessToken: tokenPayload.access_token,
-          refreshToken: tokenPayload.refresh_token || existingConnection?.refreshToken || undefined,
-          connectedAt: new Date(),
-          expiresAt: tokenPayload.expires_in ? new Date(Date.now() + tokenPayload.expires_in * 1000) : null,
-          tokenStatus: "healthy",
-          lastValidatedAt: new Date(),
-          lastErrorCode: null,
-          lastErrorAt: null
-        },
-        { upsert: true, new: true }
-      );
-    } catch {
+      await saveGoogleDriveCredential({
+        userId,
+        workspaceId: workspace?._id,
+        accessToken: tokenPayload.access_token,
+        refreshToken: tokenPayload.refresh_token || existingConnection?.refreshToken || null,
+        expiresIn: tokenPayload.expires_in ?? null
+      });
+    } catch (saveError) {
       await GoogleDriveConnection.findOneAndUpdate(
         { userId },
         {
@@ -88,6 +145,16 @@ export async function GET(request: Request) {
           lastErrorAt: new Date()
         }
       ).catch(() => null);
+      await logAction({
+        userId,
+        type: "error",
+        level: "error",
+        message: "Google Drive credential save failed after fallback",
+        metadata: {
+          errorName: saveError instanceof Error ? saveError.name : "unknown",
+          errorMessage: saveError instanceof Error ? saveError.message : "unknown"
+        }
+      }).catch(() => null);
       return NextResponse.redirect(`${getAppUrl(request)}/connections/google-drive?error=google_credential_save_failed`);
     }
 

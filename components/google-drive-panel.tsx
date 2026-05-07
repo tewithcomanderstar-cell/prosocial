@@ -119,10 +119,18 @@ export function GoogleDrivePanel() {
     const statusResult = await statusResponse.json().catch(() => null);
     if (statusResult?.ok && statusResult.data) {
       setStatusDebug(statusResult.data);
-      if (!statusResult.data.connected) {
+      const hasUsableGoogleCredential = Boolean(statusResult.data.connected && statusResult.data.hasRefreshToken);
+      if (!hasUsableGoogleCredential) {
         setFolders([]);
         setImages([]);
-        setMessage(mapGoogleDriveMessage("google_drive_not_connected", isThai));
+        setMessage(
+          mapGoogleDriveMessage(
+            statusResult.data.hasGoogleAccount && !statusResult.data.hasRefreshToken
+              ? "google_refresh_token_missing"
+              : "google_drive_not_connected",
+            isThai
+          )
+        );
         return false;
       }
     } else if (statusResult?.code || statusResult?.message) {
