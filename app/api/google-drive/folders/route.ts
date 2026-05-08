@@ -25,7 +25,7 @@ export async function GET() {
     const connection = await ensureValidGoogleDriveConnection(userId);
     let payload;
     try {
-      payload = await fetchDriveFolders(connection.accessToken, "root");
+      payload = await fetchDriveFolders(connection.accessToken);
     } catch (driveError) {
       if (
         driveError instanceof GoogleDriveServiceError &&
@@ -37,7 +37,7 @@ export async function GET() {
           throw driveError;
         }
         try {
-          payload = await fetchDriveFolders(refreshed.accessToken, "root");
+          payload = await fetchDriveFolders(refreshed.accessToken);
         } catch (retryError) {
           if (
             retryError instanceof GoogleDriveServiceError &&
