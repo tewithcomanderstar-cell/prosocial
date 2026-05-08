@@ -194,20 +194,33 @@ export async function exchangeGoogleCode(code: string, redirectUri?: string | nu
   return response.json() as Promise<{ access_token: string; refresh_token?: string; expires_in?: number }>;
 }
 
-export async function fetchDriveFolders(accessToken: string, parentId = "root") {
-  const url = new URL("https://www.googleapis.com/drive/v3/files");
-  url.searchParams.set(
-    "q",
-    `'${parentId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`
-  );
-  url.searchParams.set("fields", "files(id,name)");
-  url.searchParams.set("pageSize", "100");
+export async function fetchDriveFolders(accessToken: string, parentId: string | null = null, maxFolders = 1000) {
+  const files: Array<{ id: string; name: string; parents?: string[] }> = [];
+  let nextPageToken: string | undefined;
 
-  return fetchGoogleDriveJson<{ files: Array<{ id: string; name: string }> }>(
-    url,
-    accessToken,
-    "Failed to fetch Google Drive folders"
-  );
+  do {
+    const url = new URL("https://www.googleapis.com/drive/v3/files");
+    const folderQuery = "mimeType = 'application/vnd.google-apps.folder' and trashed = false";
+    url.searchParams.set("q", parentId ? `'${parentId}' in parents and ${folderQuery}` : folderQuery);
+    url.searchParams.set("fields", "nextPageToken,files(id,name,parents)");
+    url.searchParams.set("pageSize", "100");
+    url.searchParams.set("supportsAllDrives", "true");
+    url.searchParams.set("includeItemsFromAllDrives", "true");
+
+    if (nextPageToken) {
+      url.searchParams.set("pageToken", nextPageToken);
+    }
+
+    const payload = await fetchGoogleDriveJson<{
+      nextPageToken?: string;
+      files?: Array<{ id: string; name: string; parents?: string[] }>;
+    }>(url, accessToken, "Failed to fetch Google Drive folders");
+
+    files.push(...(payload.files ?? []));
+    nextPageToken = files.length >= maxFolders ? undefined : payload.nextPageToken;
+  } while (nextPageToken);
+
+  return { files: files.slice(0, maxFolders) };
 }
 
 export async function fetchImagesFromFolder(accessToken: string, folderId: string, maxFiles = 200) {

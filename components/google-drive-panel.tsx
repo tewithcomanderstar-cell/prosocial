@@ -196,7 +196,11 @@ export function GoogleDrivePanel() {
       setImages(result.data.images);
       setImageMessage("");
     } else {
-      setImageMessage(mapGoogleDriveMessage(result?.code || result?.message || "google_drive_fetch_failed", isThai));
+      setImageMessage(
+        folderId === "root"
+          ? ""
+          : mapGoogleDriveMessage(result?.code || result?.message || "google_drive_fetch_failed", isThai)
+      );
       setImages([]);
     }
   }
