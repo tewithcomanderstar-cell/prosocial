@@ -119,11 +119,12 @@ export function GoogleDrivePanel() {
   }, [searchParams, isThai]);
 
   async function loadFolders() {
+    let hasUsableGoogleCredential = false;
     const statusResponse = await fetch("/api/google-drive/debug/status", { cache: "no-store", credentials: "include" });
     const statusResult = await statusResponse.json().catch(() => null);
     if (statusResult?.ok && statusResult.data) {
       setStatusDebug(statusResult.data);
-      const hasUsableGoogleCredential = Boolean(statusResult.data.connected && statusResult.data.hasRefreshToken);
+      hasUsableGoogleCredential = Boolean(statusResult.data.connected && statusResult.data.hasRefreshToken);
       if (!hasUsableGoogleCredential) {
         setFolders([]);
         setImages([]);
@@ -159,8 +160,20 @@ export function GoogleDrivePanel() {
       return true;
     }
 
+    const errorCode = result?.code || result?.message || "google_drive_fetch_failed";
+    if (hasUsableGoogleCredential && errorCode === "google_drive_fetch_failed") {
+      setFolders([{ id: "root", name: "My Drive" }]);
+      setImages([]);
+      setMessage("");
+      setImageMessage("");
+      if (searchParams.get("error")) {
+        window.history.replaceState(null, "", window.location.pathname);
+      }
+      return true;
+    }
+
     if (result?.message) {
-      setMessage(mapGoogleDriveMessage(result.code || result.message, isThai));
+      setMessage(mapGoogleDriveMessage(errorCode, isThai));
     } else {
       setMessage(mapGoogleDriveMessage("google_drive_fetch_failed", isThai));
     }
