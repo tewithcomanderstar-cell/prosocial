@@ -97,6 +97,12 @@ function mapGoogleDriveMessage(code: string, isThai: boolean) {
   return messages[code] || code;
 }
 
+function getConnectedDriveMessage(isThai: boolean) {
+  return isThai
+    ? "เชื่อม Google Drive สำเร็จแล้ว ระบบพร้อมใช้รูปจากไดรฟ์ของฉัน"
+    : "Google Drive is connected. My Drive is ready to use.";
+}
+
 export function GoogleDrivePanel() {
   const { t, language } = useI18n();
   const isThai = language === "th";
@@ -139,7 +145,7 @@ export function GoogleDrivePanel() {
         );
         return false;
       }
-      setMessage("");
+      setMessage(getConnectedDriveMessage(isThai));
       if (searchParams.get("error")) {
         window.history.replaceState(null, "", window.location.pathname);
       }
@@ -152,8 +158,9 @@ export function GoogleDrivePanel() {
     const result = await response.json().catch(() => null);
     if (result?.ok) {
       setFolders(result.data.folders);
-      setMessage("");
+      setMessage(getConnectedDriveMessage(isThai));
       setImageMessage("");
+      await loadImages("root");
       if (searchParams.get("error")) {
         window.history.replaceState(null, "", window.location.pathname);
       }
@@ -164,8 +171,9 @@ export function GoogleDrivePanel() {
     if (hasUsableGoogleCredential && errorCode === "google_drive_fetch_failed") {
       setFolders([{ id: "root", name: "My Drive" }]);
       setImages([]);
-      setMessage("");
+      setMessage(getConnectedDriveMessage(isThai));
       setImageMessage("");
+      await loadImages("root");
       if (searchParams.get("error")) {
         window.history.replaceState(null, "", window.location.pathname);
       }
