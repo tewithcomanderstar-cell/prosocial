@@ -39,12 +39,12 @@ export async function GET() {
 
     return jsonOk({
       connected: true,
-      canReadDrive: true,
       ...probe
     });
   } catch (error) {
     const driveError = describeGoogleDriveError(error);
     const normalized = normalizeRouteError(error, "Unable to probe Google Drive right now.");
-    return jsonError(normalized.message, normalized.status, driveError.code || normalized.code);
+    const code = driveError.code === "unknown_error" ? normalized.code : driveError.code;
+    return jsonError(driveError.details || normalized.message, normalized.status, code);
   }
 }

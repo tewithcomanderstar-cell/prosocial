@@ -44,6 +44,7 @@ type GoogleDriveProbe = {
   sampleFiles: Array<{ id: string; name: string; mimeType?: string }>;
   sampleImages: Array<{ id: string; name: string; mimeType?: string }>;
   sampleFolders: Array<{ id: string; name: string }>;
+  errors?: Array<{ step: string; code: string; message: string; details: string | null }>;
 };
 
 function mapGoogleDriveMessage(code: string, isThai: boolean) {
@@ -92,6 +93,9 @@ function mapGoogleDriveMessage(code: string, isThai: boolean) {
     google_drive_fetch_failed: isThai
       ? "เชื่อม Google Drive แล้ว แต่ดึงโฟลเดอร์หรือรูปภาพไม่สำเร็จ กรุณาลองใหม่อีกครั้ง"
       : "Google Drive is connected, but folders or images could not be loaded.",
+    unknown_error: isThai
+      ? "ระบบยังอ่าน Google Drive ไม่สำเร็จ แต่ยังระบุสาเหตุไม่ได้"
+      : "Google Drive could not be read yet, but the cause is not identified.",
     google_drive_token_invalid: isThai
       ? "Google Drive token เก่าถูกปฏิเสธ ระบบพยายามรีเฟรชแล้ว กรุณากดเชื่อม Google Drive ใหม่อีกครั้ง"
       : "Google Drive rejected the old token. Please reconnect Google Drive.",
@@ -310,6 +314,16 @@ export function GoogleDrivePanel() {
                   {isThai
                     ? "Google API ตอบสำเร็จ แต่ไม่คืนไฟล์/โฟลเดอร์ให้ระบบ อาจเป็นบัญชี Drive คนละอัน หรือสิทธิ์ Drive ของ OAuth ยังไม่ครอบคลุมข้อมูลนี้"
                     : "Google API responded successfully but returned no files or folders. This may be a different Drive account or an OAuth access scope/data visibility issue."}
+                </span>
+              ) : null}
+              {probe.errors?.length ? (
+                <span>
+                  {isThai ? "รายละเอียด step ที่ยังอ่านไม่ได้" : "Unreadable probe steps"}:{" "}
+                  <code>
+                    {probe.errors
+                      .map((error) => `${error.step}:${error.code}${error.details ? ` (${error.details})` : ""}`)
+                      .join(", ")}
+                  </code>
                 </span>
               ) : null}
             </div>

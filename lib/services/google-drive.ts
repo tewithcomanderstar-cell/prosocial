@@ -169,8 +169,26 @@ export function describeGoogleDriveError(error: unknown) {
     code: "unknown_error",
     status: 500,
     message: error instanceof Error ? error.message : "Unknown Google Drive error",
-    details: null
+      details: null
   };
+}
+
+async function probeStep<T>(name: string, task: () => Promise<T>) {
+  try {
+    return {
+      name,
+      ok: true as const,
+      data: await task(),
+      error: null
+    };
+  } catch (error) {
+    return {
+      name,
+      ok: false as const,
+      data: null,
+      error: describeGoogleDriveError(error)
+    };
+  }
 }
 
 export function getGoogleOAuthUrl(options?: { redirectUri?: string | null; state?: string | null }) {
@@ -262,27 +280,47 @@ export async function fetchDriveProbe(accessToken: string) {
   imagesUrl.searchParams.set("supportsAllDrives", "true");
   imagesUrl.searchParams.set("includeItemsFromAllDrives", "true");
 
-  const [about, sampleFiles, sampleImages, folders] = await Promise.all([
-    fetchGoogleDriveJson<{
-      user?: { displayName?: string; emailAddress?: string };
-      storageQuota?: { limit?: string; usage?: string };
-    }>(aboutUrl, accessToken, "Failed to inspect Google Drive account"),
-    fetchGoogleDriveJson<{ files?: Array<{ id: string; name: string; mimeType?: string }> }>(
-      filesUrl,
-      accessToken,
-      "Failed to fetch Google Drive sample files"
+  const [aboutStep, filesStep, imagesStep, foldersStep] = await Promise.all([
+    probeStep("about", () =>
+      fetchGoogleDriveJson<{
+        user?: { displayName?: string; emailAddress?: string };
+        storageQuota?: { limit?: string; usage?: string };
+      }>(aboutUrl, accessToken, "Failed to inspect Google Drive account")
     ),
-    fetchGoogleDriveJson<{ files?: Array<{ id: string; name: string; mimeType?: string }> }>(
-      imagesUrl,
-      accessToken,
-      "Failed to fetch Google Drive sample images"
+    probeStep("sample_files", () =>
+      fetchGoogleDriveJson<{ files?: Array<{ id: string; name: string; mimeType?: string }> }>(
+        filesUrl,
+        accessToken,
+        "Failed to fetch Google Drive sample files"
+      )
     ),
-    fetchDriveFolders(accessToken, null, 100)
+    probeStep("sample_images", () =>
+      fetchGoogleDriveJson<{ files?: Array<{ id: string; name: string; mimeType?: string }> }>(
+        imagesUrl,
+        accessToken,
+        "Failed to fetch Google Drive sample images"
+      )
+    ),
+    probeStep("folders", () => fetchDriveFolders(accessToken, null, 100))
   ]);
 
+  const about = aboutStep.ok ? aboutStep.data : null;
+  const sampleFiles = filesStep.ok ? filesStep.data : { files: [] };
+  const sampleImages = imagesStep.ok ? imagesStep.data : { files: [] };
+  const folders = foldersStep.ok ? foldersStep.data : { files: [] };
+  const errors = [aboutStep, filesStep, imagesStep, foldersStep]
+    .filter((step) => !step.ok)
+    .map((step) => ({
+      step: step.name,
+      code: step.error?.code ?? "unknown_error",
+      message: step.error?.message ?? "Unknown error",
+      details: step.error?.details ?? null
+    }));
+
   return {
-    accountEmail: about.user?.emailAddress ?? null,
-    accountName: about.user?.displayName ?? null,
+    canReadDrive: [aboutStep, filesStep, imagesStep, foldersStep].some((step) => step.ok),
+    accountEmail: about?.user?.emailAddress ?? null,
+    accountName: about?.user?.displayName ?? null,
     sampleFileCount: sampleFiles.files?.length ?? 0,
     sampleImageCount: sampleImages.files?.length ?? 0,
     folderCount: folders.files.length,
@@ -299,7 +337,8 @@ export async function fetchDriveProbe(accessToken: string) {
     sampleFolders: folders.files.slice(0, 10).map((folder) => ({
       id: folder.id,
       name: folder.name
-    }))
+    })),
+    errors
   };
 }
 
