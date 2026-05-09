@@ -33,6 +33,19 @@ type GoogleDriveStatusDebug = {
   workspaceIdPresent?: boolean;
 };
 
+type GoogleDriveProbe = {
+  connected: boolean;
+  canReadDrive: boolean;
+  accountEmail: string | null;
+  accountName: string | null;
+  sampleFileCount: number;
+  sampleImageCount: number;
+  folderCount: number;
+  sampleFiles: Array<{ id: string; name: string; mimeType?: string }>;
+  sampleImages: Array<{ id: string; name: string; mimeType?: string }>;
+  sampleFolders: Array<{ id: string; name: string }>;
+};
+
 function mapGoogleDriveMessage(code: string, isThai: boolean) {
   const messages: Record<string, string> = {
     missing_code: isThai ? "Google ไม่ส่ง code กลับมา กรุณาลองเชื่อมต่อใหม่" : "Google did not return an authorization code.",
@@ -114,6 +127,8 @@ export function GoogleDrivePanel() {
   const [imageMessage, setImageMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [statusDebug, setStatusDebug] = useState<GoogleDriveStatusDebug | null>(null);
+  const [probe, setProbe] = useState<GoogleDriveProbe | null>(null);
+  const [probeMessage, setProbeMessage] = useState("");
 
   const queryMessage = useMemo(() => {
     if (searchParams.get("success")) {
@@ -188,6 +203,19 @@ export function GoogleDrivePanel() {
     return false;
   }
 
+  async function loadProbe() {
+    const response = await fetch("/api/google-drive/debug/probe", { cache: "no-store", credentials: "include" });
+    const result = await response.json().catch(() => null);
+    if (result?.ok && result.data) {
+      setProbe(result.data);
+      setProbeMessage("");
+      return;
+    }
+
+    setProbe(null);
+    setProbeMessage(mapGoogleDriveMessage(result?.code || result?.message || "google_drive_fetch_failed", isThai));
+  }
+
   async function loadImages(folderId: string) {
     setSelectedFolder(folderId);
     const response = await fetch(`/api/google-drive/images?folderId=${folderId}`, { cache: "no-store", credentials: "include" });
@@ -209,6 +237,7 @@ export function GoogleDrivePanel() {
     setMessage(queryMessage);
     setImageMessage("");
     loadFolders();
+    loadProbe();
   }, [queryMessage]);
 
   async function connect() {
@@ -255,6 +284,38 @@ export function GoogleDrivePanel() {
             <span>{isThai ? "มี workspace หรือไม่" : "Workspace present"}: <strong>{statusDebug.workspaceIdPresent ? (isThai ? "มี" : "Yes") : isThai ? "ไม่มี" : "No"}</strong></span>
             <span>{isThai ? "รหัส error ล่าสุด" : "Last error code"}: <code>{statusDebug.lastErrorCode || "-"}</code></span>
           </div>
+        </div>
+      ) : null}
+
+      {probe || probeMessage ? (
+        <div
+          style={{
+            border: "1px solid rgba(37, 99, 235, 0.16)",
+            background: "rgba(239, 246, 255, 0.72)",
+            borderRadius: 16,
+            padding: 16,
+            display: "grid",
+            gap: 8
+          }}
+        >
+          <strong>{isThai ? "ผลตรวจข้อมูลใน Google Drive" : "Google Drive data probe"}</strong>
+          {probe ? (
+            <div className="muted" style={{ display: "grid", gap: 4 }}>
+              <span>{isThai ? "บัญชี Drive" : "Drive account"}: <strong>{probe.accountEmail || probe.accountName || "-"}</strong></span>
+              <span>{isThai ? "ไฟล์ตัวอย่างที่อ่านได้" : "Readable sample files"}: <strong>{probe.sampleFileCount}</strong></span>
+              <span>{isThai ? "รูปภาพตัวอย่างที่อ่านได้" : "Readable sample images"}: <strong>{probe.sampleImageCount}</strong></span>
+              <span>{isThai ? "โฟลเดอร์ที่อ่านได้" : "Readable folders"}: <strong>{probe.folderCount}</strong></span>
+              {probe.folderCount === 0 && probe.sampleFileCount === 0 ? (
+                <span>
+                  {isThai
+                    ? "Google API ตอบสำเร็จ แต่ไม่คืนไฟล์/โฟลเดอร์ให้ระบบ อาจเป็นบัญชี Drive คนละอัน หรือสิทธิ์ Drive ของ OAuth ยังไม่ครอบคลุมข้อมูลนี้"
+                    : "Google API responded successfully but returned no files or folders. This may be a different Drive account or an OAuth access scope/data visibility issue."}
+                </span>
+              ) : null}
+            </div>
+          ) : (
+            <p className="muted">{probeMessage}</p>
+          )}
         </div>
       ) : null}
 

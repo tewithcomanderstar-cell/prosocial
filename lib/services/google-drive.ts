@@ -152,6 +152,27 @@ async function fetchGoogleDriveJson<T>(url: URL, accessToken: string, fallbackMe
   return response.json() as Promise<T>;
 }
 
+export function describeGoogleDriveError(error: unknown) {
+  if (error instanceof GoogleDriveServiceError) {
+    return {
+      code: error.code,
+      status: error.status,
+      message: error.message,
+      details:
+        typeof error.details === "string"
+          ? error.details
+          : getGoogleErrorDescription(error.details ?? null, error.message)
+    };
+  }
+
+  return {
+    code: "unknown_error",
+    status: 500,
+    message: error instanceof Error ? error.message : "Unknown Google Drive error",
+    details: null
+  };
+}
+
 export function getGoogleOAuthUrl(options?: { redirectUri?: string | null; state?: string | null }) {
   const config = assertGoogleOAuthConfig(options?.redirectUri);
   const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
@@ -221,6 +242,65 @@ export async function fetchDriveFolders(accessToken: string, parentId: string | 
   } while (nextPageToken);
 
   return { files: files.slice(0, maxFolders) };
+}
+
+export async function fetchDriveProbe(accessToken: string) {
+  const aboutUrl = new URL("https://www.googleapis.com/drive/v3/about");
+  aboutUrl.searchParams.set("fields", "user(displayName,emailAddress),storageQuota(limit,usage)");
+
+  const filesUrl = new URL("https://www.googleapis.com/drive/v3/files");
+  filesUrl.searchParams.set("fields", "files(id,name,mimeType)");
+  filesUrl.searchParams.set("pageSize", "10");
+  filesUrl.searchParams.set("q", "trashed = false");
+  filesUrl.searchParams.set("supportsAllDrives", "true");
+  filesUrl.searchParams.set("includeItemsFromAllDrives", "true");
+
+  const imagesUrl = new URL("https://www.googleapis.com/drive/v3/files");
+  imagesUrl.searchParams.set("fields", "files(id,name,mimeType)");
+  imagesUrl.searchParams.set("pageSize", "10");
+  imagesUrl.searchParams.set("q", "mimeType contains 'image/' and trashed = false");
+  imagesUrl.searchParams.set("supportsAllDrives", "true");
+  imagesUrl.searchParams.set("includeItemsFromAllDrives", "true");
+
+  const [about, sampleFiles, sampleImages, folders] = await Promise.all([
+    fetchGoogleDriveJson<{
+      user?: { displayName?: string; emailAddress?: string };
+      storageQuota?: { limit?: string; usage?: string };
+    }>(aboutUrl, accessToken, "Failed to inspect Google Drive account"),
+    fetchGoogleDriveJson<{ files?: Array<{ id: string; name: string; mimeType?: string }> }>(
+      filesUrl,
+      accessToken,
+      "Failed to fetch Google Drive sample files"
+    ),
+    fetchGoogleDriveJson<{ files?: Array<{ id: string; name: string; mimeType?: string }> }>(
+      imagesUrl,
+      accessToken,
+      "Failed to fetch Google Drive sample images"
+    ),
+    fetchDriveFolders(accessToken, null, 100)
+  ]);
+
+  return {
+    accountEmail: about.user?.emailAddress ?? null,
+    accountName: about.user?.displayName ?? null,
+    sampleFileCount: sampleFiles.files?.length ?? 0,
+    sampleImageCount: sampleImages.files?.length ?? 0,
+    folderCount: folders.files.length,
+    sampleFiles: (sampleFiles.files ?? []).map((file) => ({
+      id: file.id,
+      name: file.name,
+      mimeType: file.mimeType
+    })),
+    sampleImages: (sampleImages.files ?? []).map((file) => ({
+      id: file.id,
+      name: file.name,
+      mimeType: file.mimeType
+    })),
+    sampleFolders: folders.files.slice(0, 10).map((folder) => ({
+      id: folder.id,
+      name: folder.name
+    }))
+  };
 }
 
 export async function fetchImagesFromFolder(accessToken: string, folderId: string, maxFiles = 200) {
