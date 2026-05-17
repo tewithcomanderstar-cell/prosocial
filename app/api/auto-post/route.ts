@@ -47,8 +47,18 @@ function sanitizeLegacyMessage(value?: string | null) {
 
 const schema = z.object({
   enabled: z.boolean(),
+  contentSource: z.enum(["shopee-affiliate", "google-drive"]).default("shopee-affiliate"),
   folderId: z.string().min(1).default("root"),
   folderName: z.string().min(1).default("My Drive"),
+  shopeeSourceTag: z.enum(["trending", "best_selling", "top_search", "best_roi", "manual"]).default("trending"),
+  shopeeKeyword: z.string().default(""),
+  shopeeCategory: z.string().default(""),
+  shopeeCaptionStyle: z
+    .enum(["soft_sell", "urgency", "problem_solution", "review_style", "deal_alert", "lifestyle"])
+    .default("soft_sell"),
+  shopeeTrackingId: z.string().default(""),
+  shopeeBlockedCategories: z.array(z.string()).default([]),
+  shopeeCategoryPriority: z.array(z.string()).default([]),
   targetPageIds: z.array(z.string()).max(100, "Select up to 100 Facebook pages").default([]),
   intervalMinutes: intervalSchema.default(60),
   captionStrategy: z.enum(["manual", "ai", "hybrid"]),
@@ -78,6 +88,9 @@ export async function GET() {
           jobStatus: "pending",
           retryCount: 0,
           intervalMinutes: 60,
+          contentSource: "shopee-affiliate",
+          shopeeSourceTag: "trending",
+          shopeeCaptionStyle: "soft_sell",
           watermarkEnabled: true,
           watermarkSource: "page_profile",
           watermarkPosition: "bottom-right",
@@ -111,6 +124,9 @@ export async function POST(request: Request) {
     const { userId } = await requireRole(["admin", "editor"]);
     const payload = parseBody(schema, await request.json());
     const normalizedFolderId = normalizeFolderId(payload.folderId ?? "root");
+    const shopeeKeyword = (payload.shopeeKeyword ?? "").trim();
+    const shopeeCategory = (payload.shopeeCategory ?? "").trim();
+    const shopeeTrackingId = (payload.shopeeTrackingId ?? "").trim();
     const current = (await AutoPostConfig.findOne({ userId }).lean()) as LeanAutoPostConfig | null;
 
     const nextRunAt = payload.enabled
@@ -129,7 +145,13 @@ export async function POST(request: Request) {
       { userId },
       {
         ...payload,
+        contentSource: "shopee-affiliate",
         folderId: normalizedFolderId,
+        shopeeKeyword,
+        shopeeCategory,
+        shopeeTrackingId,
+        shopeeBlockedCategories: (payload.shopeeBlockedCategories ?? []).map((item) => item.trim()).filter(Boolean),
+        shopeeCategoryPriority: (payload.shopeeCategoryPriority ?? []).map((item) => item.trim()).filter(Boolean),
         captions: (payload.captions ?? []).map((caption) => caption.trim()).filter(Boolean),
         hashtags: (payload.hashtags ?? []).map((hashtag) => hashtag.trim()).filter(Boolean),
         watermarkEnabled: payload.watermarkEnabled,
@@ -156,6 +178,11 @@ export async function POST(request: Request) {
       metadata: {
         autoPost: true,
         folderId: normalizedFolderId,
+        contentSource: "shopee-affiliate",
+        shopeeSourceTag: payload.shopeeSourceTag,
+        shopeeKeyword,
+        shopeeCategory,
+        shopeeCaptionStyle: payload.shopeeCaptionStyle,
         targetPageCount: (payload.targetPageIds ?? []).length,
         intervalMinutes: payload.intervalMinutes,
         captionStrategy: payload.captionStrategy,

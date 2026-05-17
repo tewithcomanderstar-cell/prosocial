@@ -12,6 +12,11 @@ type LeanAutoPostConfig = {
   folderName: string;
   targetPageIds: string[];
   intervalMinutes: number;
+  contentSource?: "shopee-affiliate" | "google-drive";
+  shopeeSourceTag?: "trending" | "best_selling" | "top_search" | "best_roi" | "manual";
+  shopeeKeyword?: string;
+  shopeeCategory?: string;
+  shopeeCaptionStyle?: "soft_sell" | "urgency" | "problem_solution" | "review_style" | "deal_alert" | "lifestyle";
   captionStrategy: "manual" | "ai" | "hybrid";
   captions: string[];
   aiPrompt: string;
@@ -58,10 +63,6 @@ export async function POST() {
       return jsonError("Auto Post settings not found", 404);
     }
 
-    if (!normalizedFolderId) {
-      return jsonError("Select a Google Drive folder first", 400);
-    }
-
     if (!config.targetPageIds.length) {
       return jsonError("Select at least one Facebook page first", 400);
     }
@@ -93,7 +94,10 @@ export async function POST() {
       metadata: {
         autoPost: true,
         autoPostConfigId: config._id,
-        folderId: normalizedFolderId,
+        contentSource: "shopee-affiliate",
+        shopeeSourceTag: config.shopeeSourceTag ?? "trending",
+        shopeeKeyword: config.shopeeKeyword ?? "",
+        shopeeCategory: config.shopeeCategory ?? "",
         targetPageCount: config.targetPageIds.length,
         intervalMinutes: config.intervalMinutes,
         source: "manual-start",

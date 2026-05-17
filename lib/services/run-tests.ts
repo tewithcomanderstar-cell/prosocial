@@ -3,3 +3,4 @@ import "./page-logo.test.ts";
 import "./image-composer.test.ts";
 import "./facebook.test.ts";
 import "../social-auth.test.ts";
+import "./shopee-affiliate.test.ts";

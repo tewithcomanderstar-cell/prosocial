@@ -2,10 +2,14 @@ import { randomUUID } from "crypto";
 import sharp from "sharp";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
 import { AutoPostAiConfig } from "@/models/AutoPostAiConfig";
+import { AffiliatePerformance } from "@/models/AffiliatePerformance";
+import { AiGeneratedPost } from "@/models/AiGeneratedPost";
 import { CommentInbox } from "@/models/CommentInbox";
+import { FacebookPostQueue } from "@/models/FacebookPostQueue";
 import { Job } from "@/models/Job";
 import { MediaCache } from "@/models/MediaCache";
 import { Post } from "@/models/Post";
+import { ProductPostHistory } from "@/models/ProductPostHistory";
 import { Schedule } from "@/models/Schedule";
 import { finalizeTrackedPostIfComplete, notifyCommentFailure } from "@/lib/services/comment-automation";
 import { logCommentStage } from "@/lib/services/comment-logging";
@@ -244,6 +248,95 @@ function getAutoPostLogFlags(job: JobExecution) {
     return { autoPost: true };
   }
   return {};
+}
+
+function isShopeeAffiliateJob(job: JobExecution) {
+  const hasSingleProduct = typeof job.payload?.shopeeProductId === "string";
+  const hasProductSet = Array.isArray(job.payload?.shopeeProductIds) && job.payload.shopeeProductIds.length > 0;
+  return job.payload?.autoSource === "shopee-affiliate" && (hasSingleProduct || hasProductSet);
+}
+
+async function updateShopeeQueueStatus(
+  job: JobExecution,
+  status: "published" | "failed",
+  details: {
+    publishResult?: unknown;
+    failureReason?: string;
+    errorCode?: string;
+  } = {}
+) {
+  if (!isShopeeAffiliateJob(job) || !job.postId) {
+    return;
+  }
+
+  const productIds = Array.from(
+    new Set(
+      [
+        ...(Array.isArray(job.payload?.shopeeProductIds) ? job.payload.shopeeProductIds : []),
+        job.payload?.shopeeProductId
+      ]
+        .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+        .map((value) => value.trim())
+    )
+  );
+
+  if (productIds.length === 0) {
+    return;
+  }
+
+  const update = {
+    status,
+    publishResult: details.publishResult ?? {},
+    failureReason: details.failureReason ?? null,
+    errorCode: details.errorCode ?? null
+  };
+
+  await FacebookPostQueue.updateMany(
+    {
+      userId: job.userId,
+      pageId: job.targetPageId,
+      productId: { $in: productIds },
+      postId: job.postId
+    },
+    update
+  );
+
+  await ProductPostHistory.updateMany(
+    {
+      userId: job.userId,
+      pageId: job.targetPageId,
+      productId: { $in: productIds },
+      postId: job.postId
+    },
+    {
+      status,
+      postedAt: new Date()
+    }
+  );
+
+  await Promise.all(
+    productIds.map((productId) =>
+      AffiliatePerformance.findOneAndUpdate(
+        {
+          userId: job.userId,
+          productId,
+          pageId: job.targetPageId
+        },
+        {
+          $inc: status === "published" ? { publishedPosts: 1 } : { failedPosts: 1 }
+        },
+        { upsert: true, new: true }
+      )
+    )
+  );
+
+  if (typeof job.payload?.aiGeneratedPostId === "string") {
+    await AiGeneratedPost.findByIdAndUpdate(job.payload.aiGeneratedPostId, {
+      status,
+      errorCode: details.errorCode ?? null,
+      errorMessage: details.failureReason ?? null
+    });
+  }
 }
 
 async function getWatermarkSettings(job: JobExecution) {
@@ -943,6 +1036,8 @@ async function executePostJob(job: JobExecution) {
     source: "estimated"
   });
 
+  await updateShopeeQueueStatus(job, "published", { publishResult });
+
   await logAction({
     userId: job.userId,
     type: "post",
@@ -1219,6 +1314,13 @@ export async function processQueuedJobs(limit = 10, jobType?: JobType) {
           status: shouldRetry ? "retrying" : "failed",
           $inc: { failedCount: 1 }
         });
+
+        if (!shouldRetry) {
+          await updateShopeeQueueStatus(job, "failed", {
+            failureReason: failure.failureReason,
+            errorCode: failure.errorCode
+          });
+        }
       }
 
       if (job.type === "comment-reply") {

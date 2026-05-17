@@ -10,8 +10,16 @@ type CaptionLengthMode = "balanced" | "short";
 
 type AutoPostConfig = {
   enabled: boolean;
+  contentSource: "shopee-affiliate" | "google-drive";
   folderId: string;
   folderName: string;
+  shopeeSourceTag: "trending" | "best_selling" | "top_search" | "best_roi" | "manual";
+  shopeeKeyword: string;
+  shopeeCategory: string;
+  shopeeCaptionStyle: "soft_sell" | "urgency" | "problem_solution" | "review_style" | "deal_alert" | "lifestyle";
+  shopeeTrackingId: string;
+  shopeeBlockedCategories: string[];
+  shopeeCategoryPriority: string[];
   targetPageIds: string[];
   intervalMinutes: number;
   captionStrategy: CaptionStrategy;
@@ -62,8 +70,16 @@ const DEFAULT_MULTI_IMAGE_AI_PROMPT = `เขียนแคปชั่น Face
 
 const defaults: AutoPostConfig = {
   enabled: false,
+  contentSource: "shopee-affiliate",
   folderId: "root",
   folderName: "My Drive",
+  shopeeSourceTag: "trending",
+  shopeeKeyword: "",
+  shopeeCategory: "",
+  shopeeCaptionStyle: "lifestyle",
+  shopeeTrackingId: "",
+  shopeeBlockedCategories: [],
+  shopeeCategoryPriority: [],
   targetPageIds: [],
   intervalMinutes: 60,
   captionStrategy: "hybrid",
@@ -200,7 +216,6 @@ export function AutoPostAiPanel() {
   const forcedAutomationMode: AutomationMode = "multi-image-ai";
   const hideAutomationModeSelector = true;
   const [config, setConfig] = useState<AutoPostConfig>(defaults);
-  const [folders, setFolders] = useState<Folder[]>([]);
   const [pages, setPages] = useState<FacebookPage[]>([]);
   const [logs, setLogs] = useState<StatusLog[]>([]);
   const [message, setMessage] = useState("");
@@ -218,7 +233,9 @@ export function AutoPostAiPanel() {
       const [statusRes, pagesRes, foldersRes] = await Promise.all([
         fetch("/api/auto-post-ai/status", { cache: "no-store" }),
         fetch("/api/facebook/pages", { cache: "no-store" }),
-        fetch("/api/google-drive/folders", { cache: "no-store" })
+        Promise.resolve(new Response(JSON.stringify({ ok: true, data: { folders: [] } }), {
+          headers: { "content-type": "application/json" }
+        }))
       ]);
 
       const [statusJson, pagesJson, foldersJson] = await Promise.all([
@@ -240,7 +257,7 @@ export function AutoPostAiPanel() {
       }
 
       if (pagesJson.ok) setPages(pagesJson.data?.pages ?? []);
-      if (foldersJson.ok) setFolders(foldersJson.data?.folders ?? []);
+      void foldersJson;
     } catch (statusError) {
       setError(statusError instanceof Error ? statusError.message : "Unable to load Auto Post status");
     } finally {
@@ -414,22 +431,23 @@ export function AutoPostAiPanel() {
 
         <div className="grid cols-2 auto-post-grid auto-post-grid-minimal">
           <label className="label">
-            Google Drive Folder
+            Shopee Product Source
             <select
               className="select"
-              value={config.folderId}
-              onChange={(event) => {
-                const folder = folders.find((item) => item.id === event.target.value);
+              value={config.shopeeSourceTag}
+              onChange={(event) =>
                 setConfig((current) => ({
                   ...current,
-                  folderId: event.target.value,
-                  folderName: folder?.name ?? current.folderName
-                }));
-              }}
+                  contentSource: "shopee-affiliate",
+                  shopeeSourceTag: event.target.value as AutoPostConfig["shopeeSourceTag"]
+                }))
+              }
             >
-              {folders.map((folder) => (
-                <option key={folder.id} value={folder.id}>{folder.name}</option>
-              ))}
+              <option value="trending">Trending products</option>
+              <option value="best_selling">Best-selling products</option>
+              <option value="top_search">Top searched products</option>
+              <option value="best_roi">Best ROI products</option>
+              <option value="manual">Manual keyword search</option>
             </select>
           </label>
 
@@ -444,6 +462,58 @@ export function AutoPostAiPanel() {
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
             </select>
+          </label>
+        </div>
+
+        <div className="grid cols-2 auto-post-grid auto-post-grid-minimal">
+          <label className="label">
+            Keyword
+            <input
+              className="input"
+              value={config.shopeeKeyword}
+              onChange={(event) => setConfig((current) => ({ ...current, shopeeKeyword: event.target.value }))}
+              placeholder="Shopee keyword, e.g. home organizer"
+            />
+          </label>
+
+          <label className="label">
+            Category
+            <input
+              className="input"
+              value={config.shopeeCategory}
+              onChange={(event) => setConfig((current) => ({ ...current, shopeeCategory: event.target.value }))}
+              placeholder="Lifestyle, Beauty, Home"
+            />
+          </label>
+        </div>
+
+        <div className="grid cols-2 auto-post-grid auto-post-grid-minimal">
+          <label className="label">
+            Caption Style
+            <select
+              className="select"
+              value={config.shopeeCaptionStyle}
+              onChange={(event) =>
+                setConfig((current) => ({ ...current, shopeeCaptionStyle: event.target.value as AutoPostConfig["shopeeCaptionStyle"] }))
+              }
+            >
+              <option value="soft_sell">Soft sell</option>
+              <option value="urgency">Urgency</option>
+              <option value="problem_solution">Problem-solution</option>
+              <option value="review_style">Review style</option>
+              <option value="deal_alert">Deal alert</option>
+              <option value="lifestyle">Lifestyle</option>
+            </select>
+          </label>
+
+          <label className="label">
+            Tracking ID
+            <input
+              className="input"
+              value={config.shopeeTrackingId}
+              onChange={(event) => setConfig((current) => ({ ...current, shopeeTrackingId: event.target.value }))}
+              placeholder="Optional affiliate tracking id"
+            />
           </label>
         </div>
 
@@ -607,7 +677,7 @@ export function AutoPostAiPanel() {
         <div className="muted">Unique image assignment per page is handled by the in-app automation engine for each run.</div>
         {config.automationMode === "multi-image-ai" ? (
           <div className="muted">
-            โหมดหลายภาพ AI จะสุ่มภาพที่มีธีมใกล้กันจากโฟลเดอร์, จับแกนหลักของภาพ และคิดแคปชั่นใหม่ให้เองโดยไม่ใช้ Caption Mode ปกติ
+            โหมดหลายภาพ AI จะดึงสินค้า Shopee หลายรายการมาทำเป็นโพสต์เปรียบเทียบ/เลือกข้อ 1-4 พร้อมลิงก์ Affiliate โดยไม่ต้องใช้ Google Drive
           </div>
         ) : null}
         {config.automationMode === "multi-image-ai" ? (
