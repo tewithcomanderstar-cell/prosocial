@@ -1,6 +1,11 @@
 import { isUnauthorizedError, jsonError, jsonOk } from "@/lib/api";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
 import { ActionLog } from "@/models/ActionLog";
+import { FacebookConnection } from "@/models/FacebookConnection";
+import { FacebookPostQueue } from "@/models/FacebookPostQueue";
+import { ShopeeProduct } from "@/models/ShopeeProduct";
+import { getShopeeProductProvider } from "@/lib/services/shopee-affiliate";
+import { safeLogAction } from "@/lib/services/logging";
 
 type AutoPostConfigStatusDoc = {
   _id: unknown;
@@ -42,6 +47,7 @@ export async function GET() {
   try {
     const { requireAuth } = await import("@/lib/api");
     const userId = await requireAuth();
+    console.info("[auto-post/control-panel] status fetch started", { userId });
 
     const configResult = await AutoPostConfig.findOneAndUpdate(
       { userId },
@@ -69,6 +75,30 @@ export async function GET() {
 
     const legacyLastError = config?.lastError ?? null;
     const sanitizedLastError = sanitizeLegacyMessage(legacyLastError);
+    const facebookConnection = await FacebookConnection.findOne({ userId }).lean();
+    const connectedPageCount = Array.isArray((facebookConnection as any)?.pages) ? (facebookConnection as any).pages.length : 0;
+    const shopeeProvider = getShopeeProductProvider();
+    const lastProduct = await ShopeeProduct.findOne({}).sort({ fetchedAt: -1 }).select("fetchedAt").lean();
+    const lastPublishedQueueItem = await FacebookPostQueue.findOne({ userId, status: "published" })
+      .sort({ updatedAt: -1 })
+      .select("updatedAt")
+      .lean();
+    const hasAffiliateTracking = typeof config?.shopeeTrackingId === "string" && config.shopeeTrackingId.trim().length > 0;
+    const contentSource = String(config?.contentSource ?? "shopee-affiliate");
+    const shopeeSetupReady = contentSource === "shopee-affiliate" && Boolean(config?.shopeeSourceTag);
+    const facebookReady = connectedPageCount > 0;
+
+    const controlPanel = {
+      state: !shopeeSetupReady ? "setup_required" : !facebookReady ? "facebook_required" : "ready",
+      shopeeApiStatus: shopeeProvider.name === "mock-shopee-provider" ? "mock_provider_ready" : "configured",
+      affiliateConfigStatus: hasAffiliateTracking ? "configured" : "setup_required",
+      facebookPageStatus: facebookReady ? "connected" : "missing",
+      autoPostEngineStatus: config?.autoPostStatus ?? "paused",
+      lastProductFetchAt: (lastProduct as any)?.fetchedAt ?? null,
+      lastPublishAt: (lastPublishedQueueItem as any)?.updatedAt ?? null,
+      provider: shopeeProvider.name,
+      connectedPageCount
+    };
 
     if (config && isLegacyMessage(legacyLastError)) {
       await AutoPostConfig.findByIdAndUpdate(config._id, {
@@ -101,11 +131,38 @@ export async function GET() {
         metadata: log.metadata ?? {}
       }));
 
-    return jsonOk({ config: sanitizedConfig, logs: normalizedLogs });
+    await safeLogAction({
+      userId,
+      type: "queue",
+      level: "info",
+      message: "Auto Post control panel status loaded",
+      metadata: {
+        autoPost: true,
+        shopeeAffiliate: true,
+        controlPanelState: controlPanel.state,
+        shopeeApiStatus: controlPanel.shopeeApiStatus,
+        affiliateConfigStatus: controlPanel.affiliateConfigStatus,
+        facebookPageStatus: controlPanel.facebookPageStatus,
+        connectedPageCount
+      }
+    });
+
+    console.info("[auto-post/control-panel] status fetch completed", {
+      userId,
+      state: controlPanel.state,
+      connectedPageCount,
+      provider: shopeeProvider.name
+    });
+
+    return jsonOk({ config: sanitizedConfig, logs: normalizedLogs, controlPanel });
   } catch (error) {
     if (isUnauthorizedError(error)) {
       return jsonError("Unauthorized", 401);
     }
+
+    console.error("[auto-post/control-panel] status fetch failed", {
+      message: error instanceof Error ? error.message : "Unknown error"
+    });
 
     return jsonError(error instanceof Error ? error.message : "Unable to load auto-post status", 500);
   }

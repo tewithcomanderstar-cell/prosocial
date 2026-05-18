@@ -36,6 +36,19 @@ type AutoPostConfig = {
 
 type Folder = { id: string; name: string };
 type FacebookPage = { pageId: string; name: string };
+type PanelState = "loading" | "setup_required" | "facebook_required" | "ready" | "error";
+
+type ControlPanelStatus = {
+  state?: Exclude<PanelState, "loading" | "error">;
+  shopeeApiStatus?: string;
+  affiliateConfigStatus?: string;
+  facebookPageStatus?: string;
+  autoPostEngineStatus?: string;
+  lastProductFetchAt?: string | null;
+  lastPublishAt?: string | null;
+  provider?: string;
+  connectedPageCount?: number;
+};
 
 type StatusLog = {
   _id: string;
@@ -48,6 +61,7 @@ type StatusLog = {
 type StatusResponse = {
   config: AutoPostConfig;
   logs: StatusLog[];
+  controlPanel?: ControlPanelStatus;
 };
 
 const MAX_TARGET_PAGES = 100;
@@ -127,7 +141,7 @@ async function readApiResult(response: Response) {
 
   if (contentType.includes("application/json")) {
     try {
-      return JSON.parse(rawText) as { ok?: boolean; message?: string; data?: any; code?: string };
+      return JSON.parse(rawText) as { ok?: boolean; message?: string; data?: any; code?: string; warning?: string };
     } catch {
       return {
         ok: false,
@@ -140,6 +154,36 @@ async function readApiResult(response: Response) {
     ok: false,
     message: sanitizeAutomationError(rawText || "The server returned an unexpected response.")
   };
+}
+
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 9000) {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
+function normalizePagesResponse(payload: any): FacebookPage[] {
+  const candidates = [
+    payload?.data?.pages,
+    payload?.pages,
+    payload?.data?.destinations,
+    payload?.destinations,
+    Array.isArray(payload) ? payload : null
+  ];
+  const rawPages = candidates.find((value) => Array.isArray(value)) ?? [];
+  return rawPages
+    .map((page: any) => ({
+      pageId: String(page.pageId ?? page.id ?? page.externalPageId ?? ""),
+      name: String(page.name ?? page.pageName ?? page.label ?? "Facebook Page")
+    }))
+    .filter((page: FacebookPage) => page.pageId.length > 0);
 }
 
 function statusLabel(status?: AutoPostStatus) {
@@ -201,6 +245,8 @@ export function AutoPostPanel() {
   const [config, setConfig] = useState<AutoPostConfig>(defaults);
   const [pages, setPages] = useState<FacebookPage[]>([]);
   const [logs, setLogs] = useState<StatusLog[]>([]);
+  const [controlPanel, setControlPanel] = useState<ControlPanelStatus | null>(null);
+  const [panelState, setPanelState] = useState<PanelState>("loading");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -210,38 +256,70 @@ export function AutoPostPanel() {
   const [stopping, setStopping] = useState(false);
 
   const loadStatus = useCallback(async (showLoader = false) => {
-    if (showLoader) setLoading(true);
+    if (showLoader) {
+      setLoading(true);
+      setPanelState("loading");
+    }
+    console.info("[auto-post/control-panel] fetch started", { showLoader });
 
     try {
-      const [statusRes, pagesRes, foldersRes] = await Promise.all([
-        fetch("/api/auto-post/status", { cache: "no-store" }),
-        fetch("/api/facebook/pages", { cache: "no-store" }),
-        Promise.resolve(new Response(JSON.stringify({ ok: true, data: { folders: [] } }), {
-          headers: { "content-type": "application/json" }
-        }))
+      const [statusResult, pagesResult] = await Promise.allSettled([
+        fetchWithTimeout("/api/auto-post/status", { cache: "no-store" }),
+        fetchWithTimeout("/api/facebook/pages", { cache: "no-store" })
       ]);
 
-      const [statusJson, pagesJson, foldersJson] = await Promise.all([
-        readApiResult(statusRes),
-        readApiResult(pagesRes),
-        readApiResult(foldersRes)
-      ]);
+      const statusJson =
+        statusResult.status === "fulfilled"
+          ? await readApiResult(statusResult.value)
+          : { ok: false, message: statusResult.reason instanceof Error ? statusResult.reason.message : "Unable to load Auto Post status" };
+      const pagesJson =
+        pagesResult.status === "fulfilled"
+          ? await readApiResult(pagesResult.value)
+          : { ok: false, message: pagesResult.reason instanceof Error ? pagesResult.reason.message : "Unable to load Facebook pages right now." };
 
       if (statusJson.ok) {
         const statusData = statusJson.data as StatusResponse;
         setConfig((current) => ({ ...current, ...defaults, ...statusData.config }));
         setLogs((statusData.logs ?? []).slice(0, 10).map((log) => ({ ...log, message: sanitizeText(log.message) })));
+        setControlPanel(statusData.controlPanel ?? null);
       } else if (statusJson.message) {
         setError(statusJson.message);
       }
 
-      if (pagesJson.ok) setPages(pagesJson.data?.pages ?? []);
-      else if (pagesJson.message) setError(pagesJson.message);
-      if (!foldersJson.ok && foldersJson.message) setError(foldersJson.message);
+      const parsedPages = pagesJson.ok ? normalizePagesResponse(pagesJson) : [];
+      if (parsedPages.length > 0) {
+        setPages(parsedPages);
+        if (pagesJson.data?.warning || pagesJson.warning) {
+          setMessage(String(pagesJson.data?.warning ?? pagesJson.warning));
+        }
+      } else if (pagesJson.message) {
+        setPages([]);
+        setError(pagesJson.message);
+      }
+
+      const statusState = statusJson.ok ? (statusJson.data as StatusResponse).controlPanel?.state : undefined;
+      const nextState: PanelState = !statusJson.ok
+        ? "error"
+        : statusState === "setup_required"
+          ? "setup_required"
+          : parsedPages.length === 0
+            ? "facebook_required"
+            : "ready";
+      setPanelState(nextState);
+      console.info("[auto-post/control-panel] fetch completed", {
+        statusOk: Boolean(statusJson.ok),
+        pagesOk: Boolean(pagesJson.ok),
+        parsedPagesCount: parsedPages.length,
+        responseKeys: pagesJson ? Object.keys(pagesJson) : [],
+        state: nextState
+      });
     } catch (statusError) {
-      setError(statusError instanceof Error ? statusError.message : "Unable to load Auto Post status");
+      const message = statusError instanceof Error ? statusError.message : "Unable to load Auto Post status";
+      console.error("[auto-post/control-panel] fetch failed", { message });
+      setError(message);
+      setPanelState("error");
     } finally {
-      if (showLoader) setLoading(false);
+      setLoading(false);
     }
   }, []);
 
@@ -383,8 +461,31 @@ export function AutoPostPanel() {
     }
   }
 
-  if (loading) {
-    return <p className="muted">Loading control panel...</p>;
+  const visibleState: PanelState = loading ? "loading" : panelState;
+  const hasFacebookPages = pages.length > 0;
+  const setupRequired = visibleState === "setup_required" || controlPanel?.affiliateConfigStatus === "setup_required";
+  const facebookRequired = visibleState === "facebook_required" || !hasFacebookPages;
+  const blockingError = visibleState === "error" ? error || "Unable to load Auto Post control panel" : "";
+
+  function renderStateBanner() {
+    if (visibleState === "loading") {
+      return <div className="composer-message">Loading control panel...</div>;
+    }
+    if (blockingError) {
+      return (
+        <div className="composer-message composer-message-error">
+          <strong>{blockingError}</strong>
+          <button className="button button-secondary" type="button" onClick={() => loadStatus(true)}>Retry</button>
+        </div>
+      );
+    }
+    if (setupRequired) {
+      return <div className="composer-message">Shopee Affiliate setup required</div>;
+    }
+    if (facebookRequired) {
+      return <div className="composer-message">Connect Facebook Page first</div>;
+    }
+    return <div className="composer-message">Shopee Affiliate Auto Post is ready.</div>;
   }
 
   return (
@@ -521,7 +622,7 @@ export function AutoPostPanel() {
             <span className="muted">{selectedPageNames.length} / {MAX_TARGET_PAGES} selected</span>
           </div>
           <div className="chip-grid">
-            {pages.map((page) => {
+            {pages.length ? pages.map((page) => {
               const active = config.targetPageIds.includes(page.pageId);
               const disabled = !active && config.targetPageIds.length >= MAX_TARGET_PAGES;
               return (
@@ -535,7 +636,7 @@ export function AutoPostPanel() {
                   {page.name}
                 </button>
               );
-            })}
+            }) : <div className="composer-media-empty">Connect Facebook Page first</div>}
           </div>
         </div>
 
@@ -606,8 +707,18 @@ export function AutoPostPanel() {
           <span className={`badge ${statusTone(config.autoPostStatus)}`}>{statusLabel(config.autoPostStatus)}</span>
         </div>
 
+        {renderStateBanner()}
         {message ? <div className="composer-message">{message}</div> : null}
-        {error ? <div className="composer-message composer-message-error">{error}</div> : null}
+        {error && !blockingError ? <div className="composer-message composer-message-error">{error}</div> : null}
+
+        <div className="grid cols-2 auto-post-metrics auto-post-metrics-minimal">
+          <div className="auto-post-metric-card"><span className="muted">Shopee API status</span><strong>{controlPanel?.shopeeApiStatus ?? "checking"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Affiliate config status</span><strong>{controlPanel?.affiliateConfigStatus ?? "checking"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Facebook Page status</span><strong>{hasFacebookPages ? `connected (${pages.length})` : controlPanel?.facebookPageStatus ?? "missing"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Auto-post engine status</span><strong>{controlPanel?.autoPostEngineStatus ?? statusLabel(config.autoPostStatus)}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Last product fetch time</span><strong>{formatDateTime(controlPanel?.lastProductFetchAt ?? undefined)}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Last publish time</span><strong>{formatDateTime(controlPanel?.lastPublishAt ?? undefined)}</strong></div>
+        </div>
 
         <div className="auto-post-control-row">
           <button className="button button-secondary" type="button" onClick={handleStartNow} disabled={startDisabled}>
