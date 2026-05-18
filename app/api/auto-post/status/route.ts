@@ -5,7 +5,6 @@ import { FacebookConnection } from "@/models/FacebookConnection";
 import { FacebookPostQueue } from "@/models/FacebookPostQueue";
 import { ShopeeProduct } from "@/models/ShopeeProduct";
 import { getShopeeProductProvider } from "@/lib/services/shopee-affiliate";
-import { safeLogAction } from "@/lib/services/logging";
 
 type AutoPostConfigStatusDoc = {
   _id: unknown;
@@ -49,21 +48,40 @@ export async function GET() {
     const userId = await requireAuth();
     console.info("[auto-post/control-panel] status fetch started", { userId });
 
-    const configResult = await AutoPostConfig.findOneAndUpdate(
-      { userId },
-      {
-        $setOnInsert: {
-          userId,
-          nextRunAt: new Date(),
-          autoPostStatus: "paused",
-          jobStatus: "pending",
-          retryCount: 0
-        }
-      },
-      { upsert: true, new: true }
-    ).lean();
+    // This status endpoint is polled by the UI, so it must stay read-only.
+    // MongoDB Atlas blocks all writes when storage quota is exceeded; even an
+    // upsert/log write here would make the control panel fail to render.
+    const configResult = await AutoPostConfig.findOne({ userId }).lean();
 
     const config = (configResult as AutoPostConfigStatusDoc | null) ?? null;
+    const defaultConfig = {
+      userId,
+      enabled: false,
+      contentSource: "shopee-affiliate",
+      folderId: "root",
+      folderName: "My Drive",
+      shopeeSourceTag: "trending",
+      shopeeKeyword: "",
+      shopeeCategory: "",
+      shopeeCaptionStyle: "soft_sell",
+      shopeeTrackingId: "",
+      shopeeBlockedCategories: [],
+      shopeeCategoryPriority: [],
+      targetPageIds: [],
+      intervalMinutes: 60,
+      captionStrategy: "hybrid",
+      captions: [],
+      hashtags: [],
+      aiPrompt: "",
+      postingWindowStart: "06:00",
+      postingWindowEnd: "00:00",
+      language: "th",
+      autoPostStatus: "paused",
+      jobStatus: "pending",
+      retryCount: 0,
+      lastError: null
+    };
+    const effectiveConfig = config ?? defaultConfig;
 
     const logs = await ActionLog.find({
       userId,
@@ -73,7 +91,7 @@ export async function GET() {
       .limit(30)
       .lean();
 
-    const legacyLastError = config?.lastError ?? null;
+    const legacyLastError = effectiveConfig?.lastError ?? null;
     const sanitizedLastError = sanitizeLegacyMessage(legacyLastError);
     const facebookConnection = await FacebookConnection.findOne({ userId }).lean();
     const connectedPageCount = Array.isArray((facebookConnection as any)?.pages) ? (facebookConnection as any).pages.length : 0;
@@ -83,9 +101,10 @@ export async function GET() {
       .sort({ updatedAt: -1 })
       .select("updatedAt")
       .lean();
-    const hasAffiliateTracking = typeof config?.shopeeTrackingId === "string" && config.shopeeTrackingId.trim().length > 0;
-    const contentSource = String(config?.contentSource ?? "shopee-affiliate");
-    const shopeeSetupReady = contentSource === "shopee-affiliate" && Boolean(config?.shopeeSourceTag);
+    const hasAffiliateTracking =
+      typeof effectiveConfig?.shopeeTrackingId === "string" && effectiveConfig.shopeeTrackingId.trim().length > 0;
+    const contentSource = String(effectiveConfig?.contentSource ?? "shopee-affiliate");
+    const shopeeSetupReady = contentSource === "shopee-affiliate" && Boolean(effectiveConfig?.shopeeSourceTag);
     const facebookReady = connectedPageCount > 0;
 
     const controlPanel = {
@@ -93,26 +112,17 @@ export async function GET() {
       shopeeApiStatus: shopeeProvider.name === "mock-shopee-provider" ? "mock_provider_ready" : "configured",
       affiliateConfigStatus: hasAffiliateTracking ? "configured" : "setup_required",
       facebookPageStatus: facebookReady ? "connected" : "missing",
-      autoPostEngineStatus: config?.autoPostStatus ?? "paused",
+      autoPostEngineStatus: effectiveConfig?.autoPostStatus ?? "paused",
       lastProductFetchAt: (lastProduct as any)?.fetchedAt ?? null,
       lastPublishAt: (lastPublishedQueueItem as any)?.updatedAt ?? null,
       provider: shopeeProvider.name,
       connectedPageCount
     };
 
-    if (config && isLegacyMessage(legacyLastError)) {
-      await AutoPostConfig.findByIdAndUpdate(config._id, {
-        lastError: null,
-        lastStatus: config.autoPostStatus === "paused" ? "paused" : config.lastStatus ?? "pending"
-      });
-    }
-
-    const sanitizedConfig = config
-      ? {
-          ...config,
-          lastError: sanitizedLastError
-        }
-      : config;
+    const sanitizedConfig = {
+      ...effectiveConfig,
+      lastError: isLegacyMessage(legacyLastError) ? null : sanitizedLastError
+    };
 
     const normalizedLogs = logs
       .filter((log) => {
@@ -130,22 +140,6 @@ export async function GET() {
         createdAt: log.createdAt,
         metadata: log.metadata ?? {}
       }));
-
-    await safeLogAction({
-      userId,
-      type: "queue",
-      level: "info",
-      message: "Auto Post control panel status loaded",
-      metadata: {
-        autoPost: true,
-        shopeeAffiliate: true,
-        controlPanelState: controlPanel.state,
-        shopeeApiStatus: controlPanel.shopeeApiStatus,
-        affiliateConfigStatus: controlPanel.affiliateConfigStatus,
-        facebookPageStatus: controlPanel.facebookPageStatus,
-        connectedPageCount
-      }
-    });
 
     console.info("[auto-post/control-panel] status fetch completed", {
       userId,

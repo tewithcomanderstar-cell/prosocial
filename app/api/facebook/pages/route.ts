@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { jsonError, normalizeRouteError, requireAuth } from "@/lib/api";
 import { connectDb } from "@/lib/db";
-import { safeLogAction } from "@/lib/services/logging";
 import { resolveCurrentWorkspaceOrCreate } from "@/lib/services/workspace";
 import { getResolvedFacebookPagesState } from "@/lib/services/facebook-pages-state";
 import { FacebookConnection } from "@/models/FacebookConnection";
@@ -29,25 +28,17 @@ export async function GET() {
     workspaceId = String(workspace._id);
     const payload = await getResolvedFacebookPagesState(userId);
 
-    await safeLogAction({
+    console.info("[facebook/pages] resolved pages list", {
       userId,
-      type: "auth",
-      level: payload.fallbackToCachedPages ? "warn" : "info",
-      message: "Resolved Facebook pages list",
-      metadata: {
-        userId,
-        workspaceId,
-        workspaceIdPresent: Boolean(workspace?._id),
-        responseShape: payload.responseShape,
-        connectedPageCount: payload.storedConnectedPageCount,
-        pagesCount: payload.count,
-        parsedPagesCount: payload.pages.length,
-        responseKeys: ["ok", "message", "data"],
-        fallbackToCachedPages: payload.fallbackToCachedPages,
-        warning: payload.warning,
-        errorCode: payload.warningCode,
-        queryFilter: { userId, workspaceId }
-      }
+      workspaceId,
+      workspaceIdPresent: Boolean(workspace?._id),
+      responseShape: payload.responseShape,
+      connectedPageCount: payload.storedConnectedPageCount,
+      pagesCount: payload.count,
+      parsedPagesCount: payload.pages.length,
+      fallbackToCachedPages: payload.fallbackToCachedPages,
+      warning: payload.warning,
+      errorCode: payload.warningCode
     });
 
     return NextResponse.json({
@@ -76,20 +67,14 @@ export async function GET() {
 
       if (cachedPages.length > 0) {
         const normalized = normalizeRouteError(error, "Unable to validate Facebook pages right now.");
-        await safeLogAction({
+        console.warn("[facebook/pages] returned cached pages after warning", {
           userId,
-          type: "auth",
-          level: "warn",
-          message: "Returned cached Facebook pages after list route warning",
-          metadata: {
-            userId,
-            workspaceId,
-            responseShape: "data.pages",
-            pagesCount: cachedPages.length,
-            parsedPagesCount: cachedPages.length,
-            fallbackToCachedPages: true,
-            errorCode: normalized.code
-          }
+          workspaceId,
+          responseShape: "data.pages",
+          pagesCount: cachedPages.length,
+          parsedPagesCount: cachedPages.length,
+          fallbackToCachedPages: true,
+          errorCode: normalized.code
         });
 
         const fallbackPayload = {
