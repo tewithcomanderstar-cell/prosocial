@@ -1,4 +1,4 @@
-﻿import { Schema, model, models } from "mongoose";
+import { Schema, model, models } from "mongoose";
 
 const DEFAULT_MULTI_IMAGE_AI_PROMPT = `คุณคือผู้เชี่ยวชาญด้านการสร้างคอนเทนต์โซเชียลมีเดียสายไวรัล (Facebook/Instagram) ที่เน้นเพิ่ม Like, Comment, Share และ Time Spent
 
@@ -50,30 +50,8 @@ const autoPostAiConfigSchema = new Schema(
   {
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true, unique: true, index: true },
     enabled: { type: Boolean, default: false },
-    contentSource: {
-      type: String,
-      enum: ["shopee-affiliate", "google-drive"],
-      default: "shopee-affiliate",
-      index: true
-    },
     folderId: { type: String, default: "root" },
     folderName: { type: String, default: "My Drive" },
-    shopeeSourceTag: {
-      type: String,
-      enum: ["trending", "best_selling", "top_search", "best_roi", "manual"],
-      default: "trending",
-      index: true
-    },
-    shopeeKeyword: { type: String, default: "" },
-    shopeeCategory: { type: String, default: "" },
-    shopeeCaptionStyle: {
-      type: String,
-      enum: ["soft_sell", "urgency", "problem_solution", "review_style", "deal_alert", "lifestyle"],
-      default: "lifestyle"
-    },
-    shopeeTrackingId: { type: String, default: "" },
-    shopeeBlockedCategories: { type: [String], default: [] },
-    shopeeCategoryPriority: { type: [String], default: [] },
     targetPageIds: { type: [String], default: [] },
     intervalMinutes: {
       type: Number,

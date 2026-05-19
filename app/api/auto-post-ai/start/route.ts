@@ -1,4 +1,4 @@
-﻿import { jsonError, jsonOk } from "@/lib/api";
+import { jsonError, jsonOk } from "@/lib/api";
 import { processAutoPostAiConfigNow } from "@/lib/services/auto-post-ai";
 import { logAction, logAndNotifyError } from "@/lib/services/logging";
 import { handleRoleError, requireRole } from "@/lib/services/permissions";
@@ -8,12 +8,8 @@ type LeanAutoPostConfig = {
   _id: string;
   userId: string;
   enabled: boolean;
-  contentSource?: "shopee-affiliate" | "google-drive";
   folderId: string;
   folderName: string;
-  shopeeSourceTag?: "trending" | "best_selling" | "top_search" | "best_roi" | "manual";
-  shopeeKeyword?: string;
-  shopeeCategory?: string;
   targetPageIds: string[];
   intervalMinutes: number;
   captionStrategy: "manual" | "ai" | "hybrid";
@@ -62,6 +58,10 @@ export async function POST() {
       return jsonError("Auto Post AI settings not found", 404);
     }
 
+    if (!normalizedFolderId) {
+      return jsonError("Select a Google Drive folder first", 400);
+    }
+
     if (!config.targetPageIds.length) {
       return jsonError("Select at least one Facebook page first", 400);
     }
@@ -93,10 +93,7 @@ export async function POST() {
       metadata: {
         autoPostAi: true,
         autoPostAiConfigId: config._id,
-        contentSource: "shopee-affiliate",
-        shopeeSourceTag: config.shopeeSourceTag ?? "trending",
-        shopeeKeyword: config.shopeeKeyword ?? "",
-        shopeeCategory: config.shopeeCategory ?? "",
+        folderId: normalizedFolderId,
         targetPageCount: config.targetPageIds.length,
         intervalMinutes: config.intervalMinutes,
         source: "manual-start",

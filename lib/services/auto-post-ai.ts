@@ -1,4 +1,4 @@
-﻿import { createAutoPostAiRecords } from "@/lib/services/automation-records-ai";
+import { createAutoPostAiRecords } from "@/lib/services/automation-records-ai";
 import {
   describeVisualStyleFromImage,
   extractExactTextFromImage,
@@ -11,18 +11,6 @@ import { ensureValidFacebookConnection, ensureValidGoogleDriveConnection } from 
 import { logAction, logAndNotifyError } from "@/lib/services/logging";
 import { sanitizeMultiImageCaption } from "@/lib/services/multi-image-caption";
 import { enqueuePostJobsForPost, processQueuedJobs } from "@/lib/services/queue";
-import {
-  buildAffiliateLink,
-  getShopeeProductProvider,
-  logShopeeAutomationEvent,
-  recordShopeeQueueItem,
-  scoreShopeeProduct,
-  ShopeeCaptionStyle,
-  ShopeeProductRecord,
-  ShopeeSourceTag,
-  upsertShopeeProducts,
-  wasProductRecentlyPosted
-} from "@/lib/services/shopee-affiliate";
 import { randomItem } from "@/lib/utils";
 import { AutoPostAiConfig } from "@/models/AutoPostAiConfig";
 import { Job } from "@/models/Job";
@@ -35,16 +23,8 @@ type LeanAutoPostConfig = {
   _id: string;
   userId: string;
   enabled: boolean;
-  contentSource?: "shopee-affiliate" | "google-drive";
   folderId: string;
   folderName?: string;
-  shopeeSourceTag?: ShopeeSourceTag;
-  shopeeKeyword?: string;
-  shopeeCategory?: string;
-  shopeeCaptionStyle?: ShopeeCaptionStyle;
-  shopeeTrackingId?: string;
-  shopeeBlockedCategories?: string[];
-  shopeeCategoryPriority?: string[];
   targetPageIds: string[];
   intervalMinutes: number;
   minRandomDelayMinutes?: number;
@@ -1067,245 +1047,6 @@ Optional:
   };
 }
 
-function formatShopeePrice(product: ShopeeProductRecord) {
-  if (product.discountPrice && product.discountPrice > 0) {
-    return `${product.discountPrice} THB`;
-  }
-  return product.productPrice ? `${product.productPrice} THB` : "check latest price";
-}
-
-function buildShopeeMultiImageCaption(products: ShopeeProductRecord[], affiliateLinks: string[]) {
-  const intro = [
-    "Stop scrolling for a second. Here are Shopee finds worth comparing.",
-    "Pick item 1-4 first, then check the link that fits your style."
-  ];
-  const productLines = products.slice(0, 4).map((product, index) => {
-    const price = formatShopeePrice(product);
-    const discount = product.discountPercent ? `, ${product.discountPercent}% off` : "";
-    return `Option ${index + 1}: ${product.productName} - ${price}${discount}. ${product.productDescription || "Practical product for everyday use."}`;
-  });
-  const links = affiliateLinks.slice(0, 4).map((link, index) => `Link ${index + 1}: ${link}`);
-  return [
-    ...intro,
-    ...productLines,
-    "Comment 1-4 for the item you like most. Save this post before the deal changes.",
-    "This post contains affiliate links.",
-    ...links,
-    "#ShopeeAffiliate #Deals #ProductFinds"
-  ].join("\n");
-}
-
-function buildShopeeMultiImageReplies(products: ShopeeProductRecord[]) {
-  return products.slice(0, 4).map((product, index) => ({
-    optionKey: String(index + 1),
-    replyText: `You picked ${index + 1}: ${product.productName}. This usually fits people who like practical finds with a clear everyday use. Check the matching link in the caption.`
-  }));
-}
-
-async function selectShopeeProductSetForPage(input: {
-  userId: string;
-  pageId: string;
-  config: LeanAutoPostConfig;
-  count: number;
-  alreadyUsedProductIds: Set<string>;
-}) {
-  const provider = getShopeeProductProvider();
-  const products = await provider.fetchProducts({
-    sourceTag: input.config.shopeeSourceTag ?? "trending",
-    keyword: input.config.shopeeKeyword,
-    category: input.config.shopeeCategory,
-    limit: Math.max(20, input.count * 5)
-  });
-  await upsertShopeeProducts(products);
-
-  const scored: Array<{ product: ShopeeProductRecord; score: ReturnType<typeof scoreShopeeProduct> }> = [];
-  for (const product of products) {
-    const recentlyPosted = await wasProductRecentlyPosted(input.userId, input.pageId, product.productId);
-    const score = scoreShopeeProduct({
-      product,
-      recentlyPosted: recentlyPosted || input.alreadyUsedProductIds.has(product.productId),
-      categoryPriority: input.config.shopeeCategoryPriority ?? [],
-      blockedCategories: input.config.shopeeBlockedCategories ?? []
-    });
-    if (!score.riskFlags.includes("blocked_category") && !score.riskFlags.includes("missing_product_url")) {
-      scored.push({ product, score });
-    }
-  }
-
-  const selected = scored
-    .filter((item) => item.score.productScore >= 35)
-    .sort((left, right) => right.score.productScore - left.score.productScore)
-    .slice(0, input.count);
-
-  if (selected.length < input.count) {
-    throw new Error(`Not enough eligible Shopee products for multi-image post. Available: ${selected.length}, required: ${input.count}.`);
-  }
-
-  selected.forEach((item) => input.alreadyUsedProductIds.add(item.product.productId));
-  return selected;
-}
-
-async function queueShopeeMultiImageAutoPostsForConfig(
-  config: LeanAutoPostConfig,
-  options: QueueAutoPostsOptions,
-  triggeredAt: Date,
-  nextRunAt: Date
-): Promise<QueueAutoPostsResult> {
-  if (!config.targetPageIds.length) {
-    throw new Error("No Facebook pages selected for Shopee Multi-image AI Auto Post");
-  }
-
-  await ensureValidFacebookConnection(config.userId);
-
-  const records = await createAutoPostAiRecords({
-    userId: config.userId,
-    configId: config._id,
-    folderId: "shopee-affiliate",
-    folderName: "Shopee Affiliate",
-    pageIds: config.targetPageIds,
-    intervalMinutes: config.intervalMinutes,
-    captionStrategy: config.captionStrategy,
-    captions: config.captions,
-    aiPrompt: config.aiPrompt || "",
-    language: config.language || "th",
-    source: options.source,
-    triggeredAt: triggeredAt.toISOString()
-  });
-
-  let queued = 0;
-  let lastPostId: unknown = null;
-  const usedProductIds = new Set<string>();
-  const batchDelayMinutes = options.immediate ? 0 : getRandomDelayMinutes(config.minRandomDelayMinutes ?? 0, config.maxRandomDelayMinutes ?? 0);
-  const batchRequestedStartAt = new Date(Date.now() + batchDelayMinutes * 60 * 1000);
-  const batchStartAt = fitBatchStartToPostingWindow(
-    batchRequestedStartAt,
-    config.targetPageIds.length,
-    config.postingWindowStart,
-    config.postingWindowEnd
-  );
-  const productCount = config.multiImageCountMode === "5" ? 5 : config.multiImageCountMode === "6-10" ? 6 : 4;
-
-  for (let index = 0; index < config.targetPageIds.length; index += 1) {
-    const pageId = config.targetPageIds[index];
-    const selectedProducts = await selectShopeeProductSetForPage({
-      userId: config.userId,
-      pageId,
-      config,
-      count: productCount,
-      alreadyUsedProductIds: usedProductIds
-    });
-    const products = selectedProducts.map((item) => item.product);
-    const affiliateLinks = products.map((product, productIndex) =>
-      buildAffiliateLink(product, config.shopeeTrackingId?.trim() || `page-${pageId}-item-${productIndex + 1}`)
-    );
-    const caption = sanitizeMultiImageCaption(buildShopeeMultiImageCaption(products, affiliateLinks));
-    const optionReplies = buildShopeeMultiImageReplies(products);
-    const pinnedComment = buildPinnedCommentFromOptionReplies(optionReplies);
-    const startAt = new Date(batchStartAt.getTime() + index * AUTO_POST_BATCH_PAGE_SPACING_MINUTES * 60 * 1000);
-    const primaryProduct = products[0];
-
-    const post = await Post.create({
-      userId: config.userId,
-      title: `Shopee Multi-image AI ${primaryProduct.productName}`,
-      content: caption,
-      pinnedComment,
-      autoCommentEnabled: Boolean(config.autoCommentEnabled),
-      autoCommentMode: "multi-image-ai",
-      autoCommentOptionReplies: optionReplies,
-      hashtags: normalizeHashtags(config.hashtags),
-      imageUrls: products.map((product) => product.productImageUrl).filter(Boolean),
-      targetPageIds: [pageId],
-      randomizeImages: false,
-      randomizeCaption: false,
-      postingMode: "broadcast",
-      variants: [],
-      status: "scheduled"
-    });
-
-    lastPostId = post._id;
-    const queuedForPost = await enqueuePostJobsForPost(config.userId, String(post._id), {
-      applyRandomDelay: false,
-      startAt,
-      payloadExtras: {
-        autoPostAiConfigId: config._id,
-        autoSource: "shopee-affiliate",
-        automationMode: "multi-image-ai",
-        shopeeProductId: primaryProduct.productId,
-        shopeeProductIds: products.map((product) => product.productId),
-        affiliateLinks,
-        scheduledDelayMinutes: batchDelayMinutes + index * AUTO_POST_BATCH_PAGE_SPACING_MINUTES,
-        workflowId: records.workflowId,
-        workflowRunId: records.workflowRunId,
-        contentItemId: records.contentItemId
-      }
-    });
-
-    for (let productIndex = 0; productIndex < products.length; productIndex += 1) {
-      await recordShopeeQueueItem({
-        userId: config.userId,
-        pageId,
-        product: products[productIndex],
-        postId: String(post._id),
-        scheduledAt: startAt,
-        affiliateLink: affiliateLinks[productIndex]
-      });
-    }
-
-    await logShopeeAutomationEvent({
-      userId: config.userId,
-      level: "success",
-      message: "Shopee multi-image affiliate post queued",
-      productId: primaryProduct.productId,
-      pageId,
-      metadata: {
-        productIds: products.map((product) => product.productId),
-        scheduledAt: startAt.toISOString()
-      }
-    });
-
-    queued += queuedForPost;
-  }
-
-  await updateAutoPostState(config._id, {
-    autoPostStatus: "posting",
-    jobStatus: "pending",
-    lastStatus: "pending",
-    lastError: null,
-    lastRunAt: triggeredAt,
-    nextRunAt,
-    retryCount: 0,
-    lastPostId,
-    lastSelectedImageId: null,
-    lastWorkflowId: records.workflowId,
-    lastWorkflowRunId: records.workflowRunId,
-    lastContentItemId: records.contentItemId
-  });
-
-  await logAction({
-    userId: config.userId,
-    type: "queue",
-    level: "info",
-    message: options.source === "manual-start" ? "Shopee Multi-image AI Auto Post started" : "Scheduled Shopee Multi-image AI Auto Post queued",
-    relatedPostId: lastPostId ? String(lastPostId) : undefined,
-    metadata: {
-      autoPostAi: true,
-      shopeeAffiliate: true,
-      autoPostAiConfigId: config._id,
-      source: options.source,
-      queued,
-      eligiblePageIds: config.targetPageIds,
-      workflowId: records.workflowId,
-      workflowRunId: records.workflowRunId,
-      contentItemId: records.contentItemId
-    }
-  });
-
-  return {
-    queued,
-    ...records
-  };
-}
-
 async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: QueueAutoPostsOptions): Promise<QueueAutoPostsResult> {
   const triggeredAt = new Date();
   const nextRunAt = getNextAutoRun(config.intervalMinutes, config.postingWindowStart, config.postingWindowEnd, triggeredAt);
@@ -1319,10 +1060,6 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
     lastRunAt: triggeredAt,
     nextRunAt
   });
-
-  if ((config.contentSource ?? "shopee-affiliate") === "shopee-affiliate") {
-    return queueShopeeMultiImageAutoPostsForConfig(config, options, triggeredAt, nextRunAt);
-  }
 
   if (!config.targetPageIds.length) {
     throw new Error("No Facebook pages selected for Auto Post");
