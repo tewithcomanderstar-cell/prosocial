@@ -448,7 +448,6 @@ function buildShopeeAffiliateGraphqlQuery(query: ProductDiscoveryQuery) {
       ratingStar
       commissionRate
       shopName
-      categoryName
     }
   }
 }`;
