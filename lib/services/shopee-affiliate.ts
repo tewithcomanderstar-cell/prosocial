@@ -79,7 +79,7 @@ type ShopeeEnvStatus = {
   optionalMissing: string[];
 };
 
-type ShopeeAuthMode = "open_platform_query" | "affiliate_headers" | "unsigned";
+type ShopeeAuthMode = "affiliate_graphql" | "open_platform_query" | "affiliate_headers" | "unsigned";
 
 export class ShopeeProviderError extends Error {
   constructor(
@@ -120,7 +120,12 @@ function getShopeeCredentialEnv() {
 
 function getShopeeAuthMode(): ShopeeAuthMode {
   const value = process.env.SHOPEE_AUTH_MODE?.trim().toLowerCase();
-  if (value === "affiliate_headers" || value === "unsigned") return value;
+  if (value === "affiliate_graphql" || value === "affiliate_headers" || value === "unsigned" || value === "open_platform_query") {
+    return value;
+  }
+  if (process.env.SHOPEE_AFFILIATE_API_URL?.trim().toLowerCase().includes("/graphql")) {
+    return "affiliate_graphql";
+  }
   return "open_platform_query";
 }
 
@@ -141,6 +146,7 @@ export function getShopeeEnvStatus(): ShopeeEnvStatus {
     "SHOPEE_APP_ID",
     "SHOPEE_APP_SECRET",
     "SHOPEE_AUTH_MODE",
+    "SHOPEE_AFFILIATE_QUERY_MODE",
     "CRON_SECRET"
   ];
   const missing = providerMode === "mock" ? [] : requiredGroups.filter((item) => !item.ok).map((item) => item.label);
@@ -317,6 +323,15 @@ export class ShopeeOfficialApiProvider implements ShopeeProductProvider {
       );
     }
 
+    if (authMode === "affiliate_graphql") {
+      return fetchShopeeAffiliateGraphqlProducts({
+        endpoint,
+        appId: partnerId,
+        secret: partnerKey,
+        query
+      });
+    }
+
     // Adapter shell: keep official API specifics isolated so we can swap endpoint contracts safely.
     const url = new URL(endpoint);
     if (query.keyword) url.searchParams.set("keyword", query.keyword);
@@ -375,7 +390,7 @@ export class ShopeeOfficialApiProvider implements ShopeeProductProvider {
       });
       const message =
         response.status === 401
-          ? "Shopee rejected the request. Check partner ID, partner key, signature, timestamp, and region."
+          ? `Shopee rejected the request using ${authMode}. Check AppID/Partner ID, Secret/Partner Key, signature mode, timestamp, endpoint path, and region.`
           : `Shopee API request failed: ${response.status}`;
       throw new ShopeeProviderError(message, response.status, response.status === 401 ? "shopee_unauthorized" : "shopee_api_error", "shopee_api", bodySummary);
     }
@@ -390,6 +405,137 @@ export class ShopeeOfficialApiProvider implements ShopeeProductProvider {
   }
 }
 
+function getShopeeAffiliateListType(sourceTag?: ShopeeSourceTag) {
+  switch (sourceTag) {
+    case "best_selling":
+      return 1;
+    case "top_search":
+      return 2;
+    case "best_roi":
+      return 3;
+    case "manual":
+      return 0;
+    case "trending":
+    default:
+      return 0;
+  }
+}
+
+function escapeGraphqlString(value: string) {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, " ");
+}
+
+function buildShopeeAffiliateGraphqlQuery(query: ProductDiscoveryQuery) {
+  const limit = Math.max(1, Math.min(query.limit ?? 20, 50));
+  const listType = getShopeeAffiliateListType(query.sourceTag);
+  const args = [`limit: ${limit}`, "page: 1", `listType: ${listType}`];
+  const keyword = query.keyword?.trim() || query.category?.trim();
+  if (keyword) args.push(`keyword: "${escapeGraphqlString(keyword)}"`);
+
+  return `query {
+  productOfferV2(${args.join(", ")}) {
+    nodes {
+      productName
+      itemId
+      shopId
+      productLink
+      offerLink
+      imageUrl
+      price
+      priceMin
+      priceMax
+      sales
+      ratingStar
+      commissionRate
+      shopName
+      categoryName
+    }
+  }
+}`;
+}
+
+async function fetchShopeeAffiliateGraphqlProducts(input: {
+  endpoint: string;
+  appId: string;
+  secret: string;
+  query: ProductDiscoveryQuery;
+}) {
+  const url = new URL(input.endpoint);
+  const graphqlQuery = buildShopeeAffiliateGraphqlQuery(input.query);
+  const body = JSON.stringify({ query: graphqlQuery });
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const signature = crypto
+    .createHash("sha256")
+    .update(`${input.appId}${timestamp}${body}${input.secret}`)
+    .digest("hex");
+  const authorization = `SHA256 Credential=${input.appId}, Timestamp=${timestamp}, Signature=${signature}`;
+
+  console.info("[shopee/provider] affiliate graphql product fetch", {
+    endpointHost: url.host,
+    endpointPath: url.pathname,
+    sourceTag: input.query.sourceTag ?? "trending",
+    hasKeyword: Boolean(input.query.keyword),
+    hasCategory: Boolean(input.query.category),
+    hasAppId: Boolean(input.appId),
+    hasSecret: Boolean(input.secret),
+    authMode: "affiliate_graphql",
+    signatureGenerated: Boolean(signature),
+    authorizationScheme: "SHA256"
+  });
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      Authorization: authorization
+    },
+    body,
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    const bodySummary = await summarizeResponse(response);
+    console.warn("[shopee/provider] affiliate graphql product fetch failed", {
+      endpointHost: url.host,
+      endpointPath: url.pathname,
+      status: response.status,
+      bodySummary,
+      authMode: "affiliate_graphql",
+      signatureGenerated: Boolean(signature)
+    });
+    const message =
+      response.status === 401
+        ? "Shopee Affiliate API rejected the request. Set SHOPEE_AUTH_MODE=affiliate_graphql and verify AppID, Secret, endpoint region, timestamp, and SHA256 signature."
+        : `Shopee Affiliate API request failed: ${response.status}`;
+    throw new ShopeeProviderError(message, response.status, response.status === 401 ? "shopee_unauthorized" : "shopee_api_error", "shopee_api", bodySummary);
+  }
+
+  const payload = (await response.json()) as Record<string, any>;
+  if (payload.errors?.length) {
+    const summary = JSON.stringify(payload.errors).slice(0, 500);
+    console.warn("[shopee/provider] affiliate graphql returned errors", {
+      endpointHost: url.host,
+      endpointPath: url.pathname,
+      errorSummary: summary
+    });
+    throw new ShopeeProviderError(`Shopee Affiliate API returned errors: ${summary}`, 502, "shopee_graphql_error", "shopee_api", summary);
+  }
+
+  const nodes =
+    payload?.data?.productOfferV2?.nodes ??
+    payload?.data?.productOfferV2?.products ??
+    payload?.data?.productOfferV2?.items ??
+    [];
+
+  console.info("[shopee/provider] affiliate graphql product fetch completed", {
+    endpointHost: url.host,
+    endpointPath: url.pathname,
+    productsCount: Array.isArray(nodes) ? nodes.length : 0
+  });
+
+  return (Array.isArray(nodes) ? nodes : []).map(mapExternalProduct(input.query.sourceTag ?? "trending"));
+}
+
 function mapExternalProduct(sourceTag: ShopeeSourceTag) {
   return (item: Record<string, unknown>): ShopeeProductRecord => {
     const productId = String(item.product_id ?? item.productId ?? item.item_id ?? crypto.randomUUID());
@@ -401,23 +547,23 @@ function mapExternalProduct(sourceTag: ShopeeSourceTag) {
       itemId,
       productName: String(item.product_name ?? item.name ?? item.productName ?? "Shopee Product"),
       productDescription: String(item.product_description ?? item.description ?? item.productDescription ?? ""),
-      productPrice: Number(item.product_price ?? item.price ?? 0),
-      discountPrice: item.discount_price === undefined ? undefined : Number(item.discount_price),
+      productPrice: Number(item.product_price ?? item.price ?? item.priceMin ?? item.price_min ?? 0),
+      discountPrice: item.discount_price === undefined && item.priceMin === undefined ? undefined : Number(item.discount_price ?? item.priceMin),
       discountPercent: item.discount_percent === undefined ? undefined : Number(item.discount_percent),
-      productImageUrl: String(item.product_image_url ?? item.image ?? item.productImageUrl ?? ""),
+      productImageUrl: String(item.product_image_url ?? item.image ?? item.productImageUrl ?? item.imageUrl ?? ""),
       productImageUrls: Array.isArray(item.product_image_urls)
         ? item.product_image_urls.map(String).filter(Boolean)
         : Array.isArray(item.images)
           ? item.images.map(String).filter(Boolean)
           : undefined,
-      productUrl: String(item.product_url ?? item.url ?? item.productUrl ?? ""),
-      affiliateUrl: item.affiliate_url ? String(item.affiliate_url) : undefined,
-      category: String(item.category ?? "General"),
-      salesCount: item.sales_count === undefined ? undefined : Number(item.sales_count),
+      productUrl: String(item.product_url ?? item.url ?? item.productUrl ?? item.productLink ?? ""),
+      affiliateUrl: item.affiliate_url || item.offerLink ? String(item.affiliate_url ?? item.offerLink) : undefined,
+      category: String(item.category ?? item.categoryName ?? "General"),
+      salesCount: item.sales_count === undefined && item.sales === undefined ? undefined : Number(item.sales_count ?? item.sales),
       reviewCount: item.review_count === undefined ? undefined : Number(item.review_count),
-      shopName: item.shop_name === undefined ? undefined : String(item.shop_name),
-      rating: item.rating === undefined ? undefined : Number(item.rating),
-      commissionRate: item.commission_rate === undefined ? undefined : Number(item.commission_rate),
+      shopName: item.shop_name === undefined && item.shopName === undefined ? undefined : String(item.shop_name ?? item.shopName),
+      rating: item.rating === undefined && item.ratingStar === undefined ? undefined : Number(item.rating ?? item.ratingStar),
+      commissionRate: item.commission_rate === undefined && item.commissionRate === undefined ? undefined : Number(item.commission_rate ?? item.commissionRate),
       sourceTag,
       fetchedAt: new Date()
     };
