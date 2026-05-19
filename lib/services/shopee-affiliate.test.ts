@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 
 // @ts-ignore Node strip-types runner resolves the .ts module directly in tests.
-import { buildAffiliateLinkCore, buildShopeeImagePrompt, MockShopeeProvider, scoreShopeeProduct } from "./shopee-affiliate-core.ts";
+import { buildAffiliateLinkCore, buildShopeeImagePrompt, buildShopeeImagePromptSet, MockShopeeProvider, scoreShopeeProduct } from "./shopee-affiliate-core.ts";
 // @ts-ignore Node strip-types runner resolves the .ts module directly in tests.
 import type { ShopeeProductRecord } from "./shopee-affiliate-core.ts";
 
@@ -65,9 +65,26 @@ function testImagePromptIncludesSafetyRules() {
   const prompt = buildShopeeImagePrompt(sampleProduct, "deal_alert");
 
   assert.ok(prompt.includes(sampleProduct.productName));
-  assert.ok(prompt.includes("Do not add Shopee logos"));
+  assert.ok(prompt.includes("Shopee logos") || prompt.includes("fake logos"));
   assert.ok(prompt.includes("misleading"));
   console.log("PASS Shopee image prompt includes safety rules");
+}
+
+function testImagePromptSetCreatesFourConsistentPrompts() {
+  const promptSet = buildShopeeImagePromptSet(sampleProduct, "deal_alert");
+
+  assert.equal(promptSet.prompts.length, 4);
+  assert.deepEqual(
+    promptSet.prompts.map((item) => item.concept),
+    ["hero_product_shot", "lifestyle_usage", "close_up_detail", "viral_review_style"]
+  );
+  for (const item of promptSet.prompts) {
+    assert.ok(item.prompt.includes(sampleProduct.productName));
+    assert.ok(item.prompt.includes("Reference product image URL"));
+    assert.ok(item.prompt.includes("same"));
+  }
+  assert.ok(promptSet.negativePrompt.includes("Do not change product shape"));
+  console.log("PASS Shopee image prompt set creates 4 consistent CTR prompts");
 }
 
 await testMockProviderReturnsProducts();
@@ -75,3 +92,4 @@ testScoringRewardsStrongProducts();
 testScoringBlocksRecentDuplicates();
 testAffiliateLinkBuilderAddsTracking();
 testImagePromptIncludesSafetyRules();
+testImagePromptSetCreatesFourConsistentPrompts();

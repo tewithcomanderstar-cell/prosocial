@@ -11,10 +11,13 @@ const shopeeProductSchema = new Schema(
     discountPrice: { type: Number, default: null },
     discountPercent: { type: Number, default: null, index: true },
     productImageUrl: { type: String, default: "" },
+    productImageUrls: { type: [String], default: [] },
     productUrl: { type: String, default: "" },
     affiliateUrl: { type: String, default: "" },
     category: { type: String, default: "General", index: true },
     salesCount: { type: Number, default: 0, index: true },
+    reviewCount: { type: Number, default: 0, index: true },
+    shopName: { type: String, default: "" },
     rating: { type: Number, default: 0, index: true },
     commissionRate: { type: Number, default: 0, index: true },
     sourceTag: {

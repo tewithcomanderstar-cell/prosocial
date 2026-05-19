@@ -28,6 +28,12 @@ const autoPostConfigSchema = new Schema(
     shopeeTrackingId: { type: String, default: "" },
     shopeeBlockedCategories: { type: [String], default: [] },
     shopeeCategoryPriority: { type: [String], default: [] },
+    shopeeMinPrice: { type: Number, default: 0 },
+    shopeeMaxPrice: { type: Number, default: 0 },
+    shopeeMinRating: { type: Number, default: 0 },
+    shopeeMinSales: { type: Number, default: 0 },
+    shopeeMinDiscountPercent: { type: Number, default: 0 },
+    approvalMode: { type: Boolean, default: false, index: true },
     targetPageIds: { type: [String], default: [] },
     intervalMinutes: {
       type: Number,

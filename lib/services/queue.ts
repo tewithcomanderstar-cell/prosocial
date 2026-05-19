@@ -3,6 +3,7 @@ import sharp from "sharp";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
 import { AutoPostAiConfig } from "@/models/AutoPostAiConfig";
 import { AffiliatePerformance } from "@/models/AffiliatePerformance";
+import { AiGeneratedImage } from "@/models/AiGeneratedImage";
 import { AiGeneratedPost } from "@/models/AiGeneratedPost";
 import { CommentInbox } from "@/models/CommentInbox";
 import { FacebookPostQueue } from "@/models/FacebookPostQueue";
@@ -11,6 +12,7 @@ import { MediaCache } from "@/models/MediaCache";
 import { Post } from "@/models/Post";
 import { ProductPostHistory } from "@/models/ProductPostHistory";
 import { Schedule } from "@/models/Schedule";
+import { ShopeeProduct } from "@/models/ShopeeProduct";
 import { finalizeTrackedPostIfComplete, notifyCommentFailure } from "@/lib/services/comment-automation";
 import { logCommentStage } from "@/lib/services/comment-logging";
 import { updateAutoPostRecords } from "@/lib/services/automation-records";
@@ -42,6 +44,30 @@ type LeanMediaCache = {
   bytesBase64?: string;
   fileName: string;
   mimeType: string;
+};
+
+type LeanAiGeneratedImage = {
+  _id: string;
+  productId: string;
+  generatedImageUrl?: string;
+  fallbackImageUrl?: string;
+  promptHistory?: string[];
+};
+
+type LeanShopeeProduct = {
+  productId: string;
+  productName: string;
+  productDescription?: string;
+  productPrice?: number;
+  discountPrice?: number;
+  discountPercent?: number;
+  productImageUrl?: string;
+  productImageUrls?: string[];
+  category?: string;
+  salesCount?: number;
+  reviewCount?: number;
+  rating?: number;
+  shopName?: string;
 };
 
 type LeanDriveConnection = {
@@ -426,6 +452,139 @@ function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function escapeXml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function wrapText(value: string, maxChars: number, maxLines: number) {
+  const words = value.replace(/\s+/g, " ").trim().split(" ");
+  const lines: string[] = [];
+  let current = "";
+
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (candidate.length > maxChars && current) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = candidate;
+    }
+    if (lines.length >= maxLines) break;
+  }
+
+  if (current && lines.length < maxLines) lines.push(current);
+  if (lines.length === maxLines && words.join(" ").length > lines.join(" ").length) {
+    lines[lines.length - 1] = `${lines[lines.length - 1].replace(/\.*$/, "")}...`;
+  }
+  return lines;
+}
+
+async function fetchRemoteImageBuffer(url: string) {
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`Unable to fetch Shopee product image: ${response.status}`);
+  }
+  return Buffer.from(await response.arrayBuffer());
+}
+
+function getShopeeCardLayout(promptHistory?: string[]) {
+  const layoutEntry = (promptHistory ?? []).find((item) => item.startsWith("layout="));
+  const layout = Number(layoutEntry?.replace("layout=", "") ?? "1");
+  return Number.isFinite(layout) && layout >= 1 && layout <= 4 ? layout : 1;
+}
+
+async function renderShopeeAffiliateCard(imageDoc: LeanAiGeneratedImage): Promise<ResolvedImage> {
+  const product = (await ShopeeProduct.findOne({ productId: imageDoc.productId }).lean()) as LeanShopeeProduct | null;
+  if (!product) {
+    throw new Error("Shopee product not found for generated image");
+  }
+
+  const layout = getShopeeCardLayout(imageDoc.promptHistory);
+  const imageUrl = imageDoc.fallbackImageUrl || imageDoc.generatedImageUrl || product.productImageUrl || product.productImageUrls?.[0];
+  if (!imageUrl) {
+    throw new Error("Shopee product image is missing");
+  }
+
+  const productBuffer = await fetchRemoteImageBuffer(imageUrl);
+  const productPng = await sharp(productBuffer)
+    .resize(840, 700, { fit: "inside", withoutEnlargement: true, background: "#ffffff" })
+    .png()
+    .toBuffer();
+  const productDataUrl = `data:image/png;base64,${productPng.toString("base64")}`;
+
+  const price = product.discountPrice || product.productPrice || 0;
+  const priceText = price ? `฿${price.toLocaleString("th-TH")}` : "ดูราคาหน้าสินค้า";
+  const discountText = product.discountPercent ? `ลด ${product.discountPercent}%` : "ดีลน่าเช็ก";
+  const ratingText = product.rating ? `⭐ ${product.rating}` : "รีวิวจาก Shopee";
+  const salesText = product.salesCount ? `ขายแล้ว ${product.salesCount.toLocaleString("th-TH")}+` : "สินค้ากำลังมาแรง";
+  const titleLines = wrapText(product.productName, 26, 3);
+  const descLines = wrapText(product.productDescription || product.category || "สินค้าแนะนำจาก Shopee", 34, 2);
+
+  const layoutMeta = [
+    { kicker: "ดีลแนะนำ", headline: "ของน่าใช้ที่คนกำลังสนใจ", accent: "#ff6b2c" },
+    { kicker: "รายละเอียดสินค้า", headline: "เช็กจุดเด่นก่อนกดซื้อ", accent: "#2563eb" },
+    { kicker: "ทำไมคนสนใจ", headline: "จุดเด่นที่น่าเก็บไว้ดู", accent: "#16a34a" },
+    { kicker: "กดดูดีล", headline: "ถ้ากำลังมองหาแนวนี้", accent: "#db2777" }
+  ][layout - 1];
+
+  const bullets =
+    layout === 1
+      ? [priceText, discountText, ratingText]
+      : layout === 2
+        ? [salesText, product.shopName ? `ร้าน ${product.shopName}` : product.category || "หมวดหมู่สินค้า", ratingText]
+        : layout === 3
+          ? [discountText, salesText, "ดูรายละเอียดก่อนตัดสินใจ"]
+          : [priceText, "ลิงก์อยู่ในแคปชั่น", "ลิงก์ Affiliate"];
+
+  const svg = `
+    <svg width="1200" height="1200" viewBox="0 0 1200 1200" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#fff7ed"/>
+          <stop offset="52%" stop-color="#ffffff"/>
+          <stop offset="100%" stop-color="#eef2ff"/>
+        </linearGradient>
+        <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+          <feDropShadow dx="0" dy="24" stdDeviation="26" flood-color="#1f2937" flood-opacity="0.18"/>
+        </filter>
+      </defs>
+      <rect width="1200" height="1200" rx="0" fill="url(#bg)"/>
+      <circle cx="1040" cy="120" r="180" fill="${layoutMeta.accent}" opacity="0.10"/>
+      <circle cx="120" cy="1080" r="220" fill="${layoutMeta.accent}" opacity="0.08"/>
+      <rect x="70" y="76" width="1060" height="1048" rx="54" fill="rgba(255,255,255,0.88)" filter="url(#shadow)"/>
+      <text x="118" y="150" font-size="34" font-family="Arial, sans-serif" font-weight="700" fill="${layoutMeta.accent}">${escapeXml(layoutMeta.kicker)}</text>
+      <text x="118" y="204" font-size="48" font-family="Arial, sans-serif" font-weight="800" fill="#111827">${escapeXml(layoutMeta.headline)}</text>
+      <rect x="118" y="250" width="964" height="580" rx="42" fill="#ffffff" stroke="#f1f5f9" stroke-width="3"/>
+      <image href="${productDataUrl}" x="180" y="292" width="840" height="496" preserveAspectRatio="xMidYMid meet"/>
+      <g>
+        ${titleLines.map((line, index) => `<text x="118" y="${900 + index * 52}" font-size="42" font-family="Arial, sans-serif" font-weight="800" fill="#111827">${escapeXml(line)}</text>`).join("")}
+      </g>
+      <g>
+        ${descLines.map((line, index) => `<text x="118" y="${1038 + index * 34}" font-size="28" font-family="Arial, sans-serif" font-weight="500" fill="#64748b">${escapeXml(line)}</text>`).join("")}
+      </g>
+      <g>
+        ${bullets.map((line, index) => `
+          <rect x="${690}" y="${875 + index * 72}" width="390" height="50" rx="25" fill="${layoutMeta.accent}" opacity="${index === 0 ? "1" : "0.12"}"/>
+          <text x="${714}" y="${910 + index * 72}" font-size="25" font-family="Arial, sans-serif" font-weight="800" fill="${index === 0 ? "#ffffff" : layoutMeta.accent}">${escapeXml(line)}</text>
+        `).join("")}
+      </g>
+    </svg>
+  `;
+
+  const output = await sharp(Buffer.from(svg)).jpeg({ quality: 92 }).toBuffer();
+  return {
+    kind: "binary",
+    fileName: `shopee-${product.productId}-layout-${layout}.jpg`,
+    bytes: Uint8Array.from(output).buffer,
+    mimeType: "image/jpeg"
+  };
+}
+
 function buildPublishMessage(caption: string, hashtags?: string[]) {
   const normalizedHashtags = normalizeHashtags(hashtags);
   const hashtagBlock = normalizedHashtags.join(" ").trim();
@@ -458,6 +617,16 @@ async function resolveImages(userId: string, imageRefs: string[]): Promise<Resol
   const images: ResolvedImage[] = [];
 
   for (const ref of imageRefs) {
+    if (ref.startsWith("ai-image:")) {
+      const imageId = ref.replace("ai-image:", "");
+      const imageDoc = (await AiGeneratedImage.findById(imageId).lean()) as LeanAiGeneratedImage | null;
+      if (!imageDoc) {
+        throw new Error("Generated Shopee image is no longer available");
+      }
+      images.push(await renderShopeeAffiliateCard(imageDoc));
+      continue;
+    }
+
     if (ref.startsWith("drive:") || ref.startsWith("upload:")) {
       const isDriveRef = ref.startsWith("drive:");
       if (isDriveRef && !driveConnection) {
@@ -979,6 +1148,10 @@ async function executePostJob(job: JobExecution) {
     job.payload?.automationMode,
     pageProfileImage
   );
+
+  if (isShopeeAffiliateJob(job) && images.length < 4) {
+    throw new Error("Shopee Affiliate post validation failed: 4 generated images are required before publishing");
+  }
 
   if (hasBoundAutoPostConfig(job)) {
     await updateBoundAutoPostState(

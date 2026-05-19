@@ -1,4 +1,5 @@
-import crypto from "crypto";
+﻿import crypto from "crypto";
+import { buildShopeeImagePromptSet as buildShopeeImagePromptSetCore } from "@/lib/services/shopee-affiliate-core";
 import { generateFacebookContent } from "@/lib/services/ai";
 import { logAction } from "@/lib/services/logging";
 import { randomItem } from "@/lib/utils";
@@ -24,10 +25,13 @@ export type ShopeeProductRecord = {
   discountPrice?: number;
   discountPercent?: number;
   productImageUrl: string;
+  productImageUrls?: string[];
   productUrl: string;
   affiliateUrl?: string;
   category: string;
   salesCount?: number;
+  reviewCount?: number;
+  shopName?: string;
   rating?: number;
   commissionRate?: number;
   sourceTag: ShopeeSourceTag;
@@ -51,8 +55,11 @@ export type ShopeePostPackage = {
   product: ShopeeProductRecord;
   caption: string;
   imagePrompt: string;
+  imagePrompts: string[];
   generatedImageUrl: string;
+  generatedImageUrls: string[];
   affiliateLink: string;
+  shortAffiliateLink: string;
   imageStatus: "pending" | "generating" | "generated" | "failed" | "skipped";
   scheduledAt: Date;
   pageId: string;
@@ -64,13 +71,138 @@ export interface ShopeeProductProvider {
   fetchProducts(query: ProductDiscoveryQuery): Promise<ShopeeProductRecord[]>;
 }
 
+type ShopeeEnvStatus = {
+  ok: boolean;
+  providerMode: "mock" | "official";
+  missing: string[];
+  configured: string[];
+  optionalMissing: string[];
+};
+
+type ShopeeAuthMode = "open_platform_query" | "affiliate_headers" | "unsigned";
+
+export class ShopeeProviderError extends Error {
+  constructor(
+    message: string,
+    public readonly status = 500,
+    public readonly code = "shopee_provider_error",
+    public readonly source: "shopee_api" | "config" | "internal_api" | "unknown" = "unknown",
+    public readonly responseSummary?: string
+  ) {
+    super(message);
+    this.name = "ShopeeProviderError";
+  }
+}
+
+function hasEnv(name: string) {
+  return Boolean(process.env[name]?.trim());
+}
+
+function firstEnv(names: string[]) {
+  return names.map((name) => process.env[name]?.trim()).find(Boolean);
+}
+
+function configuredEnvNames(names: string[]) {
+  return names.filter(hasEnv);
+}
+
+function getShopeeCredentialEnv() {
+  const partnerIdNames = ["SHOPEE_PARTNER_ID", "SHOPEE_APP_ID"];
+  const partnerKeyNames = ["SHOPEE_PARTNER_KEY", "SHOPEE_API_SECRET", "SHOPEE_APP_SECRET"];
+
+  return {
+    partnerId: firstEnv(partnerIdNames),
+    partnerKey: firstEnv(partnerKeyNames),
+    partnerIdNames,
+    partnerKeyNames
+  };
+}
+
+function getShopeeAuthMode(): ShopeeAuthMode {
+  const value = process.env.SHOPEE_AUTH_MODE?.trim().toLowerCase();
+  if (value === "affiliate_headers" || value === "unsigned") return value;
+  return "open_platform_query";
+}
+
+export function getShopeeEnvStatus(): ShopeeEnvStatus {
+  const providerMode = process.env.SHOPEE_PROVIDER?.trim().toLowerCase() === "mock" ? "mock" : "official";
+  const credentials = getShopeeCredentialEnv();
+  const requiredGroups = [
+    { label: "SHOPEE_AFFILIATE_API_URL", ok: hasEnv("SHOPEE_AFFILIATE_API_URL") },
+    { label: "SHOPEE_PARTNER_ID or SHOPEE_APP_ID", ok: Boolean(credentials.partnerId) },
+    { label: "SHOPEE_PARTNER_KEY or SHOPEE_API_SECRET", ok: Boolean(credentials.partnerKey) }
+  ];
+  const optional = [
+    "SHOPEE_AFFILIATE_ID",
+    "SHOPEE_TRACKING_ID",
+    "SHOPEE_AFFILIATE_BASE_URL",
+    "SHOPEE_REGION",
+    "SHOPEE_API_SECRET",
+    "SHOPEE_APP_ID",
+    "SHOPEE_APP_SECRET",
+    "SHOPEE_AUTH_MODE",
+    "CRON_SECRET"
+  ];
+  const missing = providerMode === "mock" ? [] : requiredGroups.filter((item) => !item.ok).map((item) => item.label);
+  const configured = [
+    "SHOPEE_AFFILIATE_API_URL",
+    ...configuredEnvNames(credentials.partnerIdNames),
+    ...configuredEnvNames(credentials.partnerKeyNames),
+    ...optional,
+    "SHOPEE_PROVIDER"
+  ].filter((name, index, list) => hasEnv(name) && list.indexOf(name) === index);
+
+  return {
+    ok: missing.length === 0,
+    providerMode,
+    missing,
+    configured,
+    optionalMissing: optional.filter((name) => !hasEnv(name))
+  };
+}
+
+export function getShopeeAffiliateConfigStatus(trackingId?: string | null) {
+  const missing: string[] = [];
+  const hasAffiliateId = hasEnv("SHOPEE_AFFILIATE_ID");
+  const hasTracking = Boolean(trackingId?.trim()) || hasEnv("SHOPEE_TRACKING_ID");
+  const hasLinkBuilder = hasEnv("SHOPEE_AFFILIATE_BASE_URL");
+
+  if (!hasAffiliateId) missing.push("SHOPEE_AFFILIATE_ID");
+  if (!hasTracking) missing.push("SHOPEE_TRACKING_ID or Auto Post Tracking ID");
+  if (!hasLinkBuilder) missing.push("SHOPEE_AFFILIATE_BASE_URL");
+
+  return {
+    status: missing.length ? "setup_required" : "configured",
+    missing
+  };
+}
+
+export function ensureShopeeAffiliateConfigured(trackingId?: string | null) {
+  const status = getShopeeAffiliateConfigStatus(trackingId);
+  if (status.status === "setup_required") {
+    throw new ShopeeProviderError(
+      `Shopee Affiliate setup required. Missing: ${status.missing.join(", ")}`,
+      400,
+      "shopee_affiliate_setup_required",
+      "config"
+    );
+  }
+  return status;
+}
+
+async function summarizeResponse(response: Response) {
+  const text = await response.text().catch(() => "");
+  if (!text) return "";
+  return text.replace(/\s+/g, " ").slice(0, 500);
+}
+
 export class MockShopeeProvider implements ShopeeProductProvider {
   name = "mock_shopee_provider";
 
   async fetchProducts(query: ProductDiscoveryQuery): Promise<ShopeeProductRecord[]> {
     const now = new Date();
     const sourceTag = query.sourceTag ?? "trending";
-    const keyword = query.keyword?.trim() || "ของใช้ยอดนิยม";
+    const keyword = query.keyword?.trim() || "à¸‚à¸­à¸‡à¹ƒà¸Šà¹‰à¸¢à¸­à¸”à¸™à¸´à¸¢à¸¡";
     const category = query.category?.trim() || "Lifestyle";
     const limit = Math.max(1, Math.min(query.limit ?? 20, 50));
 
@@ -79,8 +211,8 @@ export class MockShopeeProvider implements ShopeeProductProvider {
         productId: "mock-thermal-cup",
         shopId: "10001",
         itemId: "90001",
-        productName: "แก้วเก็บอุณหภูมิพกพา 600ml",
-        productDescription: "แก้วสแตนเลสเก็บเย็น/ร้อน เหมาะกับออฟฟิศ เดินทาง และสายคาเฟ่",
+        productName: "à¹à¸à¹‰à¸§à¹€à¸à¹‡à¸šà¸­à¸¸à¸“à¸«à¸ à¸¹à¸¡à¸´à¸žà¸à¸žà¸² 600ml",
+        productDescription: "à¹à¸à¹‰à¸§à¸ªà¹à¸•à¸™à¹€à¸¥à¸ªà¹€à¸à¹‡à¸šà¹€à¸¢à¹‡à¸™/à¸£à¹‰à¸­à¸™ à¹€à¸«à¸¡à¸²à¸°à¸à¸±à¸šà¸­à¸­à¸Ÿà¸Ÿà¸´à¸¨ à¹€à¸”à¸´à¸™à¸—à¸²à¸‡ à¹à¸¥à¸°à¸ªà¸²à¸¢à¸„à¸²à¹€à¸Ÿà¹ˆ",
         productPrice: 299,
         discountPrice: 159,
         discountPercent: 47,
@@ -97,8 +229,8 @@ export class MockShopeeProvider implements ShopeeProductProvider {
         productId: "mock-mini-vacuum",
         shopId: "10002",
         itemId: "90002",
-        productName: "เครื่องดูดฝุ่นไร้สายมินิ",
-        productDescription: "ขนาดเล็ก ใช้ง่าย เหมาะกับโต๊ะทำงาน รถยนต์ และมุมเล็ก ๆ ในบ้าน",
+        productName: "à¹€à¸„à¸£à¸·à¹ˆà¸­à¸‡à¸”à¸¹à¸”à¸à¸¸à¹ˆà¸™à¹„à¸£à¹‰à¸ªà¸²à¸¢à¸¡à¸´à¸™à¸´",
+        productDescription: "à¸‚à¸™à¸²à¸”à¹€à¸¥à¹‡à¸ à¹ƒà¸Šà¹‰à¸‡à¹ˆà¸²à¸¢ à¹€à¸«à¸¡à¸²à¸°à¸à¸±à¸šà¹‚à¸•à¹Šà¸°à¸—à¸³à¸‡à¸²à¸™ à¸£à¸–à¸¢à¸™à¸•à¹Œ à¹à¸¥à¸°à¸¡à¸¸à¸¡à¹€à¸¥à¹‡à¸ à¹† à¹ƒà¸™à¸šà¹‰à¸²à¸™",
         productPrice: 490,
         discountPrice: 249,
         discountPercent: 49,
@@ -115,8 +247,8 @@ export class MockShopeeProvider implements ShopeeProductProvider {
         productId: "mock-led-mirror",
         shopId: "10003",
         itemId: "90003",
-        productName: "กระจกแต่งหน้าพร้อมไฟ LED",
-        productDescription: "ไฟนุ่ม ปรับมุมได้ เหมาะกับโต๊ะเครื่องแป้งและสายแต่งหน้า",
+        productName: "à¸à¸£à¸°à¸ˆà¸à¹à¸•à¹ˆà¸‡à¸«à¸™à¹‰à¸²à¸žà¸£à¹‰à¸­à¸¡à¹„à¸Ÿ LED",
+        productDescription: "à¹„à¸Ÿà¸™à¸¸à¹ˆà¸¡ à¸›à¸£à¸±à¸šà¸¡à¸¸à¸¡à¹„à¸”à¹‰ à¹€à¸«à¸¡à¸²à¸°à¸à¸±à¸šà¹‚à¸•à¹Šà¸°à¹€à¸„à¸£à¸·à¹ˆà¸­à¸‡à¹à¸›à¹‰à¸‡à¹à¸¥à¸°à¸ªà¸²à¸¢à¹à¸•à¹ˆà¸‡à¸«à¸™à¹‰à¸²",
         productPrice: 399,
         discountPrice: 219,
         discountPercent: 45,
@@ -133,8 +265,8 @@ export class MockShopeeProvider implements ShopeeProductProvider {
         productId: "mock-storage-box",
         shopId: "10004",
         itemId: "90004",
-        productName: "กล่องจัดระเบียบลิ้นชักแบบใส",
-        productDescription: "ช่วยแยกของเล็ก ๆ ให้หยิบง่าย โต๊ะดูโล่งขึ้น เหมาะกับบ้านและออฟฟิศ",
+        productName: "à¸à¸¥à¹ˆà¸­à¸‡à¸ˆà¸±à¸”à¸£à¸°à¹€à¸šà¸µà¸¢à¸šà¸¥à¸´à¹‰à¸™à¸Šà¸±à¸à¹à¸šà¸šà¹ƒà¸ª",
+        productDescription: "à¸Šà¹ˆà¸§à¸¢à¹à¸¢à¸à¸‚à¸­à¸‡à¹€à¸¥à¹‡à¸ à¹† à¹ƒà¸«à¹‰à¸«à¸¢à¸´à¸šà¸‡à¹ˆà¸²à¸¢ à¹‚à¸•à¹Šà¸°à¸”à¸¹à¹‚à¸¥à¹ˆà¸‡à¸‚à¸¶à¹‰à¸™ à¹€à¸«à¸¡à¸²à¸°à¸à¸±à¸šà¸šà¹‰à¸²à¸™à¹à¸¥à¸°à¸­à¸­à¸Ÿà¸Ÿà¸´à¸¨",
         productPrice: 199,
         discountPrice: 89,
         discountPercent: 55,
@@ -152,7 +284,7 @@ export class MockShopeeProvider implements ShopeeProductProvider {
     const keywordLower = keyword.toLowerCase();
     const filtered = samples.filter((product) => {
       const haystack = `${product.productName} ${product.productDescription} ${product.category}`.toLowerCase();
-      return !query.keyword || haystack.includes(keywordLower) || keywordLower.includes("ยอดนิยม");
+      return !query.keyword || haystack.includes(keywordLower) || keywordLower.includes("à¸¢à¸­à¸”à¸™à¸´à¸¢à¸¡");
     });
 
     return (filtered.length ? filtered : samples).slice(0, limit);
@@ -164,11 +296,25 @@ export class ShopeeOfficialApiProvider implements ShopeeProductProvider {
 
   async fetchProducts(query: ProductDiscoveryQuery): Promise<ShopeeProductRecord[]> {
     const endpoint = process.env.SHOPEE_AFFILIATE_API_URL;
-    const partnerId = process.env.SHOPEE_PARTNER_ID;
-    const partnerKey = process.env.SHOPEE_PARTNER_KEY;
+    const { partnerId, partnerKey } = getShopeeCredentialEnv();
+    const envStatus = getShopeeEnvStatus();
+    const authMode = getShopeeAuthMode();
+
+    if (envStatus.providerMode === "mock") {
+      return new MockShopeeProvider().fetchProducts(query);
+    }
 
     if (!endpoint || !partnerId || !partnerKey) {
-      return new MockShopeeProvider().fetchProducts(query);
+      console.warn("[shopee/provider] missing official API env, blocking official fetch", {
+        missing: envStatus.missing,
+        configured: envStatus.configured
+      });
+      throw new ShopeeProviderError(
+        `Shopee API environment is incomplete. Missing: ${envStatus.missing.join(", ")}`,
+        400,
+        "shopee_missing_env",
+        "config"
+      );
     }
 
     // Adapter shell: keep official API specifics isolated so we can swap endpoint contracts safely.
@@ -178,20 +324,68 @@ export class ShopeeOfficialApiProvider implements ShopeeProductProvider {
     if (query.sourceTag) url.searchParams.set("source_tag", query.sourceTag);
     url.searchParams.set("limit", String(Math.max(1, Math.min(query.limit ?? 20, 50))));
 
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const signatureBase =
+      authMode === "open_platform_query"
+        ? `${partnerId}${url.pathname}${timestamp}`
+        : `${url.pathname}${url.search}${timestamp}`;
+    const signature = crypto.createHmac("sha256", partnerKey).update(signatureBase).digest("hex");
+
+    const headers: Record<string, string> = { "content-type": "application/json" };
+    if (authMode === "open_platform_query") {
+      url.searchParams.set("partner_id", partnerId);
+      url.searchParams.set("timestamp", timestamp);
+      url.searchParams.set("sign", signature);
+    } else if (authMode === "affiliate_headers") {
+      headers["x-shopee-partner-id"] = partnerId;
+      headers["x-shopee-timestamp"] = timestamp;
+      headers["x-shopee-signature"] = signature;
+    }
+
+    console.info("[shopee/provider] external product fetch", {
+      endpointHost: url.host,
+      endpointPath: url.pathname,
+      sourceTag: query.sourceTag ?? "trending",
+      limit: url.searchParams.get("limit"),
+      hasPartnerId: Boolean(partnerId),
+      hasPartnerKey: Boolean(partnerKey),
+      signatureGenerated: Boolean(signature),
+      signatureBaseParts: authMode === "open_platform_query" ? ["partner_id", "path", "timestamp"] : ["path", "query", "timestamp"],
+      authMode,
+      hasAuthQuery: authMode === "open_platform_query",
+      hasAuthHeaders: authMode === "affiliate_headers"
+    });
+
     const response = await fetch(url, {
-      headers: {
-        "content-type": "application/json",
-        "x-shopee-partner-id": partnerId,
-        "x-shopee-signature": crypto.createHmac("sha256", partnerKey).update(url.pathname + url.search).digest("hex")
-      },
+      headers,
       cache: "no-store"
     });
 
     if (!response.ok) {
-      throw new Error(`Shopee API request failed: ${response.status}`);
+      const bodySummary = await summarizeResponse(response);
+      console.warn("[shopee/provider] external product fetch failed", {
+        endpointHost: url.host,
+        endpointPath: url.pathname,
+        status: response.status,
+        bodySummary,
+        hasPartnerId: Boolean(partnerId),
+        hasPartnerKey: Boolean(partnerKey),
+        signatureGenerated: Boolean(signature),
+        authMode
+      });
+      const message =
+        response.status === 401
+          ? "Shopee rejected the request. Check partner ID, partner key, signature, timestamp, and region."
+          : `Shopee API request failed: ${response.status}`;
+      throw new ShopeeProviderError(message, response.status, response.status === 401 ? "shopee_unauthorized" : "shopee_api_error", "shopee_api", bodySummary);
     }
 
     const payload = (await response.json()) as { products?: Array<Record<string, unknown>> };
+    console.info("[shopee/provider] external product fetch completed", {
+      endpointHost: url.host,
+      endpointPath: url.pathname,
+      productsCount: payload.products?.length ?? 0
+    });
     return (payload.products ?? []).map(mapExternalProduct(query.sourceTag ?? "trending"));
   }
 }
@@ -211,10 +405,17 @@ function mapExternalProduct(sourceTag: ShopeeSourceTag) {
       discountPrice: item.discount_price === undefined ? undefined : Number(item.discount_price),
       discountPercent: item.discount_percent === undefined ? undefined : Number(item.discount_percent),
       productImageUrl: String(item.product_image_url ?? item.image ?? item.productImageUrl ?? ""),
+      productImageUrls: Array.isArray(item.product_image_urls)
+        ? item.product_image_urls.map(String).filter(Boolean)
+        : Array.isArray(item.images)
+          ? item.images.map(String).filter(Boolean)
+          : undefined,
       productUrl: String(item.product_url ?? item.url ?? item.productUrl ?? ""),
       affiliateUrl: item.affiliate_url ? String(item.affiliate_url) : undefined,
       category: String(item.category ?? "General"),
       salesCount: item.sales_count === undefined ? undefined : Number(item.sales_count),
+      reviewCount: item.review_count === undefined ? undefined : Number(item.review_count),
+      shopName: item.shop_name === undefined ? undefined : String(item.shop_name),
       rating: item.rating === undefined ? undefined : Number(item.rating),
       commissionRate: item.commission_rate === undefined ? undefined : Number(item.commission_rate),
       sourceTag,
@@ -224,6 +425,9 @@ function mapExternalProduct(sourceTag: ShopeeSourceTag) {
 }
 
 export function getShopeeProductProvider(): ShopeeProductProvider {
+  if (process.env.SHOPEE_PROVIDER?.trim().toLowerCase() === "mock") {
+    return new MockShopeeProvider();
+  }
   if (process.env.SHOPEE_AFFILIATE_API_URL) {
     return new ShopeeOfficialApiProvider();
   }
@@ -236,11 +440,12 @@ export function buildAffiliateLink(product: ShopeeProductRecord, trackingId?: st
   }
 
   const base = process.env.SHOPEE_AFFILIATE_BASE_URL?.trim();
+  const resolvedTrackingId = trackingId?.trim() || process.env.SHOPEE_TRACKING_ID?.trim() || process.env.SHOPEE_AFFILIATE_ID?.trim();
   const sourceUrl = product.productUrl || `https://shopee.co.th/product/${product.shopId}/${product.itemId}`;
 
   if (!base) {
     const url = new URL(sourceUrl);
-    if (trackingId) url.searchParams.set("utm_content", trackingId);
+    if (resolvedTrackingId) url.searchParams.set("utm_content", resolvedTrackingId);
     url.searchParams.set("utm_source", "prosocial");
     url.searchParams.set("utm_medium", "affiliate_auto_post");
     return url.toString();
@@ -248,8 +453,70 @@ export function buildAffiliateLink(product: ShopeeProductRecord, trackingId?: st
 
   const url = new URL(base);
   url.searchParams.set("url", sourceUrl);
-  if (trackingId) url.searchParams.set("tracking_id", trackingId);
+  if (resolvedTrackingId) url.searchParams.set("tracking_id", resolvedTrackingId);
   return url.toString();
+}
+
+function getAppBaseUrl() {
+  return (
+    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+    process.env.APP_URL?.trim() ||
+    process.env.NEXTAUTH_URL?.trim() ||
+    "http://localhost:3000"
+  ).replace(/\/$/, "");
+}
+
+export async function createOrReuseAffiliateShortLink(input: {
+  userId: string;
+  product: ShopeeProductRecord;
+  trackingId?: string;
+}) {
+  const trackingId = input.trackingId?.trim() || process.env.SHOPEE_TRACKING_ID?.trim() || "default";
+  const originalUrl = input.product.productUrl || `https://shopee.co.th/product/${input.product.shopId}/${input.product.itemId}`;
+  const affiliateUrl = buildAffiliateLink(input.product, trackingId);
+
+  if (!affiliateUrl) {
+    throw new ShopeeProviderError("Affiliate link generation failed", 500, "shopee_affiliate_link_failed", "config");
+  }
+
+  const doc = await AffiliateLink.findOneAndUpdate(
+    {
+      userId: input.userId,
+      productId: input.product.productId,
+      trackingId
+    },
+    {
+      userId: input.userId,
+      productId: input.product.productId,
+      shopId: input.product.shopId,
+      itemId: input.product.itemId,
+      originalUrl,
+      sourceUrl: originalUrl,
+      affiliateUrl,
+      trackingId,
+      status: "active",
+      lastError: null,
+      metadataJson: {
+        source: "shopee-affiliate",
+        shopName: input.product.shopName ?? "",
+        category: input.product.category
+      }
+    },
+    { upsert: true, new: true }
+  );
+
+  const shortUrl = `${getAppBaseUrl()}/api/s/${String(doc._id)}`;
+  if (doc.shortUrl !== shortUrl) {
+    await AffiliateLink.findByIdAndUpdate(doc._id, { shortUrl });
+    doc.shortUrl = shortUrl;
+  }
+
+  return {
+    trackingId,
+    originalUrl,
+    affiliateUrl,
+    shortUrl
+  };
 }
 
 export function scoreShopeeProduct(input: {
@@ -266,22 +533,22 @@ export function scoreShopeeProduct(input: {
   const sales = product.salesCount ?? 0;
   if (sales >= 10000) {
     score += 18;
-    reason.push("ยอดขายสูงมาก");
+    reason.push("à¸¢à¸­à¸”à¸‚à¸²à¸¢à¸ªà¸¹à¸‡à¸¡à¸²à¸");
   } else if (sales >= 3000) {
     score += 12;
-    reason.push("ยอดขายดี");
+    reason.push("à¸¢à¸­à¸”à¸‚à¸²à¸¢à¸”à¸µ");
   } else if (sales > 0) {
     score += 6;
-    reason.push("มีสัญญาณยอดขาย");
+    reason.push("à¸¡à¸µà¸ªà¸±à¸à¸à¸²à¸“à¸¢à¸­à¸”à¸‚à¸²à¸¢");
   }
 
   const rating = product.rating ?? 0;
   if (rating >= 4.8) {
     score += 14;
-    reason.push("เรตติ้งดีมาก");
+    reason.push("à¹€à¸£à¸•à¸•à¸´à¹‰à¸‡à¸”à¸µà¸¡à¸²à¸");
   } else if (rating >= 4.5) {
     score += 10;
-    reason.push("เรตติ้งดี");
+    reason.push("à¹€à¸£à¸•à¸•à¸´à¹‰à¸‡à¸”à¸µ");
   } else if (rating > 0 && rating < 4.2) {
     score -= 10;
     riskFlags.push("rating_low");
@@ -290,29 +557,38 @@ export function scoreShopeeProduct(input: {
   const discount = product.discountPercent ?? 0;
   if (discount >= 45) {
     score += 14;
-    reason.push("ส่วนลดเด่น");
+    reason.push("à¸ªà¹ˆà¸§à¸™à¸¥à¸”à¹€à¸”à¹ˆà¸™");
   } else if (discount >= 20) {
     score += 8;
-    reason.push("มีส่วนลดน่าสนใจ");
+    reason.push("à¸¡à¸µà¸ªà¹ˆà¸§à¸™à¸¥à¸”à¸™à¹ˆà¸²à¸ªà¸™à¹ƒà¸ˆ");
   }
 
   const commission = product.commissionRate ?? 0;
   if (commission >= 8) {
     score += 10;
-    reason.push("คอมมิชชันดี");
+    reason.push("à¸„à¸­à¸¡à¸¡à¸´à¸Šà¸Šà¸±à¸™à¸”à¸µ");
   } else if (commission >= 5) {
     score += 6;
-    reason.push("คอมมิชชันใช้ได้");
+    reason.push("à¸„à¸­à¸¡à¸¡à¸´à¸Šà¸Šà¸±à¸™à¹ƒà¸Šà¹‰à¹„à¸”à¹‰");
   }
 
   if (product.sourceTag === "trending" || product.sourceTag === "best_selling") {
     score += 10;
-    reason.push(product.sourceTag === "trending" ? "สินค้าอยู่ในกระแส" : "สินค้า best-selling");
+    reason.push(product.sourceTag === "trending" ? "à¸ªà¸´à¸™à¸„à¹‰à¸²à¸­à¸¢à¸¹à¹ˆà¹ƒà¸™à¸à¸£à¸°à¹à¸ª" : "à¸ªà¸´à¸™à¸„à¹‰à¸² best-selling");
+  }
+
+  const reviews = product.reviewCount ?? 0;
+  if (reviews >= 1000) {
+    score += 8;
+    reason.push("à¸¡à¸µà¸£à¸µà¸§à¸´à¸§à¸ˆà¸³à¸™à¸§à¸™à¸¡à¸²à¸");
+  } else if (reviews >= 100) {
+    score += 4;
+    reason.push("à¸¡à¸µà¸£à¸µà¸§à¸´à¸§à¸Šà¹ˆà¸§à¸¢à¸›à¸£à¸°à¸à¸­à¸šà¸à¸²à¸£à¸•à¸±à¸”à¸ªà¸´à¸™à¹ƒà¸ˆ");
   }
 
   if (input.categoryPriority?.includes(product.category)) {
     score += 7;
-    reason.push("ตรงหมวดหมู่ที่ตั้งค่าไว้");
+    reason.push("à¸•à¸£à¸‡à¸«à¸¡à¸§à¸”à¸«à¸¡à¸¹à¹ˆà¸—à¸µà¹ˆà¸•à¸±à¹‰à¸‡à¸„à¹ˆà¸²à¹„à¸§à¹‰");
   }
 
   if (input.blockedCategories?.includes(product.category)) {
@@ -337,7 +613,7 @@ export function scoreShopeeProduct(input: {
 
   return {
     productScore: Math.max(0, Math.min(100, Math.round(score))),
-    reason: reason.length ? reason : ["สินค้าอยู่ในเกณฑ์พื้นฐาน"],
+    reason: reason.length ? reason : ["à¸ªà¸´à¸™à¸„à¹‰à¸²à¸­à¸¢à¸¹à¹ˆà¹ƒà¸™à¹€à¸à¸“à¸‘à¹Œà¸žà¸·à¹‰à¸™à¸à¸²à¸™"],
     riskFlags
   };
 }
@@ -358,10 +634,13 @@ export async function upsertShopeeProducts(products: ShopeeProductRecord[]) {
           discountPrice: product.discountPrice,
           discountPercent: product.discountPercent,
           productImageUrl: product.productImageUrl,
+          productImageUrls: product.productImageUrls ?? (product.productImageUrl ? [product.productImageUrl] : []),
           productUrl: product.productUrl,
           affiliateUrl: product.affiliateUrl,
           category: product.category,
           salesCount: product.salesCount,
+          reviewCount: product.reviewCount ?? 0,
+          shopName: product.shopName ?? "",
           rating: product.rating,
           commissionRate: product.commissionRate,
           sourceTag: product.sourceTag,
@@ -394,6 +673,11 @@ export async function selectShopeeProductsForPages(input: {
   category?: string;
   categoryPriority?: string[];
   blockedCategories?: string[];
+  minPrice?: number;
+  maxPrice?: number;
+  minRating?: number;
+  minSales?: number;
+  minDiscountPercent?: number;
 }) {
   const provider = getShopeeProductProvider();
   const discovered = await provider.fetchProducts({
@@ -406,10 +690,19 @@ export async function selectShopeeProductsForPages(input: {
 
   const selected: Array<{ pageId: string; product: ShopeeProductRecord; score: ProductScore }> = [];
   const usedProductIds = new Set<string>();
+  const filteredProducts = discovered.filter((product) => {
+    const effectivePrice = product.discountPrice || product.productPrice || 0;
+    if ((input.minPrice ?? 0) > 0 && effectivePrice < (input.minPrice ?? 0)) return false;
+    if ((input.maxPrice ?? 0) > 0 && effectivePrice > (input.maxPrice ?? 0)) return false;
+    if ((input.minRating ?? 0) > 0 && (product.rating ?? 0) < (input.minRating ?? 0)) return false;
+    if ((input.minSales ?? 0) > 0 && (product.salesCount ?? 0) < (input.minSales ?? 0)) return false;
+    if ((input.minDiscountPercent ?? 0) > 0 && (product.discountPercent ?? 0) < (input.minDiscountPercent ?? 0)) return false;
+    return true;
+  });
 
   for (const pageId of input.pageIds) {
     const scored = [];
-    for (const product of discovered) {
+    for (const product of filteredProducts) {
       const recentlyPosted = await wasProductRecentlyPosted(input.userId, pageId, product.productId);
       const score = scoreShopeeProduct({
         product,
@@ -438,20 +731,11 @@ export async function selectShopeeProductsForPages(input: {
 }
 
 export function buildShopeeImagePrompt(product: ShopeeProductRecord, style: ShopeeCaptionStyle = "soft_sell") {
-  const priceText = product.discountPrice
-    ? `highlight an attractive deal around ${product.discountPrice} THB without fake claims`
-    : "highlight practical everyday value without fake claims";
+  return buildShopeeImagePromptSet(product, style).prompts[0].prompt;
+}
 
-  return [
-    "Create a clean promotional lifestyle image for a Facebook affiliate post.",
-    `Product: ${product.productName}.`,
-    `Category: ${product.category}.`,
-    `Context: ${product.productDescription || "useful everyday product"}.`,
-    `Style: ${style.replace(/_/g, " ")} Thai social commerce, bright, trustworthy, modern.`,
-    priceText,
-    "Do not add Shopee logos, fake brand endorsements, unrealistic before-after claims, or misleading medical/financial claims.",
-    "Leave safe space for a short Thai headline overlay."
-  ].join(" ");
+export function buildShopeeImagePromptSet(product: ShopeeProductRecord, style: ShopeeCaptionStyle = "soft_sell") {
+  return buildShopeeImagePromptSetCore(product, style);
 }
 
 export async function generateShopeeCaption(input: {
@@ -463,34 +747,58 @@ export async function generateShopeeCaption(input: {
 }) {
   const { product } = input;
   const style = input.style ?? "soft_sell";
-  const disclosure = input.disclosureText?.trim() || "ลิงก์นี้เป็นลิงก์ Affiliate";
+  const disclosure = input.disclosureText?.trim() || "หมายเหตุ: ลิงก์นี้เป็นลิงก์แนะนำ/affiliate";
   const priceLine = product.discountPrice
-    ? `ราคาโปร/ส่วนลด: ${product.discountPrice} บาท (ลดประมาณ ${product.discountPercent ?? 0}%)`
+    ? `ราคาโปร: ${product.discountPrice} บาท${product.discountPercent ? ` ลดประมาณ ${product.discountPercent}%` : ""}`
     : `ราคา: ${product.productPrice} บาท`;
+  const reviewLine = [
+    product.rating ? `คะแนน ${product.rating}/5` : "",
+    product.salesCount ? `ขายแล้ว ${product.salesCount.toLocaleString("th-TH")} ชิ้น` : ""
+  ].filter(Boolean).join(" | ");
   const fallback = [
-    `เจอดีลน่าสนใจมาแชร์ครับ ✨`,
-    `${product.productName}`,
-    product.productDescription ? `เหมาะกับคนที่อยากได้ ${product.productDescription}` : "เหมาะกับใช้ในชีวิตประจำวัน",
-    priceLine,
-    `ดูรายละเอียด/กดรับดีล: ${input.affiliateLink}`,
+    "เจอของน่าใช้ใน Shopee มาแชร์ครับ ✨",
+    product.productName,
+    "",
+    product.productDescription
+      ? `รีวิวสั้น ๆ: เหมาะกับคนที่กำลังมองหา ${product.productDescription.slice(0, 140)}`
+      : "รีวิวสั้น ๆ: เหมาะกับคนที่อยากได้ของใช้ดี ๆ ในชีวิตประจำวัน",
+    "",
+    "จุดเด่น:",
+    product.discountPercent ? `✅ มีส่วนลดประมาณ ${product.discountPercent}%` : "✅ ราคาเข้าถึงง่าย",
+    product.rating ? `✅ รีวิวค่อนข้างดี ${product.rating}/5` : "✅ รายละเอียดสินค้าชัดเจน",
+    product.salesCount ? `✅ คนซื้อเยอะ ขายแล้ว ${product.salesCount.toLocaleString("th-TH")} ชิ้น` : "✅ เหมาะกับการกดดูรายละเอียดก่อนตัดสินใจ",
+    reviewLine ? `✅ ${reviewLine}` : "",
+    "",
+    `เหมาะกับ: คนที่กำลังหาไอเทมแนว ${product.category || "ของใช้คุ้มค่า"} แบบไม่ต้องเสียเวลาไล่หาเอง`,
+    "",
+    "ใครกำลังมองหาแนวนี้ กดดูรายละเอียดได้เลยครับ",
+    `ลิงก์: ${input.affiliateLink}`,
     disclosure,
     "#ShopeeAffiliate #ดีลน่าใช้ #ของมันต้องมี"
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 
-  const customPrompt = `เขียนแคปชั่น Facebook ภาษาไทยสำหรับ Shopee Affiliate แบบ ${style}
-โครงสร้าง:
-1. Hook เปิดให้หยุดอ่าน
-2. บอกประโยชน์สินค้าแบบไม่กล่าวอ้างเกินจริง
-3. เน้นราคา/ส่วนลดถ้ามี
-4. CTA ให้กดดูรายละเอียด
-5. ต้องมีลิงก์ Affiliate นี้: ${input.affiliateLink}
-6. ต้องมี disclosure: ${disclosure}
-7. ใส่ hashtag 3-5 ตัว
+  const customPrompt = `เขียนแคปชั่น Facebook ภาษาไทยสำหรับ Shopee Affiliate สไตล์ ${style}
+โครงสร้างที่ต้องใช้:
+[Hook เปิดโพสต์]
 
-ห้าม:
-- ห้ามอ้างว่าเป็นของแท้/รักษาโรค/การันตีผลลัพธ์ ถ้าไม่มีข้อมูล
-- ห้ามพูดเหมือนรีวิวจากการใช้จริงถ้าไม่มีข้อมูล
-- ห้ามลืมลิงก์และ disclosure`;
+รีวิวสั้น ๆ แบบธรรมชาติ เหมือนคนแนะนำของน่าใช้ ไม่ขายตรงเกินไป
+
+จุดเด่น:
+✅ จุดเด่น 3-5 ข้อ จากข้อมูลสินค้าเท่านั้น
+
+เหมาะกับ: กลุ่มคนที่น่าจะใช้สินค้านี้
+
+ใครกำลังมองหาแนวนี้ กดดูรายละเอียดได้เลยครับ
+ลิงก์: ${input.affiliateLink}
+
+${disclosure}
+
+ข้อกำหนด:
+- ภาษาเป็นกันเอง อ่านง่าย
+- ห้ามเคลมเกินจริง ห้ามใช้คำว่า การันตีหาย, เห็นผล 100%, ถูกที่สุดในโลก
+- ห้ามอ้างว่าใช้จริงถ้าไม่มีข้อมูล
+- ต้องใส่ลิงก์และ disclosure ทุกครั้ง
+- ใส่ hashtag 3-5 ตัว`;
 
   try {
     const variants = await generateFacebookContent(product.productName, {
@@ -502,6 +810,7 @@ export async function generateShopeeCaption(input: {
         `Description: ${product.productDescription}`,
         priceLine,
         `Sales count: ${product.salesCount ?? "-"}`,
+        `Review count: ${product.reviewCount ?? "-"}`,
         `Rating: ${product.rating ?? "-"}`,
         `Commission rate: ${product.commissionRate ?? "-"}%`,
         `Affiliate link: ${input.affiliateLink}`
@@ -514,14 +823,13 @@ export async function generateShopeeCaption(input: {
       : "";
     const withLink = chosen.caption.includes(input.affiliateLink)
       ? chosen.caption
-      : `${chosen.caption.trim()}\n\nดูรายละเอียด/กดรับดีล: ${input.affiliateLink}`;
+      : `${chosen.caption.trim()}\n\nลิงก์: ${input.affiliateLink}`;
     const withDisclosure = withLink.includes(disclosure) ? withLink : `${withLink}\n${disclosure}`;
     return `${withDisclosure.trim()}${hashtags}`.trim();
   } catch {
     return fallback;
   }
 }
-
 export async function buildShopeePostPackage(input: {
   userId: string;
   pageId: string;
@@ -530,63 +838,81 @@ export async function buildShopeePostPackage(input: {
   captionStyle?: ShopeeCaptionStyle;
   trackingId?: string;
 }) {
-  const affiliateLink = buildAffiliateLink(input.product, input.trackingId);
-  const imagePrompt = buildShopeeImagePrompt(input.product, input.captionStyle ?? "soft_sell");
+  const linkResult = await createOrReuseAffiliateShortLink({
+    userId: input.userId,
+    product: input.product,
+    trackingId: input.trackingId
+  });
+  const affiliateLink = linkResult.affiliateUrl;
+  const shortAffiliateLink = linkResult.shortUrl;
+  const imagePromptSet = buildShopeeImagePromptSet(input.product, input.captionStyle ?? "soft_sell");
+  const imagePrompts = imagePromptSet.prompts.map((item) => item.prompt);
+  const imagePrompt = imagePrompts[0] ?? buildShopeeImagePrompt(input.product, input.captionStyle ?? "soft_sell");
   const caption = await generateShopeeCaption({
     userId: input.userId,
     product: input.product,
-    affiliateLink,
+    affiliateLink: shortAffiliateLink,
     style: input.captionStyle
   });
 
-  const imageDoc = await AiGeneratedImage.create({
-    userId: input.userId,
-    productId: input.product.productId,
-    prompt: imagePrompt,
-    status: "skipped",
-    generatedImageUrl: input.product.productImageUrl,
-    fallbackImageUrl: input.product.productImageUrl,
-    provider: "fallback_product_image"
-  });
+  const imageDocs = await AiGeneratedImage.insertMany(
+    imagePromptSet.prompts.map((promptItem, index) => ({
+      userId: input.userId,
+      productId: input.product.productId,
+      prompt: promptItem.prompt,
+      status: "generated",
+      generatedImageUrl: input.product.productImageUrl,
+      fallbackImageUrl: input.product.productImageUrl,
+      provider: "shopee_card_renderer",
+      promptHistory: [
+        promptItem.title,
+        `concept=${promptItem.concept}`,
+        `layout=${index + 1}`,
+        imagePromptSet.negativePrompt
+      ]
+    }))
+  );
 
   const postDoc = await AiGeneratedPost.create({
     userId: input.userId,
     productId: input.product.productId,
     caption,
     imagePrompt,
-    generatedImageUrl: input.product.productImageUrl,
-    affiliateLink,
+    generatedImageUrl: imageDocs[0] ? `ai-image:${String(imageDocs[0]._id)}` : input.product.productImageUrl,
+    affiliateLink: shortAffiliateLink,
     scheduledAt: input.scheduledAt,
     pageId: input.pageId,
-    status: "generated",
+    status: "image_ready",
     generationMetaJson: {
-      imageId: String(imageDoc._id),
-      source: "shopee-affiliate"
+      imageId: imageDocs[0] ? String(imageDocs[0]._id) : null,
+      imageIds: imageDocs.map((imageDoc) => String(imageDoc._id)),
+      generatedImageUrls: imageDocs.map((imageDoc) => `ai-image:${String(imageDoc._id)}`),
+      imagePromptSet,
+      source: "shopee-affiliate",
+      affiliateUrl: linkResult.affiliateUrl,
+      shortAffiliateLink,
+      promptCount: imagePrompts.length
     }
   });
+  const generatedImageUrls = imageDocs.map((imageDoc) => `ai-image:${String(imageDoc._id)}`);
 
-  await AffiliateLink.findOneAndUpdate(
-    { userId: input.userId, productId: input.product.productId, trackingId: input.trackingId ?? "default" },
-    {
-      userId: input.userId,
-      productId: input.product.productId,
-      affiliateUrl: affiliateLink,
-      trackingId: input.trackingId ?? "default",
-      sourceUrl: input.product.productUrl
-    },
-    { upsert: true, new: true }
-  );
+  if (generatedImageUrls.length < 4) {
+    throw new ShopeeProviderError("AI image generation failed: expected 4 post images", 500, "shopee_image_generation_incomplete", "internal_api");
+  }
 
   return {
     product: input.product,
     caption,
     imagePrompt,
-    generatedImageUrl: input.product.productImageUrl,
-    affiliateLink,
-    imageStatus: "skipped",
+    imagePrompts,
+    generatedImageUrl: generatedImageUrls[0],
+    generatedImageUrls,
+    affiliateLink: shortAffiliateLink,
+    shortAffiliateLink,
+    imageStatus: "generated",
     scheduledAt: input.scheduledAt,
     pageId: input.pageId,
-    status: "generated",
+    status: "image_ready",
     aiGeneratedPostId: String(postDoc._id)
   } satisfies ShopeePostPackage & { aiGeneratedPostId: string };
 }
@@ -600,6 +926,7 @@ export async function recordShopeeQueueItem(input: {
   scheduledAt: Date;
   affiliateLink: string;
   aiGeneratedPostId?: string;
+  status?: "draft" | "generated" | "image_ready" | "queued" | "scheduled" | "publishing" | "published" | "failed" | "cancelled";
 }) {
   await FacebookPostQueue.create({
     userId: input.userId,
@@ -608,7 +935,7 @@ export async function recordShopeeQueueItem(input: {
     productId: input.product.productId,
     affiliateLink: input.affiliateLink,
     scheduledAt: input.scheduledAt,
-    status: "queued",
+    status: input.status ?? "queued",
     aiGeneratedPostId: input.aiGeneratedPostId
   });
 
@@ -666,3 +993,4 @@ export async function logShopeeAutomationEvent(input: {
     }
   });
 }
+

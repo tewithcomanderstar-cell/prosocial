@@ -4,7 +4,7 @@ import { ActionLog } from "@/models/ActionLog";
 import { FacebookConnection } from "@/models/FacebookConnection";
 import { FacebookPostQueue } from "@/models/FacebookPostQueue";
 import { ShopeeProduct } from "@/models/ShopeeProduct";
-import { getShopeeProductProvider } from "@/lib/services/shopee-affiliate";
+import { getShopeeAffiliateConfigStatus, getShopeeEnvStatus, getShopeeProductProvider } from "@/lib/services/shopee-affiliate";
 
 type AutoPostConfigStatusDoc = {
   _id: unknown;
@@ -40,6 +40,31 @@ function isLegacyMessage(value?: string | null) {
     normalized.includes("workflow must be active") ||
     normalized.includes("webhook")
   );
+}
+
+function mapShopeeLastError(value?: string | null) {
+  const message = sanitizeLegacyMessage(value);
+  if (!message) return null;
+  const normalized = message.toLowerCase();
+  if (normalized.includes("shopee") && (normalized.includes("401") || normalized.includes("rejected"))) {
+    return {
+      source: "shopee_api",
+      status: 401,
+      message: "Shopee rejected the request. Check partner ID, partner key, signature, timestamp, and region."
+    };
+  }
+  if (normalized.includes("unauthorized")) {
+    return {
+      source: "internal_api",
+      status: 401,
+      message: "Internal Shopee API unauthorized. Check login/session or server route auth."
+    };
+  }
+  return {
+    source: "unknown",
+    status: null,
+    message
+  };
 }
 
 export async function GET() {
@@ -96,27 +121,57 @@ export async function GET() {
     const facebookConnection = await FacebookConnection.findOne({ userId }).lean();
     const connectedPageCount = Array.isArray((facebookConnection as any)?.pages) ? (facebookConnection as any).pages.length : 0;
     const shopeeProvider = getShopeeProductProvider();
+    const shopeeEnvStatus = getShopeeEnvStatus();
     const lastProduct = await ShopeeProduct.findOne({}).sort({ fetchedAt: -1 }).select("fetchedAt").lean();
     const lastPublishedQueueItem = await FacebookPostQueue.findOne({ userId, status: "published" })
       .sort({ updatedAt: -1 })
       .select("updatedAt")
       .lean();
-    const hasAffiliateTracking =
-      typeof effectiveConfig?.shopeeTrackingId === "string" && effectiveConfig.shopeeTrackingId.trim().length > 0;
     const contentSource = String(effectiveConfig?.contentSource ?? "shopee-affiliate");
-    const shopeeSetupReady = contentSource === "shopee-affiliate" && Boolean(effectiveConfig?.shopeeSourceTag);
+    const shopeeSourceReady = contentSource === "shopee-affiliate" && Boolean(effectiveConfig?.shopeeSourceTag);
     const facebookReady = connectedPageCount > 0;
+    const affiliateStatus = getShopeeAffiliateConfigStatus(
+      typeof effectiveConfig?.shopeeTrackingId === "string" ? effectiveConfig.shopeeTrackingId : ""
+    );
+    const mappedLastError = mapShopeeLastError(sanitizedLastError);
+    const affiliateMissingMessage = affiliateStatus.missing.length
+      ? `Shopee Affiliate setup required. Missing: ${affiliateStatus.missing.join(", ")}`
+      : null;
+    const lastError =
+      affiliateStatus.status === "setup_required"
+        ? { source: "config", status: null, message: affiliateMissingMessage }
+        : mappedLastError;
+    const shopeeApiStatus =
+      shopeeEnvStatus.providerMode === "mock"
+        ? "mock"
+        : shopeeEnvStatus.missing.length
+          ? "missing_env"
+          : affiliateStatus.status === "setup_required"
+            ? "configured"
+          : mappedLastError?.source === "shopee_api" && mappedLastError.status === 401
+            ? "unauthorized"
+            : mappedLastError?.source === "shopee_api"
+              ? "error"
+              : "configured";
+    const missingEnv = [...shopeeEnvStatus.missing, ...affiliateStatus.missing];
 
     const controlPanel = {
-      state: !shopeeSetupReady ? "setup_required" : !facebookReady ? "facebook_required" : "ready",
-      shopeeApiStatus: shopeeProvider.name === "mock-shopee-provider" ? "mock_provider_ready" : "configured",
-      affiliateConfigStatus: hasAffiliateTracking ? "configured" : "setup_required",
+      state: !shopeeSourceReady || affiliateStatus.status === "setup_required" ? "setup_required" : !facebookReady ? "facebook_required" : "ready",
+      shopeeApiStatus,
+      affiliateConfigStatus: affiliateStatus.status,
       facebookPageStatus: facebookReady ? "connected" : "missing",
-      autoPostEngineStatus: effectiveConfig?.autoPostStatus ?? "paused",
+      autoPostEngineStatus: affiliateStatus.status === "setup_required" ? "blocked_setup_required" : effectiveConfig?.autoPostStatus ?? "paused",
       lastProductFetchAt: (lastProduct as any)?.fetchedAt ?? null,
       lastPublishAt: (lastPublishedQueueItem as any)?.updatedAt ?? null,
       provider: shopeeProvider.name,
-      connectedPageCount
+      connectedPageCount,
+      missingEnv,
+      env: {
+        ok: shopeeEnvStatus.ok,
+        missing: shopeeEnvStatus.missing,
+        configured: shopeeEnvStatus.configured
+      },
+      lastError
     };
 
     const sanitizedConfig = {
@@ -145,7 +200,9 @@ export async function GET() {
       userId,
       state: controlPanel.state,
       connectedPageCount,
-      provider: shopeeProvider.name
+      provider: shopeeProvider.name,
+      shopeeApiStatus,
+      missingEnv
     });
 
     return jsonOk({ config: sanitizedConfig, logs: normalizedLogs, controlPanel });

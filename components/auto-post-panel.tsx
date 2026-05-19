@@ -17,6 +17,12 @@ type AutoPostConfig = {
   shopeeTrackingId: string;
   shopeeBlockedCategories: string[];
   shopeeCategoryPriority: string[];
+  shopeeMinPrice: number;
+  shopeeMaxPrice: number;
+  shopeeMinRating: number;
+  shopeeMinSales: number;
+  shopeeMinDiscountPercent: number;
+  approvalMode: boolean;
   targetPageIds: string[];
   intervalMinutes: number;
   captionStrategy: CaptionStrategy;
@@ -36,10 +42,10 @@ type AutoPostConfig = {
 
 type Folder = { id: string; name: string };
 type FacebookPage = { pageId: string; name: string };
-type PanelState = "loading" | "setup_required" | "facebook_required" | "ready" | "error";
+type PanelState = "loading" | "setup_required" | "facebook_required" | "ready" | "unauthorized" | "mock_mode" | "error";
 
 type ControlPanelStatus = {
-  state?: Exclude<PanelState, "loading" | "error">;
+  state?: Exclude<PanelState, "loading" | "error" | "unauthorized" | "mock_mode">;
   shopeeApiStatus?: string;
   affiliateConfigStatus?: string;
   facebookPageStatus?: string;
@@ -48,6 +54,12 @@ type ControlPanelStatus = {
   lastPublishAt?: string | null;
   provider?: string;
   connectedPageCount?: number;
+  missingEnv?: string[];
+  lastError?: {
+    source?: "internal_api" | "shopee_api" | "config" | "unknown";
+    status?: number | null;
+    message?: string;
+  } | null;
 };
 
 type StatusLog = {
@@ -62,6 +74,31 @@ type StatusResponse = {
   config: AutoPostConfig;
   logs: StatusLog[];
   controlPanel?: ControlPanelStatus;
+};
+
+type ShopeeQueuePreviewItem = {
+  _id: string;
+  productId: string;
+  pageId: string;
+  affiliateLink: string;
+  scheduledAt?: string;
+  status: string;
+  product?: {
+    productName?: string;
+    productPrice?: number;
+    discountPrice?: number;
+    discountPercent?: number;
+    productImageUrl?: string;
+    category?: string;
+    rating?: number;
+    salesCount?: number;
+  } | null;
+  preview?: {
+    caption?: string;
+    affiliateLink?: string;
+    imageUrls?: string[];
+    status?: string | null;
+  } | null;
 };
 
 const MAX_TARGET_PAGES = 100;
@@ -84,6 +121,12 @@ const defaults: AutoPostConfig = {
   shopeeTrackingId: "",
   shopeeBlockedCategories: [],
   shopeeCategoryPriority: [],
+  shopeeMinPrice: 0,
+  shopeeMaxPrice: 0,
+  shopeeMinRating: 0,
+  shopeeMinSales: 0,
+  shopeeMinDiscountPercent: 0,
+  approvalMode: false,
   targetPageIds: [],
   intervalMinutes: 60,
   captionStrategy: "hybrid",
@@ -245,6 +288,7 @@ export function AutoPostPanel() {
   const [config, setConfig] = useState<AutoPostConfig>(defaults);
   const [pages, setPages] = useState<FacebookPage[]>([]);
   const [logs, setLogs] = useState<StatusLog[]>([]);
+  const [queuePreview, setQueuePreview] = useState<ShopeeQueuePreviewItem[]>([]);
   const [controlPanel, setControlPanel] = useState<ControlPanelStatus | null>(null);
   const [panelState, setPanelState] = useState<PanelState>("loading");
   const [message, setMessage] = useState("");
@@ -263,9 +307,10 @@ export function AutoPostPanel() {
     console.info("[auto-post/control-panel] fetch started", { showLoader });
 
     try {
-      const [statusResult, pagesResult] = await Promise.allSettled([
+      const [statusResult, pagesResult, queueResult] = await Promise.allSettled([
         fetchWithTimeout("/api/auto-post/status", { cache: "no-store" }),
-        fetchWithTimeout("/api/facebook/pages", { cache: "no-store" })
+        fetchWithTimeout("/api/facebook/pages", { cache: "no-store" }),
+        fetchWithTimeout("/api/shopee/queue", { cache: "no-store" })
       ]);
 
       const statusJson =
@@ -276,6 +321,10 @@ export function AutoPostPanel() {
         pagesResult.status === "fulfilled"
           ? await readApiResult(pagesResult.value)
           : { ok: false, message: pagesResult.reason instanceof Error ? pagesResult.reason.message : "Unable to load Facebook pages right now." };
+      const queueJson =
+        queueResult.status === "fulfilled"
+          ? await readApiResult(queueResult.value)
+          : { ok: false, message: queueResult.reason instanceof Error ? queueResult.reason.message : "Unable to load Shopee queue" };
 
       if (statusJson.ok) {
         const statusData = statusJson.data as StatusResponse;
@@ -297,10 +346,20 @@ export function AutoPostPanel() {
         setError(pagesJson.message);
       }
 
+      const parsedQueue = queueJson.ok ? (((queueJson.data as any)?.queue ?? []) as ShopeeQueuePreviewItem[]).slice(0, 6) : [];
+      if (queueJson.ok) {
+        setQueuePreview(parsedQueue);
+      }
+
       const statusState = statusJson.ok ? (statusJson.data as StatusResponse).controlPanel?.state : undefined;
+      const shopeeApiStatus = statusJson.ok ? (statusJson.data as StatusResponse).controlPanel?.shopeeApiStatus : undefined;
       const nextState: PanelState = !statusJson.ok
         ? "error"
-        : statusState === "setup_required"
+        : shopeeApiStatus === "unauthorized"
+          ? "unauthorized"
+          : shopeeApiStatus === "mock"
+            ? "mock_mode"
+            : statusState === "setup_required"
           ? "setup_required"
           : parsedPages.length === 0
             ? "facebook_required"
@@ -310,7 +369,9 @@ export function AutoPostPanel() {
         statusOk: Boolean(statusJson.ok),
         pagesOk: Boolean(pagesJson.ok),
         parsedPagesCount: parsedPages.length,
+        queuePreviewCount: parsedQueue.length,
         responseKeys: pagesJson ? Object.keys(pagesJson) : [],
+        shopeeApiStatus,
         state: nextState
       });
     } catch (statusError) {
@@ -336,8 +397,6 @@ export function AutoPostPanel() {
     () => pages.filter((page) => config.targetPageIds.includes(page.pageId)).map((page) => page.name),
     [config.targetPageIds, pages]
   );
-
-  const startDisabled = starting || saving || ["running", "posting", "retrying"].includes(config.autoPostStatus ?? "");
 
   function togglePage(pageId: string) {
     setConfig((current) => {
@@ -464,8 +523,11 @@ export function AutoPostPanel() {
   const visibleState: PanelState = loading ? "loading" : panelState;
   const hasFacebookPages = pages.length > 0;
   const setupRequired = visibleState === "setup_required" || controlPanel?.affiliateConfigStatus === "setup_required";
+  const startDisabled = starting || saving || setupRequired || ["running", "posting", "retrying"].includes(config.autoPostStatus ?? "");
   const facebookRequired = visibleState === "facebook_required" || !hasFacebookPages;
   const blockingError = visibleState === "error" ? error || "Unable to load Auto Post control panel" : "";
+  const missingConfig = controlPanel?.missingEnv?.length ? ` Missing: ${controlPanel.missingEnv.join(", ")}` : "";
+  const lastShopeeError = controlPanel?.lastError?.message ? sanitizeText(controlPanel.lastError.message) : "";
 
   function renderStateBanner() {
     if (visibleState === "loading") {
@@ -479,8 +541,19 @@ export function AutoPostPanel() {
         </div>
       );
     }
+    if (visibleState === "unauthorized") {
+      return (
+        <div className="composer-message composer-message-error">
+          <strong>{lastShopeeError || "Shopee rejected the request. Check partner ID, partner key, signature, timestamp, and region."}</strong>
+          <button className="button button-secondary" type="button" onClick={() => loadStatus(true)}>Retry</button>
+        </div>
+      );
+    }
+    if (visibleState === "mock_mode") {
+      return <div className="composer-message">Shopee mock mode is active. The system will use mock products for pipeline testing.</div>;
+    }
     if (setupRequired) {
-      return <div className="composer-message">Shopee Affiliate setup required</div>;
+      return <div className="composer-message">Shopee Affiliate setup required.{missingConfig}</div>;
     }
     if (facebookRequired) {
       return <div className="composer-message">Connect Facebook Page first</div>;
@@ -593,6 +666,71 @@ export function AutoPostPanel() {
             />
           </label>
         </div>
+
+        <div className="grid cols-2 auto-post-grid auto-post-grid-minimal">
+          <label className="label">
+            Min Rating
+            <input
+              className="input"
+              type="number"
+              min="0"
+              max="5"
+              step="0.1"
+              value={config.shopeeMinRating}
+              onChange={(event) => setConfig((current) => ({ ...current, shopeeMinRating: Number(event.target.value) || 0 }))}
+              placeholder="เช่น 4.5"
+            />
+          </label>
+
+          <label className="label">
+            Min Sales
+            <input
+              className="input"
+              type="number"
+              min="0"
+              value={config.shopeeMinSales}
+              onChange={(event) => setConfig((current) => ({ ...current, shopeeMinSales: Number(event.target.value) || 0 }))}
+              placeholder="เช่น 100"
+            />
+          </label>
+        </div>
+
+        <div className="grid cols-2 auto-post-grid auto-post-grid-minimal">
+          <label className="label">
+            Price Range
+            <input
+              className="input"
+              value={`${config.shopeeMinPrice || ""}${config.shopeeMaxPrice ? `-${config.shopeeMaxPrice}` : ""}`}
+              onChange={(event) => {
+                const [min, max] = event.target.value.split("-").map((item) => Number(item.trim()) || 0);
+                setConfig((current) => ({ ...current, shopeeMinPrice: min, shopeeMaxPrice: max ?? 0 }));
+              }}
+              placeholder="เช่น 100-1500"
+            />
+          </label>
+
+          <label className="label">
+            Min Discount %
+            <input
+              className="input"
+              type="number"
+              min="0"
+              max="100"
+              value={config.shopeeMinDiscountPercent}
+              onChange={(event) => setConfig((current) => ({ ...current, shopeeMinDiscountPercent: Number(event.target.value) || 0 }))}
+              placeholder="เช่น 20"
+            />
+          </label>
+        </div>
+
+        <label className="auto-post-toggle auto-post-approval-toggle">
+          <span>Manual approval before publish</span>
+          <input
+            type="checkbox"
+            checked={config.approvalMode}
+            onChange={(event) => setConfig((current) => ({ ...current, approvalMode: event.target.checked }))}
+          />
+        </label>
 
         <div className="grid cols-2 auto-post-grid auto-post-grid-minimal">
           <label className="label">
@@ -719,6 +857,16 @@ export function AutoPostPanel() {
           <div className="auto-post-metric-card"><span className="muted">Last product fetch time</span><strong>{formatDateTime(controlPanel?.lastProductFetchAt ?? undefined)}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Last publish time</span><strong>{formatDateTime(controlPanel?.lastPublishAt ?? undefined)}</strong></div>
         </div>
+        {controlPanel?.missingEnv?.length ? (
+          <div className="composer-message composer-message-error">
+            Shopee Affiliate setup required. Missing: {controlPanel.missingEnv.join(", ")}
+          </div>
+        ) : null}
+        {controlPanel?.lastError?.message && !setupRequired ? (
+          <div className="composer-message composer-message-error">
+            {sanitizeText(controlPanel.lastError.message)}
+          </div>
+        ) : null}
 
         <div className="auto-post-control-row">
           <button className="button button-secondary" type="button" onClick={handleStartNow} disabled={startDisabled}>
@@ -737,6 +885,43 @@ export function AutoPostPanel() {
           <div className="auto-post-metric-card"><span className="muted">Next run</span><strong>{formatDateTime(config.nextRunAt)}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Current job</span><strong>{jobStatusLabel(config.jobStatus)}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Last error</span><strong>{sanitizeText(config.lastError) || "None"}</strong></div>
+        </div>
+
+        <div className="stack compact-stack">
+          <div className="split compact-row">
+            <strong>Affiliate Post Preview</strong>
+            <span className="badge badge-neutral">{queuePreview.length}</span>
+          </div>
+          <div className="auto-post-log-list auto-post-log-list-minimal">
+            {queuePreview.length ? queuePreview.map((item) => (
+              <article key={item._id} className="auto-post-log-item">
+                <div className="split compact-row">
+                  <strong>{sanitizeText(item.product?.productName || item.productId)}</strong>
+                  <span className="badge badge-neutral">{item.status}</span>
+                </div>
+                <div className="muted">
+                  {item.product?.discountPrice || item.product?.productPrice
+                    ? `ราคา ${item.product?.discountPrice ?? item.product?.productPrice} บาท`
+                    : "รอข้อมูลราคา"}
+                  {item.product?.discountPercent ? ` • ลด ${item.product.discountPercent}%` : ""}
+                  {item.product?.rating ? ` • ${item.product.rating}/5` : ""}
+                </div>
+                {item.product?.productImageUrl ? (
+                  <img
+                    src={item.product.productImageUrl}
+                    alt={item.product?.productName || "Shopee product preview"}
+                    style={{ width: "100%", maxHeight: 160, objectFit: "cover", borderRadius: 18, marginTop: 10 }}
+                  />
+                ) : null}
+                {item.preview?.caption ? (
+                  <div className="muted auto-post-log-meta">{sanitizeText(item.preview.caption)}</div>
+                ) : null}
+                <div className="muted auto-post-log-meta">
+                  {formatDateTime(item.scheduledAt)} • {item.preview?.imageUrls?.length ?? 0}/4 images • {item.preview?.affiliateLink || item.affiliateLink}
+                </div>
+              </article>
+            )) : <div className="composer-media-empty">ยังไม่มีโพสต์ Shopee ในคิว Preview</div>}
+          </div>
         </div>
 
         <div className="stack compact-stack">

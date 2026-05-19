@@ -1,8 +1,10 @@
 import { z } from "zod";
 import { jsonError, jsonOk, normalizeRouteError, parseBody, requireAuth } from "@/lib/api";
 import {
+  getShopeeEnvStatus,
   getShopeeProductProvider,
   scoreShopeeProduct,
+  ShopeeProviderError,
   upsertShopeeProducts,
   ShopeeSourceTag
 } from "@/lib/services/shopee-affiliate";
@@ -21,7 +23,7 @@ function parseSourceTag(value: string | null): ShopeeSourceTag {
 
 export async function GET(request: Request) {
   try {
-    await requireAuth();
+    const userId = await requireAuth();
     const url = new URL(request.url);
     const sourceTag = parseSourceTag(url.searchParams.get("sourceTag"));
     const keyword = url.searchParams.get("keyword") ?? undefined;
@@ -29,6 +31,17 @@ export async function GET(request: Request) {
     const limit = Number(url.searchParams.get("limit") ?? "20");
 
     const provider = getShopeeProductProvider();
+    const envStatus = getShopeeEnvStatus();
+    console.info("[shopee/products] internal GET started", {
+      userId,
+      provider: provider.name,
+      providerMode: envStatus.providerMode,
+      sourceTag,
+      hasKeyword: Boolean(keyword),
+      hasCategory: Boolean(category),
+      limit: Number.isFinite(limit) ? limit : 20,
+      missingEnv: envStatus.missing
+    });
     const products = await provider.fetchProducts({
       sourceTag,
       keyword,
@@ -46,16 +59,43 @@ export async function GET(request: Request) {
       provider: provider.name
     });
   } catch (error) {
+    if (error instanceof ShopeeProviderError) {
+      console.warn("[shopee/products] provider error", {
+        source: error.source,
+        status: error.status,
+        code: error.code,
+        message: error.message,
+        responseSummary: error.responseSummary
+      });
+      return jsonError(error.message, error.status, error.code);
+    }
     const normalized = normalizeRouteError(error, "Unable to load Shopee products");
+    console.error("[shopee/products] internal GET failed", {
+      status: normalized.status,
+      code: normalized.code,
+      message: normalized.message,
+      source: normalized.status === 401 ? "internal_api" : "unknown"
+    });
     return jsonError(normalized.message, normalized.status, normalized.code);
   }
 }
 
 export async function POST(request: Request) {
   try {
-    await requireAuth();
+    const userId = await requireAuth();
     const payload = parseBody(querySchema, await request.json());
     const provider = getShopeeProductProvider();
+    const envStatus = getShopeeEnvStatus();
+    console.info("[shopee/products] internal POST started", {
+      userId,
+      provider: provider.name,
+      providerMode: envStatus.providerMode,
+      sourceTag: payload.sourceTag,
+      hasKeyword: Boolean(payload.keyword),
+      hasCategory: Boolean(payload.category),
+      limit: payload.limit,
+      missingEnv: envStatus.missing
+    });
     const products = await provider.fetchProducts(payload);
     await upsertShopeeProducts(products);
     return jsonOk({
@@ -67,7 +107,23 @@ export async function POST(request: Request) {
       provider: provider.name
     });
   } catch (error) {
+    if (error instanceof ShopeeProviderError) {
+      console.warn("[shopee/products] provider error", {
+        source: error.source,
+        status: error.status,
+        code: error.code,
+        message: error.message,
+        responseSummary: error.responseSummary
+      });
+      return jsonError(error.message, error.status, error.code);
+    }
     const normalized = normalizeRouteError(error, "Unable to discover Shopee products");
+    console.error("[shopee/products] internal POST failed", {
+      status: normalized.status,
+      code: normalized.code,
+      message: normalized.message,
+      source: normalized.status === 401 ? "internal_api" : "unknown"
+    });
     return jsonError(normalized.message, normalized.status, normalized.code);
   }
 }
