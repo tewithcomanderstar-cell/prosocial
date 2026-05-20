@@ -1,4 +1,4 @@
-﻿import OpenAI from "openai";
+﻿import OpenAI, { toFile } from "openai";
 import { getFallbackVariants } from "@/lib/services/fallback-content";
 import { GeneratedVariant } from "@/lib/types";
 
@@ -45,6 +45,10 @@ export function getLightweightModel() {
   return process.env.OPENAI_LIGHT_MODEL || "gpt-5-nano";
 }
 
+export function getImageModel() {
+  return process.env.OPENAI_IMAGE_MODEL || "gpt-image-1";
+}
+
 function extractJson(text: string) {
   const trimmed = text.trim();
   if (trimmed.startsWith("```")) {
@@ -58,6 +62,52 @@ function normalizeExtractedText(text: string) {
     .replace(/\r\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+export async function generateProductReferenceImage(input: {
+  imageBytes: ArrayBuffer;
+  mimeType: string;
+  prompt: string;
+  userId?: string;
+}) {
+  if (!process.env.OPENAI_API_KEY || process.env.SHOPEE_AI_IMAGE_EDIT_ENABLED === "false") {
+    return null;
+  }
+
+  const safePrompt = [
+    input.prompt,
+    "Create a realistic UGC product review photo, not a card, banner, poster, ecommerce thumbnail, or Canva template.",
+    "Use the provided image only as the product identity reference. Preserve the same product shape, colors, label/logo placement, proportions, and visible details.",
+    "Do not invent a new product. Do not redesign, recolor, rebrand, add fake logos, add fake reviews, or add any text.",
+    "The product must be large in frame, 60-85% of the image area, with natural mobile photography, realistic lighting, depth, shadow, and lifestyle context.",
+    "No generated text, no UI elements, no price labels, no stickers, no screenshots, no floating product on a white card."
+  ].join("\n");
+
+  try {
+    const productFile = await toFile(Buffer.from(input.imageBytes), "shopee-product-reference.png", {
+      type: input.mimeType || "image/png"
+    });
+
+    const result = await client.images.edit({
+      model: getImageModel(),
+      image: productFile,
+      prompt: safePrompt,
+      size: "1024x1024",
+      quality: "medium",
+      background: "opaque",
+      n: 1,
+      user: input.userId
+    });
+
+    const b64 = result.data?.[0]?.b64_json;
+    return b64 ? Buffer.from(b64, "base64") : null;
+  } catch (error) {
+    console.warn("[ai/image] product reference image edit failed", {
+      message: error instanceof Error ? error.message : "unknown_error",
+      model: getImageModel()
+    });
+    return null;
+  }
 }
 
 function buildPersonaPrompt(persona?: PersonaContext) {

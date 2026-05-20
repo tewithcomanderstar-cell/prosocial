@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { buildShopeeImagePromptSet as buildShopeeImagePromptSetCore } from "@/lib/services/shopee-affiliate-core";
-import { generateFacebookContent } from "@/lib/services/ai";
+import { generateFacebookContent, generateProductReferenceImage } from "@/lib/services/ai";
 import { logAction } from "@/lib/services/logging";
 import { randomItem } from "@/lib/utils";
 import { AffiliateLink } from "@/models/AffiliateLink";
@@ -616,6 +616,23 @@ export function isShopeeShortLink(value?: string | null) {
   }
 }
 
+async function fetchImageForAiEdit(url?: string) {
+  if (!url) return null;
+  try {
+    const response = await fetch(url, { cache: "no-store" });
+    if (!response.ok) return null;
+    const contentType = response.headers.get("content-type") || "image/jpeg";
+    if (!contentType.startsWith("image/")) return null;
+    return { bytes: await response.arrayBuffer(), mimeType: contentType };
+  } catch {
+    return null;
+  }
+}
+
+function bufferToDataImageUrl(buffer: Buffer, mimeType = "image/png") {
+  return `data:${mimeType};base64,${buffer.toString("base64")}`;
+}
+
 function getSafeHostname(value: string) {
   try {
     return new URL(value).hostname;
@@ -1045,15 +1062,39 @@ export async function buildShopeePostPackage(input: {
     style: input.captionStyle
   });
 
+  const productImageForEdit = await fetchImageForAiEdit(input.product.productImageUrl);
+  const editedImageUrls = productImageForEdit
+    ? await Promise.all(
+        imagePromptSet.prompts.map(async (promptItem, index) => {
+          const edited = await generateProductReferenceImage({
+            imageBytes: productImageForEdit.bytes,
+            mimeType: productImageForEdit.mimeType,
+            prompt: [
+              promptItem.prompt,
+              `UGC frame ${index + 1} of 4. Make this a different camera angle/composition than the other images.`,
+              index === 0 ? "Front hero review angle, product fills the frame." : "",
+              index === 1 ? "Close detail/open/detail angle, product fills the frame." : "",
+              index === 2 ? "Lifestyle usage environment, candid creator review angle." : "",
+              index === 3 ? "CTA review angle, product foreground, natural social commerce photo." : ""
+            ]
+              .filter(Boolean)
+              .join("\n"),
+            userId: input.userId
+          });
+          return edited ? bufferToDataImageUrl(edited, "image/png") : "";
+        })
+      )
+    : [];
+
   const imageDocs = await AiGeneratedImage.insertMany(
     imagePromptSet.prompts.map((promptItem, index) => ({
       userId: input.userId,
       productId: input.product.productId,
       prompt: promptItem.prompt,
       status: "generated",
-      generatedImageUrl: input.product.productImageUrl,
+      generatedImageUrl: editedImageUrls[index] || input.product.productImageUrl,
       fallbackImageUrl: input.product.productImageUrl,
-      provider: "shopee_ugc_lifestyle_renderer",
+      provider: editedImageUrls[index] ? "openai_reference_ugc_edit" : "shopee_ugc_lifestyle_renderer",
       promptHistory: [
         promptItem.title,
         `concept=${promptItem.concept}`,

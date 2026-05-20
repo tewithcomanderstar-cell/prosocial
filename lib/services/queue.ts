@@ -486,6 +486,14 @@ function wrapText(value: string, maxChars: number, maxLines: number) {
 }
 
 async function fetchRemoteImageBuffer(url: string) {
+  if (url.startsWith("data:image/")) {
+    const match = url.match(/^data:image\/[a-zA-Z0-9.+-]+;base64,(.+)$/);
+    if (!match?.[1]) {
+      throw new Error("Invalid generated Shopee data image");
+    }
+    return Buffer.from(match[1], "base64");
+  }
+
   const response = await fetch(url, { cache: "no-store" });
   if (!response.ok) {
     throw new Error(`Unable to fetch Shopee product image: ${response.status}`);
