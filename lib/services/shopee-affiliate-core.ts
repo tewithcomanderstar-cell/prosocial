@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { buildUgcShopeeImagePromptSet } from "./ugc-image-prompt.ts";
 
 export type ShopeeSourceTag = "trending" | "best_selling" | "top_search" | "best_roi" | "manual";
 export type ShopeeCaptionStyle = "soft_sell" | "urgency" | "problem_solution" | "review_style" | "deal_alert" | "lifestyle";
@@ -337,107 +338,9 @@ export function analyzeShopeeProductVisuals(product: ShopeeProductRecord): Shope
   };
 }
 
-function buildPromptHeader(product: ShopeeProductRecord, style: ShopeeCaptionStyle, analysis: ShopeeProductVisualAnalysis) {
-  return [
-    "Use the provided product_image_url as the visual identity reference source.",
-    "Primary rendering rule: use the real Shopee product image as the product layer; do not ask the image model to redraw or invent the product.",
-    `Reference product image URL: ${product.productImageUrl || "not provided"}.`,
-    `Product name: ${product.productName}.`,
-    `Category: ${product.category}.`,
-    `Description/features: ${product.productDescription || "useful everyday product"}.`,
-    `Visual identity: ${analysis.keyVisualIdentity.join("; ")}.`,
-    `Shape/material hints: ${analysis.shape}; ${analysis.materials}.`,
-    `Social commerce style: ${style.replace(/_/g, " ")}, UGC creator review, Thai Facebook/TikTok/Shopee review content, high CTR, trustworthy, emotional but believable.`,
-    "Scene rule: generate only realistic lifestyle context, perspective, depth, light, and background around the real product image.",
-    "Text rule: do not generate Thai text inside diffusion/image models; Thai text must be rendered later by HTML/SVG/canvas/sharp.",
-    "Safety: no ecommerce card, no Canva banner, no fake Shopee logos, fake brand endorsements, fake reviews, fake screenshots, misleading health claims, or unrealistic product transformations."
-  ].join(" ");
-}
-
 export function buildShopeeImagePromptSet(product: ShopeeProductRecord, style: ShopeeCaptionStyle = "soft_sell"): ShopeeImagePromptSet {
   const analysis = analyzeShopeeProductVisuals(product);
-  const header = buildPromptHeader(product, style, analysis);
-  const priceCue = product.discountPrice
-    ? `Subtly highlight the deal around ${product.discountPrice} THB and ${product.discountPercent ?? 0}% discount without fake scarcity.`
-    : "Subtly highlight practical everyday value without fake price claims.";
-
-  const consistencyInstructions = [
-    "The product must remain the exact same item across all four images.",
-    "Preserve product shape, color, proportions, branding, label placement, accessories, and visible details from the reference image.",
-    "Use the real product image as the product layer and only change camera angle, background, lighting, usage context, crop, perspective, and composition.",
-    "Do not redesign, recolor, simplify, mutate, upscale into a different premium product, or add fake features.",
-    "No Shopee logo unless it exists on the actual product packaging in the reference image.",
-    "Product should occupy roughly 60-85% of the frame and feel like a real mobile review photo, not a template card."
-  ];
-
-  const prompts: ShopeeImagePromptConcept[] = [
-    {
-      concept: "hero_product_shot",
-      title: "Prompt 1: Hero Shot",
-      prompt: [
-        header,
-        "IMAGE 1 HERO UGC SHOT: product fills most of the frame like a creator review photo, not a product card.",
-        "Camera: handheld mobile 3/4 angle, slightly close, product large and touchable, natural perspective, safe small overlay area only.",
-        "Lighting: real daylight or indoor window light, soft shadows, believable reflections.",
-        "Background: lifestyle surface such as desk, cafe table, bedroom, garage, or camping setup based on category, no empty white card.",
-        "CTR strategy: make the exact product instantly recognizable, large, clear, and scroll-stopping.",
-        priceCue
-      ].join(" ")
-    },
-    {
-      concept: "lifestyle_usage",
-      title: "Prompt 2: Lifestyle",
-      prompt: [
-        header,
-        "IMAGE 2 DETAIL REVIEW SHOT: closer crop from the real product image, showing texture/material/detail clearly.",
-        "Camera: mobile close-up crop, shallow depth, product still large and accurate, never redraw product details.",
-        "Lighting: natural side light with real shadows and highlight texture.",
-        "Background: blurred lifestyle environment matching product category.",
-        "Emotional tone: 'I can imagine owning this' feeling, useful, approachable, trustworthy.",
-        "CTR strategy: create curiosity about details without fake before-after claims."
-      ].join(" ")
-    },
-    {
-      concept: "close_up_detail",
-      title: "Prompt 3: Detail Close-up",
-      prompt: [
-        header,
-        "IMAGE 3 LIFESTYLE USAGE SHOT: same product in a realistic usage environment, like a Thai social commerce review post.",
-        "Camera: candid mobile angle, product in foreground, lifestyle background has depth but does not hide the product.",
-        "Lighting: warm daylight, realistic ambient shadows, no AI glow.",
-        "Background: home, desk, car, cafe, travel setup, bedroom, garage, or camping setup based on category.",
-        "Emotional tone: practical, trustworthy, looks like someone actually reviewed it.",
-        "CTR strategy: make users imagine using the exact product."
-      ].join(" ")
-    },
-    {
-      concept: "viral_review_style",
-      title: "Prompt 4: Viral Review Style",
-      prompt: [
-        header,
-        "IMAGE 4 CTA REVIEW SHOT: viral Facebook/TikTok review style with product as the hero and a short CTA overlay rendered later.",
-        "Camera: dynamic handheld angle, product foregrounded and large, realistic scene props around it.",
-        "Lighting: bright social feed lighting, clear product edges, no fake glow.",
-        "Background: creator-style review setup, clean table or lifestyle flat lay, no fake UI elements, no template frame.",
-        "Emotional tone: exciting, shareable, trustworthy, 'น่าใช้มาก' feeling without fake social proof.",
-        "CTR strategy: strong contrast, product fills the frame, small safe area for Thai overlay text."
-      ].join(" ")
-    }
-  ];
-
-  return {
-    productVisualAnalysis: analysis,
-    consistencyInstructions,
-    prompts,
-    negativePrompt: [
-      "Do not change product shape, color, branding, logo, label, category, accessories, packaging, or visible components.",
-      "No random redesigns, no fake luxury transformation, no fake celebrity endorsement, no fake Shopee logo, no fake reviews or screenshots.",
-      "No misleading health, medical, financial, safety, or guaranteed-result claims.",
-      "No unrealistic anatomy, distorted hands, mutated product, impossible materials, unreadable fake text, duplicate products, extra product variants, or unrelated items.",
-      "No card layout, no giant white box, no floating product, no corporate banner, no ecommerce thumbnail, no Canva template.",
-      "Do not make the product look like a different model, size, colorway, or brand."
-    ].join(" ")
-  };
+  return buildUgcShopeeImagePromptSet(product, style, analysis);
 }
 
 export function buildShopeeImagePrompt(product: ShopeeProductRecord, style: ShopeeCaptionStyle = "soft_sell") {

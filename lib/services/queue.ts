@@ -53,6 +53,7 @@ type LeanAiGeneratedImage = {
   generatedImageUrl?: string;
   fallbackImageUrl?: string;
   promptHistory?: string[];
+  provider?: string;
 };
 
 type LeanShopeeProduct = {
@@ -548,15 +549,15 @@ function getShopeeUgcCopy(product: LeanShopeeProduct, layout: number) {
   const shortName = truncateText(product.productName, 34);
 
   if (layout === 1) {
-    return { label: "รีวิวของน่าใช้", headline: "รุ่นฮิต ใช้งานทุกวัน", note: `${priceText} · ${discountText}`, chips: [priceText, discountText, ratingText], title: shortName };
+    return { label: "รีวิวจากรูปจริง", lines: ["ดีไซน์น่าใช้ เห็นชัดเต็มเฟรม", `ราคา ${priceText} • ${discountText}`, shortName], chips: [priceText, discountText, ratingText] };
   }
   if (layout === 2) {
-    return { label: "ซูมรายละเอียด", headline: "รายละเอียดเห็นชัด", note: product.shopName ? `จากร้าน ${truncateText(product.shopName, 20)}` : categoryText, chips: [salesText, ratingText, discountText], title: truncateText(product.productDescription || product.productName, 38) };
+    return { label: "ซูมรายละเอียด", lines: ["ดูผิววัสดุและดีเทลใกล้ ๆ", product.shopName ? `จากร้าน ${truncateText(product.shopName, 22)}` : categoryText, ratingText], chips: [ratingText, salesText, discountText] };
   }
   if (layout === 3) {
-    return { label: "ลองดูแล้วน่าสนใจ", headline: "เหมาะกับสายใช้งานจริง", note: `${categoryText} · ${salesText}`, chips: [discountText, "ดูรายละเอียดก่อนซื้อ", ratingText], title: shortName };
+    return { label: "ใช้งานจริง", lines: ["เหมาะกับใช้ในชีวิตประจำวัน", `หมวด ${categoryText}`, salesText], chips: [salesText, discountText, "ดูรายละเอียดก่อนซื้อ"] };
   }
-  return { label: "กดดูในแคปชั่น", headline: "กดดูรายละเอียด", note: `${priceText} · ลิงก์อยู่ท้ายโพสต์`, chips: [priceText, "น่าใช้มาก", salesText], title: shortName };
+  return { label: "กดดูในแคปชั่น", lines: ["ใครมองหาแนวนี้", "กดดูรายละเอียดได้เลย", `ราคา ${priceText}`], chips: [priceText, "น่าใช้มาก", salesText] };
 }
 
 function buildShopeeUgcSceneSvg(input: { scene: ReturnType<typeof getShopeeProductScene>; layout: number }) {
@@ -602,39 +603,41 @@ function buildShopeeUgcSceneSvg(input: { scene: ReturnType<typeof getShopeeProdu
 
 function buildShopeeUgcTextSvg(input: { copy: ReturnType<typeof getShopeeUgcCopy>; scene: ReturnType<typeof getShopeeProductScene>; layout: number }) {
   const { copy, scene, layout } = input;
-  const topY = layout === 2 ? 48 : 56;
-  const bottomPanelY = layout === 2 ? 890 : 902;
-  const titleLines = wrapText(copy.title, 22, 2);
-  const chipStartX = layout === 4 ? 606 : 640;
-  const chipStartY = bottomPanelY + 46;
+  const labelX = layout === 2 ? 52 : 58;
+  const labelY = layout === 2 ? 52 : 58;
+  const textX = layout === 4 ? 54 : 58;
+  const textY = layout === 2 ? 774 : 792;
+  const lines = copy.lines.slice(0, 3).map((line) => truncateText(line, 34));
+  const overlayText = [copy.label, ...lines].join(" ");
+
+  if (/[�]/.test(overlayText) || lines.length > 3) {
+    throw new Error("Shopee UGC image validation failed: Thai overlay text is invalid");
+  }
 
   return `
     <svg width="1080" height="1080" viewBox="0 0 1080 1080" xmlns="http://www.w3.org/2000/svg">
       <defs>
-        <filter id="labelShadow" x="-20%" y="-20%" width="140%" height="140%">
-          <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#0f172a" flood-opacity="0.18"/>
+        <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+          <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#0f172a" flood-opacity="0.28"/>
         </filter>
         <style>
-          .thai { font-family: &quot;Noto Sans Thai&quot;, &quot;Prompt&quot;, &quot;Sarabun&quot;, &quot;Tahoma&quot;, &quot;Arial Unicode MS&quot;, Arial, sans-serif; }
+          .thai { font-family: &quot;Noto Sans Thai&quot;, &quot;Prompt&quot;, &quot;Kanit&quot;, &quot;Sarabun&quot;, &quot;Tahoma&quot;, Arial, sans-serif; }
           .heavy { font-weight: 900; }
           .bold { font-weight: 800; }
-          .medium { font-weight: 650; }
         </style>
       </defs>
-      <g filter="url(#labelShadow)">
-        <rect x="56" y="${topY}" width="316" height="64" rx="32" fill="rgba(255,255,255,0.86)"/>
-        <circle cx="96" cy="${topY + 32}" r="18" fill="${scene.accent}"/>
-        <text x="126" y="${topY + 42}" font-size="28" class="thai bold" fill="#111827">${escapeXml(copy.label)}</text>
+      <g filter="url(#softShadow)">
+        <rect x="${labelX}" y="${labelY}" width="290" height="56" rx="28" fill="rgba(15,23,42,0.68)"/>
+        <circle cx="${labelX + 32}" cy="${labelY + 28}" r="12" fill="${scene.accent}"/>
+        <text x="${labelX + 58}" y="${labelY + 38}" font-size="25" class="thai bold" fill="#ffffff">${escapeXml(copy.label)}</text>
       </g>
-      <g filter="url(#labelShadow)">
-        <rect x="54" y="${bottomPanelY}" width="972" height="132" rx="34" fill="rgba(255,255,255,0.86)"/>
-        <text x="86" y="${bottomPanelY + 48}" font-size="36" class="thai heavy" fill="#111827">${escapeXml(copy.headline)}</text>
-        <text x="86" y="${bottomPanelY + 88}" font-size="24" class="thai medium" fill="#64748b">${escapeXml(copy.note)}</text>
-        ${titleLines.map((line, index) => `<text x="86" y="${bottomPanelY + 122 + index * 30}" font-size="22" class="thai medium" fill="#334155">${escapeXml(line)}</text>`).join("")}
-        ${copy.chips.slice(0, 3).map((chip, index) => `
-          <rect x="${chipStartX}" y="${chipStartY + index * 37}" width="352" height="30" rx="15" fill="${index === 0 ? scene.accent : "rgba(255,255,255,0.72)"}" stroke="${scene.accent}" stroke-width="1.5"/>
-          <text x="${chipStartX + 18}" y="${chipStartY + 22 + index * 37}" font-size="18" class="thai bold" fill="${index === 0 ? "#ffffff" : scene.accent}">${escapeXml(truncateText(chip, 28))}</text>
-        `).join("")}
+      <g filter="url(#softShadow)">
+        ${lines.map((line, index) => {
+          const width = Math.min(900, Math.max(390, line.length * 25 + 50));
+          const y = textY + index * 58;
+          return `<rect x="${textX}" y="${y}" width="${width}" height="48" rx="14" fill="rgba(17,24,39,0.72)"/>
+          <text x="${textX + 24}" y="${y + 34}" font-size="30" class="thai heavy" fill="#ffffff">${escapeXml(line)}</text>`;
+        }).join("")}
       </g>
     </svg>
   `;
@@ -647,7 +650,7 @@ async function renderShopeeAffiliateCard(imageDoc: LeanAiGeneratedImage): Promis
   }
 
   const layout = getShopeeUgcLayout(imageDoc.promptHistory);
-  const imageUrl = imageDoc.fallbackImageUrl || imageDoc.generatedImageUrl || product.productImageUrl || product.productImageUrls?.[0];
+  const imageUrl = imageDoc.generatedImageUrl || imageDoc.fallbackImageUrl || product.productImageUrl || product.productImageUrls?.[0];
   if (!imageUrl) {
     throw new Error("Shopee product image is missing");
   }
@@ -655,6 +658,31 @@ async function renderShopeeAffiliateCard(imageDoc: LeanAiGeneratedImage): Promis
   const productBuffer = await fetchRemoteImageBuffer(imageUrl);
   const scene = getShopeeProductScene(product);
   const copy = getShopeeUgcCopy(product, layout);
+  const hasReferenceEditedImage = Boolean(
+    imageDoc.generatedImageUrl &&
+      imageDoc.generatedImageUrl !== imageDoc.fallbackImageUrl &&
+      imageDoc.generatedImageUrl !== product.productImageUrl
+  );
+
+  if (hasReferenceEditedImage) {
+    const base = await sharp(productBuffer)
+      .resize(1080, 1080, { fit: "cover", position: "attention" })
+      .modulate({ brightness: 0.98, saturation: 1.03 })
+      .jpeg({ quality: 94 })
+      .toBuffer();
+
+    const output = await sharp(base)
+      .composite([{ input: Buffer.from(buildShopeeUgcTextSvg({ copy, scene, layout }), "utf8"), left: 0, top: 0 }])
+      .jpeg({ quality: 94, mozjpeg: true })
+      .toBuffer();
+
+    return {
+      kind: "binary",
+      fileName: `shopee-${product.productId}-ugc-ai-${layout}.jpg`,
+      bytes: Uint8Array.from(output).buffer,
+      mimeType: "image/jpeg"
+    };
+  }
   const placement = [
     { width: 1010, height: 760, top: 142, fit: "inside" as const },
     { width: 1080, height: 830, top: 86, fit: "cover" as const },
@@ -684,7 +712,6 @@ async function renderShopeeAffiliateCard(imageDoc: LeanAiGeneratedImage): Promis
 
   const output = await sharp(background)
     .composite([
-      { input: Buffer.from(buildShopeeUgcSceneSvg({ scene, layout }), "utf8"), left: 0, top: 0 },
       { input: productLayer, left: productLeft, top: productTop },
       { input: Buffer.from(buildShopeeUgcTextSvg({ copy, scene, layout }), "utf8"), left: 0, top: 0 }
     ])

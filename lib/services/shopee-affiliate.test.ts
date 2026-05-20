@@ -65,8 +65,8 @@ function testImagePromptIncludesSafetyRules() {
   const prompt = buildShopeeImagePrompt(sampleProduct, "deal_alert");
 
   assert.ok(prompt.includes(sampleProduct.productName));
-  assert.ok(prompt.includes("Shopee logos") || prompt.includes("fake logos"));
-  assert.ok(prompt.includes("misleading"));
+  assert.ok(prompt.includes("fake Shopee UI") || prompt.includes("fake product"));
+  assert.ok(prompt.includes("Do not invent a new product"));
   console.log("PASS Shopee image prompt includes safety rules");
 }
 
@@ -76,14 +76,15 @@ function testImagePromptSetCreatesFourConsistentPrompts() {
   assert.equal(promptSet.prompts.length, 4);
   assert.deepEqual(
     promptSet.prompts.map((item) => item.concept),
-    ["hero_product_shot", "lifestyle_usage", "close_up_detail", "viral_review_style"]
+    ["hero_product_shot", "close_up_detail", "lifestyle_usage", "viral_review_style"]
   );
   for (const item of promptSet.prompts) {
     assert.ok(item.prompt.includes(sampleProduct.productName));
-    assert.ok(item.prompt.includes("Reference product image URL"));
-    assert.ok(item.prompt.includes("same"));
+    assert.ok(item.prompt.includes("Product image reference URL"));
+    assert.ok(item.prompt.includes("source of truth"));
+    assert.ok(item.prompt.includes("Do not generate Thai text"));
   }
-  assert.ok(promptSet.negativePrompt.includes("Do not change product shape"));
+  assert.ok(promptSet.negativePrompt.includes("no fake product"));
   console.log("PASS Shopee image prompt set creates 4 consistent CTR prompts");
 }
 
