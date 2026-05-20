@@ -49,6 +49,21 @@ export function getImageModel() {
   return process.env.OPENAI_IMAGE_MODEL || "gpt-image-1";
 }
 
+function getSafeOpenAiErrorDetails(error: unknown) {
+  const record = typeof error === "object" && error ? (error as Record<string, unknown>) : {};
+  const message = error instanceof Error ? error.message : "unknown_error";
+  const status = typeof record.status === "number" || typeof record.status === "string" ? String(record.status) : "unknown";
+  const code = typeof record.code === "string" ? record.code : "unknown";
+  const type = typeof record.type === "string" ? record.type : "unknown";
+  return { message, status, code, type };
+}
+
+function getReferenceImageFileName(mimeType: string) {
+  if (mimeType.includes("jpeg") || mimeType.includes("jpg")) return "shopee-product-reference.jpg";
+  if (mimeType.includes("webp")) return "shopee-product-reference.webp";
+  return "shopee-product-reference.png";
+}
+
 function extractJson(text: string) {
   const trimmed = text.trim();
   if (trimmed.startsWith("```")) {
@@ -70,8 +85,14 @@ export async function generateProductReferenceImage(input: {
   prompt: string;
   userId?: string;
 }) {
-  if (!process.env.OPENAI_API_KEY || process.env.SHOPEE_AI_IMAGE_EDIT_ENABLED === "false") {
-    return null;
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error("OpenAI image edit is not configured: missing OPENAI_API_KEY");
+  }
+  if (process.env.SHOPEE_AI_IMAGE_EDIT_ENABLED === "false") {
+    throw new Error("OpenAI image edit is disabled: SHOPEE_AI_IMAGE_EDIT_ENABLED=false");
+  }
+  if (getImageModel() !== "gpt-image-1") {
+    throw new Error(`OpenAI image edit model is invalid for Shopee UGC: set OPENAI_IMAGE_MODEL=gpt-image-1, current=${getImageModel()}`);
   }
 
   const safePrompt = [
@@ -84,7 +105,7 @@ export async function generateProductReferenceImage(input: {
   ].join("\n");
 
   try {
-    const productFile = await toFile(Buffer.from(input.imageBytes), "shopee-product-reference.png", {
+    const productFile = await toFile(Buffer.from(input.imageBytes), getReferenceImageFileName(input.mimeType), {
       type: input.mimeType || "image/png"
     });
 
@@ -100,13 +121,20 @@ export async function generateProductReferenceImage(input: {
     });
 
     const b64 = result.data?.[0]?.b64_json;
-    return b64 ? Buffer.from(b64, "base64") : null;
+    if (!b64) {
+      throw new Error("OpenAI image edit returned an empty image response");
+    }
+    return Buffer.from(b64, "base64");
   } catch (error) {
+    const { message, status, code, type } = getSafeOpenAiErrorDetails(error);
     console.warn("[ai/image] product reference image edit failed", {
-      message: error instanceof Error ? error.message : "unknown_error",
+      message,
+      status,
+      code,
+      type,
       model: getImageModel()
     });
-    return null;
+    throw new Error(`OpenAI image edit failed: ${message} (status=${status}, code=${code}, type=${type}, model=${getImageModel()})`);
   }
 }
 

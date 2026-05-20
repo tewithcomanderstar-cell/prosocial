@@ -1072,8 +1072,9 @@ export async function buildShopeePostPackage(input: {
     );
   }
 
-  const editedImageUrls = await Promise.all(
-    imagePromptSet.prompts.map(async (promptItem, index) => {
+  const editedImageUrls: string[] = [];
+  try {
+    for (const [index, promptItem] of imagePromptSet.prompts.entries()) {
       const edited = await generateProductReferenceImage({
         imageBytes: productImageForEdit.bytes,
         mimeType: productImageForEdit.mimeType,
@@ -1089,13 +1090,20 @@ export async function buildShopeePostPackage(input: {
           .join("\n"),
         userId: input.userId
       });
-      return edited ? bufferToDataImageUrl(edited, "image/png") : "";
-    })
-  );
+      editedImageUrls.push(bufferToDataImageUrl(edited, "image/png"));
+    }
+  } catch (error) {
+    throw new ShopeeProviderError(
+      `Shopee UGC image generation failed: ${error instanceof Error ? error.message : "OpenAI image edit failed"}`,
+      500,
+      "shopee_ugc_image_edit_failed",
+      "internal_api"
+    );
+  }
 
   if (editedImageUrls.length !== 4 || editedImageUrls.some((url) => !url.startsWith("data:image/"))) {
     throw new ShopeeProviderError(
-      "Shopee UGC image generation failed: OpenAI image edit did not return 4 UGC images. Posting was stopped to avoid publishing template/banner images.",
+      `Shopee UGC image generation failed: OpenAI image edit returned ${editedImageUrls.length}/4 usable UGC images. Check OPENAI_API_KEY, OPENAI_IMAGE_MODEL=gpt-image-1, OpenAI billing/quota, and image safety policy.`,
       500,
       "shopee_ugc_image_edit_required",
       "internal_api"
