@@ -12,6 +12,8 @@ type LeanAutoPostConfig = {
   lastError?: string | null;
   retryCount?: number;
   folderId?: string;
+  maxPostsPerDay?: number;
+  maxPostsPerPagePerDay?: number;
 };
 
 const intervalSchema = z.union([
@@ -101,22 +103,47 @@ export async function GET() {
         watermarkEnabled: true,
           watermarkSource: "page_profile",
           watermarkPosition: "bottom-right",
-          watermarkSizePercent: 17
+          watermarkSizePercent: 17,
+          maxPostsPerDay: 0,
+          maxPostsPerPagePerDay: 0
         }
       },
       { upsert: true, new: true }
     ).lean()) as LeanAutoPostConfig | null;
 
-    if (config?.folderId === BROKEN_FOLDER_ID) {
+    if (!config) {
+      return jsonError("Unable to load auto post configuration", 500);
+    }
+
+    if (config.folderId === BROKEN_FOLDER_ID) {
       await AutoPostConfig.findOneAndUpdate({ userId }, { folderId: FIXED_FOLDER_ID });
       config.folderId = FIXED_FOLDER_ID;
     }
 
-    if (config?.lastError) {
+    if (config.lastError) {
       const sanitizedLastError = sanitizeLegacyMessage(config.lastError);
       if (sanitizedLastError !== config.lastError) {
         await AutoPostConfig.findOneAndUpdate({ userId }, { lastError: sanitizedLastError });
         config.lastError = sanitizedLastError;
+      }
+    }
+
+    if ((config.maxPostsPerDay ?? 0) > 0 || (config.maxPostsPerPagePerDay ?? 0) > 0) {
+      await AutoPostConfig.findOneAndUpdate(
+        { userId },
+        {
+          maxPostsPerDay: 0,
+          maxPostsPerPagePerDay: 0,
+          lastError:
+            config.lastError === "Daily Shopee Affiliate post limit reached for selected pages"
+              ? null
+              : config.lastError ?? null
+        }
+      );
+      config.maxPostsPerDay = 0;
+      config.maxPostsPerPagePerDay = 0;
+      if (config.lastError === "Daily Shopee Affiliate post limit reached for selected pages") {
+        config.lastError = null;
       }
     }
 
@@ -159,6 +186,8 @@ export async function POST(request: Request) {
         shopeeTrackingId,
         shopeeBlockedCategories: (payload.shopeeBlockedCategories ?? []).map((item) => item.trim()).filter(Boolean),
         shopeeCategoryPriority: (payload.shopeeCategoryPriority ?? []).map((item) => item.trim()).filter(Boolean),
+        maxPostsPerDay: 0,
+        maxPostsPerPagePerDay: 0,
         captions: (payload.captions ?? []).map((caption) => caption.trim()).filter(Boolean),
         hashtags: (payload.hashtags ?? []).map((hashtag) => hashtag.trim()).filter(Boolean),
         watermarkEnabled: payload.watermarkEnabled,

@@ -444,7 +444,7 @@ async function queueShopeeAutoPostsForConfig(
   await ensureValidFacebookConnection(config.userId);
 
   const maxPostsPerPage = Math.max(0, config.maxPostsPerPagePerDay ?? 0);
-  if (maxPostsPerPage > 0) {
+  if ((config.contentSource ?? "shopee-affiliate") !== "shopee-affiliate" && maxPostsPerPage > 0) {
     const limitedPageIds: string[] = [];
     for (const pageId of eligiblePageIds) {
       const postedToday = await countSuccessfulAutoPostsToday(config.userId, config._id, pageId);
@@ -464,7 +464,7 @@ async function queueShopeeAutoPostsForConfig(
   }
 
   const maxPostsPerDay = Math.max(0, config.maxPostsPerDay ?? 0);
-  if (maxPostsPerDay > 0) {
+  if ((config.contentSource ?? "shopee-affiliate") !== "shopee-affiliate" && maxPostsPerDay > 0) {
     const postedToday = await countSuccessfulAutoPostsToday(config.userId, config._id);
     const remaining = Math.max(0, maxPostsPerDay - postedToday);
     eligiblePageIds = eligiblePageIds.slice(0, remaining);

@@ -22,6 +22,8 @@ type LeanAutoPostConfig = {
   aiPrompt: string;
   language: "th" | "en";
   autoPostStatus?: string;
+  maxPostsPerDay?: number;
+  maxPostsPerPagePerDay?: number;
 };
 
 function sanitizeLegacyMessage(value?: string | null) {
@@ -73,6 +75,16 @@ export async function POST() {
 
     if (["running", "posting", "retrying"].includes(config.autoPostStatus ?? "")) {
       return jsonError("Auto Post is already running", 409);
+    }
+
+    if ((config.maxPostsPerDay ?? 0) > 0 || (config.maxPostsPerPagePerDay ?? 0) > 0) {
+      await AutoPostConfig.findByIdAndUpdate(config._id, {
+        maxPostsPerDay: 0,
+        maxPostsPerPagePerDay: 0,
+        lastError: null
+      });
+      config.maxPostsPerDay = 0;
+      config.maxPostsPerPagePerDay = 0;
     }
 
     await AutoPostConfig.findByIdAndUpdate(config._id, {
