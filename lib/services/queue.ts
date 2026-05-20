@@ -28,6 +28,7 @@ import { logAction, logAndNotifyError, serializeError } from "@/lib/services/log
 import { getPageLogoForFacebookPage } from "@/lib/services/page-logo";
 import { checkRateLimits } from "@/lib/services/rate-limit";
 import { getUserSettings, randomDelayMs } from "@/lib/services/settings";
+import { isShopeeShortLink } from "@/lib/services/shopee-affiliate";
 import { computeNextRunAt, randomItem } from "@/lib/utils";
 
 const AUTO_POST_PAGE_SPACING_MINUTES = Number(process.env.AUTO_POST_PAGE_SPACING_MINUTES ?? "10");
@@ -512,71 +513,96 @@ async function renderShopeeAffiliateCard(imageDoc: LeanAiGeneratedImage): Promis
 
   const productBuffer = await fetchRemoteImageBuffer(imageUrl);
   const productPng = await sharp(productBuffer)
-    .resize(840, 700, { fit: "inside", withoutEnlargement: true, background: "#ffffff" })
+    .resize(900, 690, { fit: "inside", withoutEnlargement: true, background: { r: 255, g: 255, b: 255, alpha: 0 } })
     .png()
     .toBuffer();
   const productDataUrl = `data:image/png;base64,${productPng.toString("base64")}`;
 
   const price = product.discountPrice || product.productPrice || 0;
-  const priceText = price ? `฿${price.toLocaleString("th-TH")}` : "ดูราคาหน้าสินค้า";
+  const priceText = price ? `฿${price.toLocaleString("th-TH")}` : "ดูราคาใน Shopee";
   const discountText = product.discountPercent ? `ลด ${product.discountPercent}%` : "ดีลน่าเช็ก";
-  const ratingText = product.rating ? `⭐ ${product.rating}` : "รีวิวจาก Shopee";
-  const salesText = product.salesCount ? `ขายแล้ว ${product.salesCount.toLocaleString("th-TH")}+` : "สินค้ากำลังมาแรง";
-  const titleLines = wrapText(product.productName, 26, 3);
-  const descLines = wrapText(product.productDescription || product.category || "สินค้าแนะนำจาก Shopee", 34, 2);
+  const ratingText = product.rating ? `⭐ ${product.rating}/5` : "รีวิวดี";
+  const salesText = product.salesCount ? `ขายแล้ว ${product.salesCount.toLocaleString("th-TH")}+` : "กำลังมาแรง";
+  const categoryText = product.category || "ของน่าใช้";
+  const titleLines = wrapText(product.productName, 25, 2);
+  const descLines = wrapText(product.productDescription || categoryText, 30, 2);
 
   const layoutMeta = [
-    { kicker: "ดีลแนะนำ", headline: "ของน่าใช้ที่คนกำลังสนใจ", accent: "#ff6b2c" },
-    { kicker: "รายละเอียดสินค้า", headline: "เช็กจุดเด่นก่อนกดซื้อ", accent: "#2563eb" },
-    { kicker: "ทำไมคนสนใจ", headline: "จุดเด่นที่น่าเก็บไว้ดู", accent: "#16a34a" },
-    { kicker: "กดดูดีล", headline: "ถ้ากำลังมองหาแนวนี้", accent: "#db2777" }
+    { kicker: "รีวิวของน่าใช้", headline: "รุ่นนี้น่าเช็ก", accent: "#f97316", bg1: "#fff7ed", bg2: "#ffedd5" },
+    { kicker: "ดูรายละเอียดก่อนซื้อ", headline: "จุดเด่นเห็นชัด", accent: "#2563eb", bg1: "#eff6ff", bg2: "#dbeafe" },
+    { kicker: "ทำไมคนสนใจ", headline: "เหมาะกับสายคุ้ม", accent: "#16a34a", bg1: "#f0fdf4", bg2: "#dcfce7" },
+    { kicker: "กดดูดีลในแคปชั่น", headline: "ถ้ากำลังมองหาแนวนี้", accent: "#db2777", bg1: "#fdf2f8", bg2: "#fce7f3" }
   ][layout - 1];
 
   const bullets =
     layout === 1
       ? [priceText, discountText, ratingText]
       : layout === 2
-        ? [salesText, product.shopName ? `ร้าน ${product.shopName}` : product.category || "หมวดหมู่สินค้า", ratingText]
+        ? [salesText, product.shopName ? `ร้าน ${product.shopName}` : categoryText, ratingText]
         : layout === 3
           ? [discountText, salesText, "ดูรายละเอียดก่อนตัดสินใจ"]
-          : [priceText, "ลิงก์อยู่ในแคปชั่น", "ลิงก์ Affiliate"];
+          : [priceText, "ลิงก์อยู่ท้ายแคปชั่น", "กดดูรายละเอียด"];
+  const sticker =
+    layout === 1 ? "ดีลน่าเช็ก" : layout === 2 ? "ซูมรายละเอียด" : layout === 3 ? "คุ้มไหม?" : "ดูต่อในแคปชั่น";
+  const productY = layout === 2 ? 250 : 225;
+  const productHeight = layout === 2 ? 620 : 660;
+  const productWidth = layout === 2 ? 940 : 900;
+  const productX = (1080 - productWidth) / 2;
 
   const svg = `
-    <svg width="1200" height="1200" viewBox="0 0 1200 1200" xmlns="http://www.w3.org/2000/svg">
+    <svg width="1080" height="1080" viewBox="0 0 1080 1080" xmlns="http://www.w3.org/2000/svg">
       <defs>
         <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stop-color="#fff7ed"/>
-          <stop offset="52%" stop-color="#ffffff"/>
-          <stop offset="100%" stop-color="#eef2ff"/>
+          <stop offset="0%" stop-color="${layoutMeta.bg1}"/>
+          <stop offset="54%" stop-color="#ffffff"/>
+          <stop offset="100%" stop-color="${layoutMeta.bg2}"/>
         </linearGradient>
         <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-          <feDropShadow dx="0" dy="24" stdDeviation="26" flood-color="#1f2937" flood-opacity="0.18"/>
+          <feDropShadow dx="0" dy="20" stdDeviation="22" flood-color="#0f172a" flood-opacity="0.18"/>
         </filter>
+        <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+          <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#0f172a" flood-opacity="0.20"/>
+        </filter>
+        <style>
+          .thai { font-family: &quot;Noto Sans Thai&quot;, &quot;Prompt&quot;, &quot;Sarabun&quot;, &quot;Tahoma&quot;, &quot;Arial Unicode MS&quot;, Arial, sans-serif; }
+          .heavy { font-weight: 900; }
+          .bold { font-weight: 800; }
+          .medium { font-weight: 600; }
+        </style>
       </defs>
-      <rect width="1200" height="1200" rx="0" fill="url(#bg)"/>
-      <circle cx="1040" cy="120" r="180" fill="${layoutMeta.accent}" opacity="0.10"/>
-      <circle cx="120" cy="1080" r="220" fill="${layoutMeta.accent}" opacity="0.08"/>
-      <rect x="70" y="76" width="1060" height="1048" rx="54" fill="rgba(255,255,255,0.88)" filter="url(#shadow)"/>
-      <text x="118" y="150" font-size="34" font-family="Arial, sans-serif" font-weight="700" fill="${layoutMeta.accent}">${escapeXml(layoutMeta.kicker)}</text>
-      <text x="118" y="204" font-size="48" font-family="Arial, sans-serif" font-weight="800" fill="#111827">${escapeXml(layoutMeta.headline)}</text>
-      <rect x="118" y="250" width="964" height="580" rx="42" fill="#ffffff" stroke="#f1f5f9" stroke-width="3"/>
-      <image href="${productDataUrl}" x="180" y="292" width="840" height="496" preserveAspectRatio="xMidYMid meet"/>
+      <rect width="1080" height="1080" fill="url(#bg)"/>
+      <circle cx="948" cy="128" r="170" fill="${layoutMeta.accent}" opacity="0.12"/>
+      <circle cx="92" cy="934" r="190" fill="${layoutMeta.accent}" opacity="0.09"/>
+      <path d="M72 228 C210 142 306 156 408 218 C510 280 628 292 798 206 C904 152 996 164 1068 220 L1068 0 L0 0 L0 300 C22 274 42 248 72 228Z" fill="#ffffff" opacity="0.56"/>
+
+      <rect x="46" y="52" width="988" height="976" rx="48" fill="rgba(255,255,255,0.86)" filter="url(#shadow)"/>
+      <rect x="72" y="86" width="936" height="832" rx="44" fill="rgba(255,255,255,0.72)" stroke="rgba(255,255,255,0.72)" stroke-width="2"/>
+
+      <rect x="92" y="102" width="270" height="58" rx="29" fill="${layoutMeta.accent}"/>
+      <text x="122" y="140" font-size="28" class="thai bold" fill="#ffffff">${escapeXml(layoutMeta.kicker)}</text>
+      <text x="92" y="220" font-size="56" class="thai heavy" fill="#111827">${escapeXml(layoutMeta.headline)}</text>
+      <rect x="810" y="98" width="170" height="62" rx="31" fill="#111827" opacity="0.92"/>
+      <text x="840" y="139" font-size="28" class="thai bold" fill="#ffffff">${escapeXml(sticker)}</text>
+
+      <ellipse cx="540" cy="805" rx="355" ry="54" fill="#0f172a" opacity="0.11"/>
+      <image href="${productDataUrl}" x="${productX}" y="${productY}" width="${productWidth}" height="${productHeight}" preserveAspectRatio="xMidYMid meet" filter="url(#softShadow)"/>
+
       <g>
-        ${titleLines.map((line, index) => `<text x="118" y="${900 + index * 52}" font-size="42" font-family="Arial, sans-serif" font-weight="800" fill="#111827">${escapeXml(line)}</text>`).join("")}
+        ${titleLines.map((line, index) => `<text x="92" y="${940 + index * 43}" font-size="36" class="thai heavy" fill="#111827">${escapeXml(line)}</text>`).join("")}
       </g>
       <g>
-        ${descLines.map((line, index) => `<text x="118" y="${1038 + index * 34}" font-size="28" font-family="Arial, sans-serif" font-weight="500" fill="#64748b">${escapeXml(line)}</text>`).join("")}
+        ${descLines.map((line, index) => `<text x="92" y="${1012 + index * 30}" font-size="24" class="thai medium" fill="#64748b">${escapeXml(line)}</text>`).join("")}
       </g>
       <g>
-        ${bullets.map((line, index) => `
-          <rect x="${690}" y="${875 + index * 72}" width="390" height="50" rx="25" fill="${layoutMeta.accent}" opacity="${index === 0 ? "1" : "0.12"}"/>
-          <text x="${714}" y="${910 + index * 72}" font-size="25" font-family="Arial, sans-serif" font-weight="800" fill="${index === 0 ? "#ffffff" : layoutMeta.accent}">${escapeXml(line)}</text>
+        ${bullets.slice(0, 3).map((line, index) => `
+          <rect x="${694}" y="${932 + index * 42}" width="288" height="32" rx="16" fill="${index === 0 ? layoutMeta.accent : "#ffffff"}" stroke="${layoutMeta.accent}" stroke-width="2" opacity="${index === 0 ? "1" : "0.94"}"/>
+          <text x="${712}" y="${956 + index * 42}" font-size="19" class="thai bold" fill="${index === 0 ? "#ffffff" : layoutMeta.accent}">${escapeXml(line)}</text>
         `).join("")}
       </g>
     </svg>
   `;
 
-  const output = await sharp(Buffer.from(svg)).jpeg({ quality: 92 }).toBuffer();
+  const output = await sharp(Buffer.from(svg)).jpeg({ quality: 94 }).toBuffer();
   return {
     kind: "binary",
     fileName: `shopee-${product.productId}-layout-${layout}.jpg`,
@@ -604,6 +630,60 @@ function buildPublishMessage(caption: string, hashtags?: string[]) {
   }
 
   return cleanedCaption ? `${cleanedCaption}\n\n${hashtagBlock}` : hashtagBlock;
+}
+
+async function validateShopeeAffiliatePublishPayload(input: {
+  job: JobExecution;
+  message: string;
+  imageCount: number;
+}) {
+  const reasons: string[] = [];
+  const shopeeLinkMatch = input.message.match(/https:\/\/s\.shopee\.co\.th\/\S+/);
+  const payloadAffiliateLink = typeof input.job.payload?.affiliateLink === "string" ? input.job.payload.affiliateLink : "";
+
+  if (input.imageCount !== 4) {
+    reasons.push("Shopee Affiliate post requires exactly 4 generated images");
+  }
+  if (!shopeeLinkMatch || !isShopeeShortLink(shopeeLinkMatch[0])) {
+    reasons.push("Caption must include a valid Shopee short link starting with https://s.shopee.co.th/");
+  }
+  if (payloadAffiliateLink && !isShopeeShortLink(payloadAffiliateLink)) {
+    reasons.push("Queued affiliate link is not a Shopee short link");
+  }
+  if (/prosocial-app-theta\.vercel\.app|\/api\/s\//i.test(input.message)) {
+    reasons.push("Caption contains an internal redirect URL");
+  }
+  if (input.message.includes("หมายเหตุ")) {
+    reasons.push("Caption contains forbidden disclosure word: หมายเหตุ");
+  }
+  if (input.message.toLowerCase().includes("affiliate")) {
+    reasons.push("Caption contains forbidden disclosure word: affiliate");
+  }
+  if (input.message.length > 700) {
+    reasons.push(`Caption is too long (${input.message.length}/700 characters)`);
+  }
+
+  if (reasons.length === 0) {
+    return;
+  }
+
+  await logAction({
+    userId: input.job.userId,
+    type: "queue",
+    level: "error",
+    message: "Shopee Affiliate validation failed before Facebook publish",
+    relatedJobId: input.job._id,
+    relatedPostId: input.job.postId,
+    relatedScheduleId: input.job.scheduleId,
+    metadata: {
+      ...getAutoPostLogFlags(input.job),
+      targetPageId: input.job.targetPageId,
+      imageCount: input.imageCount,
+      reasons
+    }
+  });
+
+  throw new Error(`Shopee Affiliate post validation failed: ${reasons.join("; ")}`);
 }
 
 async function resolveImages(userId: string, imageRefs: string[]): Promise<ResolvedImage[]> {
@@ -1149,8 +1229,12 @@ async function executePostJob(job: JobExecution) {
     pageProfileImage
   );
 
-  if (isShopeeAffiliateJob(job) && images.length < 4) {
-    throw new Error("Shopee Affiliate post validation failed: 4 generated images are required before publishing");
+  if (isShopeeAffiliateJob(job)) {
+    await validateShopeeAffiliatePublishPayload({
+      job,
+      message,
+      imageCount: images.length
+    });
   }
 
   if (hasBoundAutoPostConfig(job)) {
@@ -1576,8 +1660,3 @@ export async function processCommentReplyJobs(limit = 5) {
   const safeLimit = Math.max(1, Math.min(limit, COMMENT_REPLY_IMMEDIATE_BATCH_SIZE));
   return processQueuedJobs(safeLimit, "comment-reply");
 }
-
-
-
-
-

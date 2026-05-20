@@ -1,4 +1,4 @@
-﻿import crypto from "crypto";
+import crypto from "crypto";
 import { buildShopeeImagePromptSet as buildShopeeImagePromptSetCore } from "@/lib/services/shopee-affiliate-core";
 import { generateFacebookContent } from "@/lib/services/ai";
 import { logAction } from "@/lib/services/logging";
@@ -224,6 +224,7 @@ export class MockShopeeProvider implements ShopeeProductProvider {
         discountPercent: 47,
         productImageUrl: "https://images.unsplash.com/photo-1544787219-7f47ccb76574?w=1200&auto=format&fit=crop",
         productUrl: "https://shopee.co.th/product/10001/90001",
+        affiliateUrl: "https://s.shopee.co.th/mockThermalCup",
         category,
         salesCount: 12400,
         rating: 4.8,
@@ -242,6 +243,7 @@ export class MockShopeeProvider implements ShopeeProductProvider {
         discountPercent: 49,
         productImageUrl: "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=1200&auto=format&fit=crop",
         productUrl: "https://shopee.co.th/product/10002/90002",
+        affiliateUrl: "https://s.shopee.co.th/mockMiniVacuum",
         category,
         salesCount: 8900,
         rating: 4.7,
@@ -260,6 +262,7 @@ export class MockShopeeProvider implements ShopeeProductProvider {
         discountPercent: 45,
         productImageUrl: "https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?w=1200&auto=format&fit=crop",
         productUrl: "https://shopee.co.th/product/10003/90003",
+        affiliateUrl: "https://s.shopee.co.th/mockLedMirror",
         category,
         salesCount: 6200,
         rating: 4.9,
@@ -278,6 +281,7 @@ export class MockShopeeProvider implements ShopeeProductProvider {
         discountPercent: 55,
         productImageUrl: "https://images.unsplash.com/photo-1558611848-73f7eb4001a1?w=1200&auto=format&fit=crop",
         productUrl: "https://shopee.co.th/product/10004/90004",
+        affiliateUrl: "https://s.shopee.co.th/mockStorageBox",
         category,
         salesCount: 15400,
         rating: 4.6,
@@ -602,13 +606,51 @@ export function buildAffiliateLink(product: ShopeeProductRecord, trackingId?: st
   return url.toString();
 }
 
-function getAppBaseUrl() {
-  return (
-    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
-    process.env.APP_URL?.trim() ||
-    process.env.NEXTAUTH_URL?.trim() ||
-    "http://localhost:3000"
-  ).replace(/\/$/, "");
+export function isShopeeShortLink(value?: string | null) {
+  if (!value) return false;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "https:" && url.hostname === "s.shopee.co.th" && url.pathname.length > 1;
+  } catch {
+    return false;
+  }
+}
+
+function getSafeHostname(value: string) {
+  try {
+    return new URL(value).hostname;
+  } catch {
+    return "invalid-url";
+  }
+}
+
+function stripForbiddenAffiliateDisclosure(caption: string) {
+  return caption
+    .split(/\r?\n/)
+    .filter((line) => {
+      const normalized = line.toLowerCase();
+      return !normalized.includes("หมายเหตุ") && !normalized.includes("affiliate");
+    })
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string) {
+  const withoutForbidden = stripForbiddenAffiliateDisclosure(caption)
+    .replace(/https?:\/\/prosocial-app-theta\.vercel\.app\/\S+/gi, "")
+    .replace(/https?:\/\/[^ \n]*\/api\/s\/\S+/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  const withoutDuplicateShortLink = withoutForbidden
+    .split(/\r?\n/)
+    .filter((line) => line.trim() !== shopeeShortUrl)
+    .join("\n")
+    .trim();
+  const base = withoutDuplicateShortLink.length > 620
+    ? `${withoutDuplicateShortLink.slice(0, 617).replace(/\s+\S*$/, "")}...`
+    : withoutDuplicateShortLink;
+  return `${base}\n${shopeeShortUrl}`.trim().slice(0, 700);
 }
 
 export async function createOrReuseAffiliateShortLink(input: {
@@ -622,6 +664,14 @@ export async function createOrReuseAffiliateShortLink(input: {
 
   if (!affiliateUrl) {
     throw new ShopeeProviderError("Affiliate link generation failed", 500, "shopee_affiliate_link_failed", "config");
+  }
+  if (!isShopeeShortLink(affiliateUrl)) {
+    throw new ShopeeProviderError(
+      `Shopee short link validation failed. Expected https://s.shopee.co.th/{shortCode}, got ${getSafeHostname(affiliateUrl)}`,
+      422,
+      "shopee_short_link_invalid",
+      "config"
+    );
   }
 
   const doc = await AffiliateLink.findOneAndUpdate(
@@ -638,6 +688,7 @@ export async function createOrReuseAffiliateShortLink(input: {
       originalUrl,
       sourceUrl: originalUrl,
       affiliateUrl,
+      shortUrl: affiliateUrl,
       trackingId,
       status: "active",
       lastError: null,
@@ -650,17 +701,11 @@ export async function createOrReuseAffiliateShortLink(input: {
     { upsert: true, new: true }
   );
 
-  const shortUrl = `${getAppBaseUrl()}/api/s/${String(doc._id)}`;
-  if (doc.shortUrl !== shortUrl) {
-    await AffiliateLink.findByIdAndUpdate(doc._id, { shortUrl });
-    doc.shortUrl = shortUrl;
-  }
-
   return {
     trackingId,
     originalUrl,
     affiliateUrl,
-    shortUrl
+    shortUrl: affiliateUrl
   };
 }
 
@@ -891,59 +936,55 @@ export async function generateShopeeCaption(input: {
   disclosureText?: string;
 }) {
   const { product } = input;
-  const style = input.style ?? "soft_sell";
-  const disclosure = input.disclosureText?.trim() || "หมายเหตุ: ลิงก์นี้เป็นลิงก์แนะนำ/affiliate";
   const priceLine = product.discountPrice
     ? `ราคาโปร: ${product.discountPrice} บาท${product.discountPercent ? ` ลดประมาณ ${product.discountPercent}%` : ""}`
     : `ราคา: ${product.productPrice} บาท`;
-  const reviewLine = [
-    product.rating ? `คะแนน ${product.rating}/5` : "",
-    product.salesCount ? `ขายแล้ว ${product.salesCount.toLocaleString("th-TH")} ชิ้น` : ""
-  ].filter(Boolean).join(" | ");
+  const audience = product.category || "คนที่กำลังหาไอเทมน่าใช้";
   const fallback = [
-    "เจอของน่าใช้ใน Shopee มาแชร์ครับ ✨",
-    product.productName,
-    "",
+    `${product.productName} น่าเช็กมากครับ`,
     product.productDescription
-      ? `รีวิวสั้น ๆ: เหมาะกับคนที่กำลังมองหา ${product.productDescription.slice(0, 140)}`
-      : "รีวิวสั้น ๆ: เหมาะกับคนที่อยากได้ของใช้ดี ๆ ในชีวิตประจำวัน",
+      ? `${product.productDescription.slice(0, 120)}`
+      : "เหมาะกับคนที่อยากได้ของใช้ดี ๆ แบบกดดูรายละเอียดก่อนตัดสินใจ",
     "",
-    "จุดเด่น:",
-    product.discountPercent ? `✅ มีส่วนลดประมาณ ${product.discountPercent}%` : "✅ ราคาเข้าถึงง่าย",
-    product.rating ? `✅ รีวิวค่อนข้างดี ${product.rating}/5` : "✅ รายละเอียดสินค้าชัดเจน",
-    product.salesCount ? `✅ คนซื้อเยอะ ขายแล้ว ${product.salesCount.toLocaleString("th-TH")} ชิ้น` : "✅ เหมาะกับการกดดูรายละเอียดก่อนตัดสินใจ",
-    reviewLine ? `✅ ${reviewLine}` : "",
+    product.discountPercent ? `✅ ลดประมาณ ${product.discountPercent}%` : `✅ ${priceLine}`,
+    product.rating ? `✅ คะแนน ${product.rating}/5` : "✅ รายละเอียดสินค้าอ่านง่าย",
+    product.salesCount ? `✅ ขายแล้ว ${product.salesCount.toLocaleString("th-TH")} ชิ้น` : `✅ เหมาะกับ${audience}`,
     "",
-    `เหมาะกับ: คนที่กำลังหาไอเทมแนว ${product.category || "ของใช้คุ้มค่า"} แบบไม่ต้องเสียเวลาไล่หาเอง`,
-    "",
-    "ใครกำลังมองหาแนวนี้ กดดูรายละเอียดได้เลยครับ",
-    `ลิงก์: ${input.affiliateLink}`,
-    disclosure,
-    "#ShopeeAffiliate #ดีลน่าใช้ #ของมันต้องมี"
+    "ใครกำลังมองหาแนวนี้ กดเช็กรายละเอียดได้เลยครับ",
+    input.affiliateLink
   ].filter(Boolean).join("\n");
 
-  const customPrompt = `เขียนแคปชั่น Facebook ภาษาไทยสำหรับ Shopee Affiliate สไตล์ ${style}
-โครงสร้างที่ต้องใช้:
-[Hook เปิดโพสต์]
+  const customPrompt = `คุณคือ AI เขียนแคปชั่นรีวิวสินค้า Shopee สำหรับโพสต์ Facebook Page
 
-รีวิวสั้น ๆ แบบธรรมชาติ เหมือนคนแนะนำของน่าใช้ ไม่ขายตรงเกินไป
+เขียนให้สั้น กระชับ อ่านง่าย และชวนคลิก
+โทนเหมือนเพจรีวิวสินค้าพูดกับคนอ่านแบบเป็นกันเอง
+ห้ามเขียนยาวเป็นบทความ
+ห้ามขายตรงเกินไป
+ห้ามเคลมเกินข้อมูลสินค้า
+ห้ามใส่คำว่า หมายเหตุ
+ห้ามใส่คำว่า affiliate
+ห้ามใส่ disclosure ท้ายโพสต์
 
-จุดเด่น:
-✅ จุดเด่น 3-5 ข้อ จากข้อมูลสินค้าเท่านั้น
+รูปแบบ:
+- เปิดด้วยประโยค hook 1 บรรทัด
+- อธิบายสินค้า 1-2 บรรทัด
+- bullet จุดเด่นไม่เกิน 3 ข้อ
+- CTA 1 บรรทัด
+- ปิดท้ายด้วย Shopee short link เท่านั้น
 
-เหมาะกับ: กลุ่มคนที่น่าจะใช้สินค้านี้
+ข้อมูลสินค้า:
+ชื่อสินค้า: ${product.productName}
+ราคา: ${priceLine}
+ส่วนลด: ${product.discountPercent ?? "-"}
+จุดเด่น: ${product.productDescription || "-"}
+เหมาะกับ: ${audience}
+ลิงก์ Shopee Short Link: ${input.affiliateLink}
 
-ใครกำลังมองหาแนวนี้ กดดูรายละเอียดได้เลยครับ
-ลิงก์: ${input.affiliateLink}
-
-${disclosure}
-
-ข้อกำหนด:
-- ภาษาเป็นกันเอง อ่านง่าย
-- ห้ามเคลมเกินจริง ห้ามใช้คำว่า การันตีหาย, เห็นผล 100%, ถูกที่สุดในโลก
-- ห้ามอ้างว่าใช้จริงถ้าไม่มีข้อมูล
-- ต้องใส่ลิงก์และ disclosure ทุกครั้ง
-- ใส่ hashtag 3-5 ตัว`;
+ข้อบังคับ:
+- ความยาวรวมไม่เกิน 700 ตัวอักษร
+- ลิงก์ท้ายโพสต์ต้องเป็น ${input.affiliateLink}
+- ห้ามใช้ลิงก์ domain อื่น
+- ห้ามมีหมายเหตุท้ายโพสต์`;
 
   try {
     const variants = await generateFacebookContent(product.productName, {
@@ -958,21 +999,17 @@ ${disclosure}
         `Review count: ${product.reviewCount ?? "-"}`,
         `Rating: ${product.rating ?? "-"}`,
         `Commission rate: ${product.commissionRate ?? "-"}%`,
-        `Affiliate link: ${input.affiliateLink}`
+        `Shopee short link: ${input.affiliateLink}`
       ].join("\n")
     });
     const chosen = variants?.length ? randomItem(variants) : null;
-    if (!chosen?.caption) return fallback;
-    const hashtags = chosen.hashtags?.length
-      ? `\n\n${chosen.hashtags.map((tag: string) => (tag.startsWith("#") ? tag : `#${tag}`)).join(" ")}`
-      : "";
+    if (!chosen?.caption) return sanitizeShopeeCaption(fallback, input.affiliateLink);
     const withLink = chosen.caption.includes(input.affiliateLink)
       ? chosen.caption
-      : `${chosen.caption.trim()}\n\nลิงก์: ${input.affiliateLink}`;
-    const withDisclosure = withLink.includes(disclosure) ? withLink : `${withLink}\n${disclosure}`;
-    return `${withDisclosure.trim()}${hashtags}`.trim();
+      : `${chosen.caption.trim()}\n${input.affiliateLink}`;
+    return sanitizeShopeeCaption(withLink, input.affiliateLink);
   } catch {
-    return fallback;
+    return sanitizeShopeeCaption(fallback, input.affiliateLink);
   }
 }
 export async function buildShopeePostPackage(input: {
@@ -990,6 +1027,14 @@ export async function buildShopeePostPackage(input: {
   });
   const affiliateLink = linkResult.affiliateUrl;
   const shortAffiliateLink = linkResult.shortUrl;
+  if (!isShopeeShortLink(shortAffiliateLink)) {
+    throw new ShopeeProviderError(
+      "Shopee short link validation failed before post generation",
+      422,
+      "shopee_short_link_invalid",
+      "config"
+    );
+  }
   const imagePromptSet = buildShopeeImagePromptSet(input.product, input.captionStyle ?? "soft_sell");
   const imagePrompts = imagePromptSet.prompts.map((item) => item.prompt);
   const imagePrompt = imagePrompts[0] ?? buildShopeeImagePrompt(input.product, input.captionStyle ?? "soft_sell");
