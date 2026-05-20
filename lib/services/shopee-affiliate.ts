@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { buildShopeeImagePromptSet as buildShopeeImagePromptSetCore } from "@/lib/services/shopee-affiliate-core";
-import { generateFacebookContent, generateProductReferenceImage } from "@/lib/services/ai";
+import { generateFacebookContent } from "@/lib/services/ai";
 import { logAction } from "@/lib/services/logging";
 import { randomItem } from "@/lib/utils";
 import { AffiliateLink } from "@/models/AffiliateLink";
@@ -1062,50 +1062,13 @@ export async function buildShopeePostPackage(input: {
     style: input.captionStyle
   });
 
-  const productImageForEdit = await fetchImageForAiEdit(input.product.productImageUrl);
-  if (!productImageForEdit) {
+  const sourceImageUrls = (input.product.productImageUrls?.length ? input.product.productImageUrls : [input.product.productImageUrl])
+    .filter((url): url is string => Boolean(url?.trim()));
+  if (sourceImageUrls.length === 0) {
     throw new ShopeeProviderError(
-      "Shopee UGC image generation failed: product image could not be fetched for reference editing",
+      "Shopee UGC image generation failed: product image is missing",
       422,
       "shopee_ugc_reference_image_unavailable",
-      "internal_api"
-    );
-  }
-
-  const editedImageUrls: string[] = [];
-  try {
-    for (const [index, promptItem] of imagePromptSet.prompts.entries()) {
-      const edited = await generateProductReferenceImage({
-        imageBytes: productImageForEdit.bytes,
-        mimeType: productImageForEdit.mimeType,
-        prompt: [
-          promptItem.prompt,
-          `UGC frame ${index + 1} of 4. Make this a different camera angle/composition than the other images.`,
-          index === 0 ? "Front hero review angle, product fills 70-85% of the frame." : "",
-          index === 1 ? "Close detail/open/detail angle, product fills 70-85% of the frame." : "",
-          index === 2 ? "Lifestyle usage environment, candid creator review angle, product fills 70-85% of the frame." : "",
-          index === 3 ? "CTA review angle, product foreground, natural social commerce photo, product fills 70-85% of the frame." : ""
-        ]
-          .filter(Boolean)
-          .join("\n"),
-        userId: input.userId
-      });
-      editedImageUrls.push(bufferToDataImageUrl(edited, "image/png"));
-    }
-  } catch (error) {
-    throw new ShopeeProviderError(
-      `Shopee UGC image generation failed: ${error instanceof Error ? error.message : "OpenAI image edit failed"}`,
-      500,
-      "shopee_ugc_image_edit_failed",
-      "internal_api"
-    );
-  }
-
-  if (editedImageUrls.length !== 4 || editedImageUrls.some((url) => !url.startsWith("data:image/"))) {
-    throw new ShopeeProviderError(
-      `Shopee UGC image generation failed: OpenAI image edit returned ${editedImageUrls.length}/4 usable UGC images. Check OPENAI_API_KEY, OPENAI_IMAGE_MODEL=gpt-image-1, OpenAI billing/quota, and image safety policy.`,
-      500,
-      "shopee_ugc_image_edit_required",
       "internal_api"
     );
   }
@@ -1116,9 +1079,9 @@ export async function buildShopeePostPackage(input: {
       productId: input.product.productId,
       prompt: promptItem.prompt,
       status: "generated",
-      generatedImageUrl: editedImageUrls[index],
+      generatedImageUrl: sourceImageUrls[index % sourceImageUrls.length],
       fallbackImageUrl: input.product.productImageUrl,
-      provider: "openai_reference_ugc_edit",
+      provider: "shopee_source_ugc_layout",
       promptHistory: [
         promptItem.title,
         `concept=${promptItem.concept}`,

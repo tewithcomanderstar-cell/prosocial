@@ -1,4 +1,6 @@
 import { randomUUID } from "crypto";
+import { readFileSync } from "fs";
+import path from "path";
 import sharp from "sharp";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
 import { AutoPostAiConfig } from "@/models/AutoPostAiConfig";
@@ -36,6 +38,23 @@ const FACEBOOK_RATE_LIMIT_COOLDOWN_MINUTES = Number(process.env.FACEBOOK_RATE_LI
 const COMMENT_REPLY_RATE_LIMIT_COOLDOWN_MINUTES = Number(process.env.COMMENT_REPLY_RATE_LIMIT_COOLDOWN_MINUTES ?? "30");
 const COMMENT_REPLY_IMMEDIATE_BATCH_SIZE = Number(process.env.COMMENT_REPLY_IMMEDIATE_BATCH_SIZE ?? "5");
 const USER_JOB_LOCK_WINDOW_MS = Number(process.env.USER_JOB_LOCK_WINDOW_MS ?? String(5 * 60 * 1000));
+
+let notoSansThaiFontDataUri: string | null = null;
+
+function getNotoSansThaiFontDataUri() {
+  if (notoSansThaiFontDataUri) return notoSansThaiFontDataUri;
+  const fontPath = path.join(
+    process.cwd(),
+    "node_modules",
+    "@fontsource",
+    "noto-sans-thai",
+    "files",
+    "noto-sans-thai-thai-700-normal.woff"
+  );
+  const fontBytes = readFileSync(fontPath);
+  notoSansThaiFontDataUri = `data:font/woff;base64,${fontBytes.toString("base64")}`;
+  return notoSansThaiFontDataUri;
+}
 
 type ResolvedImage =
   | { kind: "url"; value: string }
@@ -512,29 +531,29 @@ function getShopeeUgcLayout(promptHistory?: string[]) {
 function truncateText(value: string, maxLength: number) {
   const normalized = value.replace(/\s+/g, " ").trim();
   if (normalized.length <= maxLength) return normalized;
-  return `${normalized.slice(0, Math.max(0, maxLength - 1)).trim()}…`;
+  return `${normalized.slice(0, Math.max(0, maxLength - 1)).trim()}...`;
 }
 
 function formatShopeePrice(product: LeanShopeeProduct) {
   const price = product.discountPrice || product.productPrice || 0;
-  return price ? `฿${price.toLocaleString("th-TH")}` : "เช็กราคาใน Shopee";
+  return price ? `\u0e3f${price.toLocaleString("th-TH")}` : "\u0e40\u0e0a\u0e47\u0e01\u0e23\u0e32\u0e04\u0e32\u0e43\u0e19 Shopee";
 }
 
 function getShopeeProductScene(product: LeanShopeeProduct) {
   const text = `${product.productName} ${product.productDescription ?? ""} ${product.category ?? ""}`.toLowerCase();
-  if (/ยาง|รถ|car|tire|tyre|garage/.test(text)) {
+  if (/car|tire|tyre|garage|wheel/.test(text)) {
     return { bg1: "#dbe4ed", bg2: "#f8fafc", surface: "#cbd5e1", prop: "garage", accent: "#2563eb" };
   }
-  if (/camp|แคมป์|power|station|แบต|ไฟ|เดินทาง/.test(text)) {
+  if (/camp|power|station|battery|outdoor|travel/.test(text)) {
     return { bg1: "#d9ead3", bg2: "#fff7ed", surface: "#d6a96f", prop: "camping", accent: "#16a34a" };
   }
-  if (/รองเท้า|crocs|shoe|sneaker|แตะ|ใส่/.test(text)) {
+  if (/crocs|shoe|sneaker|slipper|sandals/.test(text)) {
     return { bg1: "#fce7f3", bg2: "#fff7ed", surface: "#f3d7c4", prop: "bedroom", accent: "#db2777" };
   }
-  if (/กระเป๋า|bag|travel|เดินทาง|คาเฟ่|cafe/.test(text)) {
+  if (/bag|travel|cafe|wallet|pouch/.test(text)) {
     return { bg1: "#fde68a", bg2: "#fef3c7", surface: "#d7a66c", prop: "cafe", accent: "#f97316" };
   }
-  if (/แกดเจ็ต|gadget|phone|มือถือ|usb|ชาร์จ|desk|โต๊ะ/.test(text)) {
+  if (/gadget|phone|usb|charger|desk|earbud|earphone|speaker|headphone/.test(text)) {
     return { bg1: "#dbeafe", bg2: "#f8fafc", surface: "#c7b7a3", prop: "desk", accent: "#0ea5e9" };
   }
   return { bg1: "#f5f0e8", bg2: "#f8fafc", surface: "#dec9aa", prop: "home", accent: "#f97316" };
@@ -542,24 +561,23 @@ function getShopeeProductScene(product: LeanShopeeProduct) {
 
 function getShopeeUgcCopy(product: LeanShopeeProduct, layout: number) {
   const priceText = formatShopeePrice(product);
-  const discountText = product.discountPercent ? `ลด ${product.discountPercent}%` : "ดีลน่าเช็ก";
-  const ratingText = product.rating ? `รีวิว ${product.rating}/5` : "รีวิวดี";
-  const salesText = product.salesCount ? `ขายแล้ว ${product.salesCount.toLocaleString("th-TH")}+` : "กำลังมาแรง";
-  const categoryText = product.category || "ของน่าใช้";
+  const discountText = product.discountPercent ? `\u0e25\u0e14 ${product.discountPercent}%` : "\u0e14\u0e35\u0e25\u0e19\u0e48\u0e32\u0e40\u0e0a\u0e47\u0e01";
+  const ratingText = product.rating ? `\u0e23\u0e35\u0e27\u0e34\u0e27 ${product.rating}/5` : "\u0e23\u0e35\u0e27\u0e34\u0e27\u0e14\u0e35";
+  const salesText = product.salesCount ? `\u0e02\u0e32\u0e22\u0e41\u0e25\u0e49\u0e27 ${product.salesCount.toLocaleString("th-TH")}+` : "\u0e01\u0e33\u0e25\u0e31\u0e07\u0e21\u0e32\u0e41\u0e23\u0e07";
+  const categoryText = product.category || "\u0e02\u0e2d\u0e07\u0e19\u0e48\u0e32\u0e43\u0e0a\u0e49";
   const shortName = truncateText(product.productName, 34);
 
   if (layout === 1) {
-    return { label: "รีวิวจากรูปจริง", lines: ["ดีไซน์น่าใช้ เห็นชัดเต็มเฟรม", `ราคา ${priceText} • ${discountText}`, shortName], chips: [priceText, discountText, ratingText] };
+    return { label: "\u0e23\u0e35\u0e27\u0e34\u0e27\u0e08\u0e32\u0e01\u0e23\u0e39\u0e1b\u0e08\u0e23\u0e34\u0e07", lines: ["\u0e2a\u0e34\u0e19\u0e04\u0e49\u0e32\u0e40\u0e15\u0e47\u0e21\u0e40\u0e1f\u0e23\u0e21 \u0e40\u0e2b\u0e47\u0e19\u0e23\u0e32\u0e22\u0e25\u0e30\u0e40\u0e2d\u0e35\u0e22\u0e14\u0e0a\u0e31\u0e14", `\u0e23\u0e32\u0e04\u0e32 ${priceText} - ${discountText}`, shortName], chips: [priceText, discountText, ratingText] };
   }
   if (layout === 2) {
-    return { label: "ซูมรายละเอียด", lines: ["ดูผิววัสดุและดีเทลใกล้ ๆ", product.shopName ? `จากร้าน ${truncateText(product.shopName, 22)}` : categoryText, ratingText], chips: [ratingText, salesText, discountText] };
+    return { label: "\u0e0b\u0e39\u0e21\u0e23\u0e32\u0e22\u0e25\u0e30\u0e40\u0e2d\u0e35\u0e22\u0e14", lines: ["\u0e14\u0e39\u0e14\u0e35\u0e40\u0e17\u0e25\u0e2a\u0e34\u0e19\u0e04\u0e49\u0e32\u0e43\u0e01\u0e25\u0e49 \u0e46", product.shopName ? `\u0e23\u0e49\u0e32\u0e19 ${truncateText(product.shopName, 22)}` : categoryText, ratingText], chips: [ratingText, salesText, discountText] };
   }
   if (layout === 3) {
-    return { label: "ใช้งานจริง", lines: ["เหมาะกับใช้ในชีวิตประจำวัน", `หมวด ${categoryText}`, salesText], chips: [salesText, discountText, "ดูรายละเอียดก่อนซื้อ"] };
+    return { label: "\u0e43\u0e0a\u0e49\u0e07\u0e32\u0e19\u0e08\u0e23\u0e34\u0e07", lines: ["\u0e40\u0e2b\u0e21\u0e32\u0e30\u0e01\u0e31\u0e1a\u0e43\u0e0a\u0e49\u0e43\u0e19\u0e0a\u0e35\u0e27\u0e34\u0e15\u0e1b\u0e23\u0e30\u0e08\u0e33\u0e27\u0e31\u0e19", `\u0e2b\u0e21\u0e27\u0e14 ${categoryText}`, salesText], chips: [salesText, discountText, "\u0e14\u0e39\u0e23\u0e32\u0e22\u0e25\u0e30\u0e40\u0e2d\u0e35\u0e22\u0e14\u0e01\u0e48\u0e2d\u0e19\u0e0b\u0e37\u0e49\u0e2d"] };
   }
-  return { label: "กดดูในแคปชั่น", lines: ["ใครมองหาแนวนี้", "กดดูรายละเอียดได้เลย", `ราคา ${priceText}`], chips: [priceText, "น่าใช้มาก", salesText] };
+  return { label: "\u0e01\u0e14\u0e14\u0e39\u0e43\u0e19\u0e41\u0e04\u0e1b\u0e0a\u0e31\u0e48\u0e19", lines: ["\u0e43\u0e04\u0e23\u0e21\u0e2d\u0e07\u0e2b\u0e32\u0e41\u0e19\u0e27\u0e19\u0e35\u0e49", "\u0e01\u0e14\u0e14\u0e39\u0e23\u0e32\u0e22\u0e25\u0e30\u0e40\u0e2d\u0e35\u0e22\u0e14\u0e44\u0e14\u0e49\u0e40\u0e25\u0e22", `\u0e23\u0e32\u0e04\u0e32 ${priceText}`], chips: [priceText, "\u0e19\u0e48\u0e32\u0e43\u0e0a\u0e49\u0e21\u0e32\u0e01", salesText] };
 }
-
 function buildShopeeUgcSceneSvg(input: { scene: ReturnType<typeof getShopeeProductScene>; layout: number }) {
   const { scene, layout } = input;
   const propSvg =
@@ -603,6 +621,7 @@ function buildShopeeUgcSceneSvg(input: { scene: ReturnType<typeof getShopeeProdu
 
 function buildShopeeUgcTextSvg(input: { copy: ReturnType<typeof getShopeeUgcCopy>; scene: ReturnType<typeof getShopeeProductScene>; layout: number }) {
   const { copy, scene, layout } = input;
+  const fontDataUri = getNotoSansThaiFontDataUri();
   const labelX = layout === 2 ? 52 : 58;
   const labelY = layout === 2 ? 52 : 58;
   const textX = layout === 4 ? 54 : 58;
@@ -610,7 +629,7 @@ function buildShopeeUgcTextSvg(input: { copy: ReturnType<typeof getShopeeUgcCopy
   const lines = copy.lines.slice(0, 3).map((line) => truncateText(line, 34));
   const overlayText = [copy.label, ...lines].join(" ");
 
-  if (/[�]/.test(overlayText) || lines.length > 3) {
+  if (/[\uFFFD]/.test(overlayText) || lines.length > 3) {
     throw new Error("Shopee UGC image validation failed: Thai overlay text is invalid");
   }
 
@@ -621,7 +640,13 @@ function buildShopeeUgcTextSvg(input: { copy: ReturnType<typeof getShopeeUgcCopy
           <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#0f172a" flood-opacity="0.28"/>
         </filter>
         <style>
-          .thai { font-family: &quot;Noto Sans Thai&quot;, &quot;Prompt&quot;, &quot;Kanit&quot;, &quot;Sarabun&quot;, &quot;Tahoma&quot;, Arial, sans-serif; }
+          @font-face {
+            font-family: "Noto Sans Thai Local";
+            src: url("${fontDataUri}") format("woff");
+            font-weight: 700;
+            font-style: normal;
+          }
+          .thai { font-family: "Noto Sans Thai Local", "Noto Sans Thai", "Prompt", "Kanit", "Sarabun", "Tahoma", Arial, sans-serif; }
           .heavy { font-weight: 900; }
           .bold { font-weight: 800; }
         </style>
@@ -650,11 +675,11 @@ async function renderShopeeAffiliateCard(imageDoc: LeanAiGeneratedImage): Promis
   }
 
   const layout = getShopeeUgcLayout(imageDoc.promptHistory);
-  const imageUrl = imageDoc.generatedImageUrl || imageDoc.fallbackImageUrl || product.productImageUrl || product.productImageUrls?.[0];
+  const imageUrl = imageDoc.fallbackImageUrl || product.productImageUrl || product.productImageUrls?.[0] || imageDoc.generatedImageUrl;
   if (!imageUrl) {
     throw new Error("Shopee product image is missing");
   }
-  if (imageDoc.provider !== "openai_reference_ugc_edit" || !imageDoc.generatedImageUrl?.startsWith("data:image/")) {
+  if (imageDoc.provider !== "shopee_source_ugc_layout" && imageDoc.provider !== "openai_reference_ugc_edit") {
     throw new Error(
       "Shopee UGC image validation failed: this queued image was generated by the old template/fallback pipeline. Please regenerate the Shopee post."
     );
@@ -663,31 +688,6 @@ async function renderShopeeAffiliateCard(imageDoc: LeanAiGeneratedImage): Promis
   const productBuffer = await fetchRemoteImageBuffer(imageUrl);
   const scene = getShopeeProductScene(product);
   const copy = getShopeeUgcCopy(product, layout);
-  const hasReferenceEditedImage = Boolean(
-    imageDoc.generatedImageUrl &&
-      imageDoc.generatedImageUrl !== imageDoc.fallbackImageUrl &&
-      imageDoc.generatedImageUrl !== product.productImageUrl
-  );
-
-  if (hasReferenceEditedImage) {
-    const base = await sharp(productBuffer)
-      .resize(1080, 1080, { fit: "cover", position: "attention" })
-      .modulate({ brightness: 0.98, saturation: 1.03 })
-      .jpeg({ quality: 94 })
-      .toBuffer();
-
-    const output = await sharp(base)
-      .composite([{ input: Buffer.from(buildShopeeUgcTextSvg({ copy, scene, layout }), "utf8"), left: 0, top: 0 }])
-      .jpeg({ quality: 94, mozjpeg: true })
-      .toBuffer();
-
-    return {
-      kind: "binary",
-      fileName: `shopee-${product.productId}-ugc-ai-${layout}.jpg`,
-      bytes: Uint8Array.from(output).buffer,
-      mimeType: "image/jpeg"
-    };
-  }
   const placement = [
     { width: 1010, height: 760, top: 142, fit: "inside" as const },
     { width: 1080, height: 830, top: 86, fit: "cover" as const },
@@ -773,8 +773,8 @@ async function validateShopeeAffiliatePublishPayload(input: {
   if (/prosocial-app-theta\.vercel\.app|\/api\/s\//i.test(input.message)) {
     reasons.push("Caption contains an internal redirect URL");
   }
-  if (input.message.includes("หมายเหตุ")) {
-    reasons.push("Caption contains forbidden disclosure word: หมายเหตุ");
+  if (input.message.includes("\u0e2b\u0e21\u0e32\u0e22\u0e40\u0e2b\u0e15\u0e38")) {
+    reasons.push("Caption contains forbidden disclosure word: \u0e2b\u0e21\u0e32\u0e22\u0e40\u0e2b\u0e15\u0e38");
   }
   if (input.message.toLowerCase().includes("affiliate")) {
     reasons.push("Caption contains forbidden disclosure word: affiliate");
