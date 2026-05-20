@@ -64,6 +64,11 @@ function getReferenceImageFileName(mimeType: string) {
   return "shopee-product-reference.png";
 }
 
+function normalizeOpenAiUserId(userId?: string) {
+  if (!userId) return undefined;
+  return String(userId);
+}
+
 function extractJson(text: string) {
   const trimmed = text.trim();
   if (trimmed.startsWith("```")) {
@@ -117,7 +122,7 @@ export async function generateProductReferenceImage(input: {
       quality: "medium",
       background: "opaque",
       n: 1,
-      user: input.userId
+      user: normalizeOpenAiUserId(input.userId)
     });
 
     const b64 = result.data?.[0]?.b64_json;
