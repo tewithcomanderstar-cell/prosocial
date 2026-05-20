@@ -1053,7 +1053,7 @@ export async function buildShopeePostPackage(input: {
       status: "generated",
       generatedImageUrl: input.product.productImageUrl,
       fallbackImageUrl: input.product.productImageUrl,
-      provider: "shopee_card_renderer",
+      provider: "shopee_ugc_lifestyle_renderer",
       promptHistory: [
         promptItem.title,
         `concept=${promptItem.concept}`,

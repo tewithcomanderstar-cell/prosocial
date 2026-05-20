@@ -493,10 +493,143 @@ async function fetchRemoteImageBuffer(url: string) {
   return Buffer.from(await response.arrayBuffer());
 }
 
-function getShopeeCardLayout(promptHistory?: string[]) {
+
+function getShopeeUgcLayout(promptHistory?: string[]) {
   const layoutEntry = (promptHistory ?? []).find((item) => item.startsWith("layout="));
   const layout = Number(layoutEntry?.replace("layout=", "") ?? "1");
   return Number.isFinite(layout) && layout >= 1 && layout <= 4 ? layout : 1;
+}
+
+function truncateText(value: string, maxLength: number) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxLength - 1)).trim()}…`;
+}
+
+function formatShopeePrice(product: LeanShopeeProduct) {
+  const price = product.discountPrice || product.productPrice || 0;
+  return price ? `฿${price.toLocaleString("th-TH")}` : "เช็กราคาใน Shopee";
+}
+
+function getShopeeProductScene(product: LeanShopeeProduct) {
+  const text = `${product.productName} ${product.productDescription ?? ""} ${product.category ?? ""}`.toLowerCase();
+  if (/ยาง|รถ|car|tire|tyre|garage/.test(text)) {
+    return { bg1: "#dbe4ed", bg2: "#f8fafc", surface: "#cbd5e1", prop: "garage", accent: "#2563eb" };
+  }
+  if (/camp|แคมป์|power|station|แบต|ไฟ|เดินทาง/.test(text)) {
+    return { bg1: "#d9ead3", bg2: "#fff7ed", surface: "#d6a96f", prop: "camping", accent: "#16a34a" };
+  }
+  if (/รองเท้า|crocs|shoe|sneaker|แตะ|ใส่/.test(text)) {
+    return { bg1: "#fce7f3", bg2: "#fff7ed", surface: "#f3d7c4", prop: "bedroom", accent: "#db2777" };
+  }
+  if (/กระเป๋า|bag|travel|เดินทาง|คาเฟ่|cafe/.test(text)) {
+    return { bg1: "#fde68a", bg2: "#fef3c7", surface: "#d7a66c", prop: "cafe", accent: "#f97316" };
+  }
+  if (/แกดเจ็ต|gadget|phone|มือถือ|usb|ชาร์จ|desk|โต๊ะ/.test(text)) {
+    return { bg1: "#dbeafe", bg2: "#f8fafc", surface: "#c7b7a3", prop: "desk", accent: "#0ea5e9" };
+  }
+  return { bg1: "#f5f0e8", bg2: "#f8fafc", surface: "#dec9aa", prop: "home", accent: "#f97316" };
+}
+
+function getShopeeUgcCopy(product: LeanShopeeProduct, layout: number) {
+  const priceText = formatShopeePrice(product);
+  const discountText = product.discountPercent ? `ลด ${product.discountPercent}%` : "ดีลน่าเช็ก";
+  const ratingText = product.rating ? `รีวิว ${product.rating}/5` : "รีวิวดี";
+  const salesText = product.salesCount ? `ขายแล้ว ${product.salesCount.toLocaleString("th-TH")}+` : "กำลังมาแรง";
+  const categoryText = product.category || "ของน่าใช้";
+  const shortName = truncateText(product.productName, 34);
+
+  if (layout === 1) {
+    return { label: "รีวิวของน่าใช้", headline: "รุ่นฮิต ใช้งานทุกวัน", note: `${priceText} · ${discountText}`, chips: [priceText, discountText, ratingText], title: shortName };
+  }
+  if (layout === 2) {
+    return { label: "ซูมรายละเอียด", headline: "รายละเอียดเห็นชัด", note: product.shopName ? `จากร้าน ${truncateText(product.shopName, 20)}` : categoryText, chips: [salesText, ratingText, discountText], title: truncateText(product.productDescription || product.productName, 38) };
+  }
+  if (layout === 3) {
+    return { label: "ลองดูแล้วน่าสนใจ", headline: "เหมาะกับสายใช้งานจริง", note: `${categoryText} · ${salesText}`, chips: [discountText, "ดูรายละเอียดก่อนซื้อ", ratingText], title: shortName };
+  }
+  return { label: "กดดูในแคปชั่น", headline: "กดดูรายละเอียด", note: `${priceText} · ลิงก์อยู่ท้ายโพสต์`, chips: [priceText, "น่าใช้มาก", salesText], title: shortName };
+}
+
+function buildShopeeUgcSceneSvg(input: { scene: ReturnType<typeof getShopeeProductScene>; layout: number }) {
+  const { scene, layout } = input;
+  const propSvg =
+    scene.prop === "garage"
+      ? `<rect x="72" y="725" width="220" height="76" rx="18" fill="#334155" opacity="0.18"/><circle cx="118" cy="825" r="28" fill="#111827" opacity="0.16"/><circle cx="246" cy="825" r="28" fill="#111827" opacity="0.16"/><path d="M780 730h180l44 92H736z" fill="#64748b" opacity="0.18"/>`
+      : scene.prop === "camping"
+        ? `<path d="M72 760l116-176 116 176z" fill="#92400e" opacity="0.18"/><path d="M122 760l66-102 66 102z" fill="#fef3c7" opacity="0.42"/><circle cx="900" cy="192" r="68" fill="#facc15" opacity="0.32"/><path d="M756 808c48-66 124-86 210-46" fill="none" stroke="#166534" stroke-width="16" opacity="0.16"/>`
+        : scene.prop === "bedroom"
+          ? `<rect x="66" y="748" width="286" height="86" rx="32" fill="#fb7185" opacity="0.18"/><circle cx="146" cy="720" r="58" fill="#fbcfe8" opacity="0.46"/><rect x="774" y="724" width="210" height="126" rx="36" fill="#fda4af" opacity="0.15"/>`
+          : scene.prop === "cafe"
+            ? `<circle cx="152" cy="742" r="72" fill="#7c2d12" opacity="0.13"/><rect x="92" y="742" width="126" height="90" rx="22" fill="#fef3c7" opacity="0.54"/><path d="M826 716h114c20 0 36 16 36 36v18c0 20-16 36-36 36H826z" fill="#92400e" opacity="0.13"/>`
+            : scene.prop === "desk"
+              ? `<rect x="66" y="720" width="218" height="132" rx="24" fill="#0f172a" opacity="0.13"/><rect x="802" y="696" width="150" height="210" rx="26" fill="#38bdf8" opacity="0.18"/><circle cx="888" cy="780" r="42" fill="#ffffff" opacity="0.28"/>`
+              : `<rect x="82" y="738" width="210" height="96" rx="32" fill="#a16207" opacity="0.13"/><circle cx="888" cy="746" r="82" fill="#fbbf24" opacity="0.16"/>`;
+  const angleLines =
+    layout === 4
+      ? `<path d="M-40 304 C240 244 492 276 1120 132" fill="none" stroke="${scene.accent}" stroke-width="24" opacity="0.12"/>`
+      : `<path d="M-20 220 C236 126 430 164 1100 92" fill="none" stroke="${scene.accent}" stroke-width="18" opacity="0.10"/>`;
+
+  return `
+    <svg width="1080" height="1080" viewBox="0 0 1080 1080" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="sceneBg" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="${scene.bg1}" stop-opacity="0.78"/>
+          <stop offset="58%" stop-color="${scene.bg2}" stop-opacity="0.72"/>
+          <stop offset="100%" stop-color="#ffffff" stop-opacity="0.5"/>
+        </linearGradient>
+      </defs>
+      <rect width="1080" height="1080" fill="url(#sceneBg)"/>
+      ${angleLines}
+      <circle cx="930" cy="122" r="166" fill="${scene.accent}" opacity="0.12"/>
+      <circle cx="98" cy="956" r="214" fill="${scene.accent}" opacity="0.08"/>
+      <path d="M0 760 C214 694 386 720 540 770 C694 820 856 820 1080 744 L1080 1080 L0 1080 Z" fill="${scene.surface}" opacity="0.78"/>
+      <path d="M0 804 C214 740 400 760 558 812 C708 862 882 858 1080 790 L1080 1080 L0 1080 Z" fill="#ffffff" opacity="0.24"/>
+      ${propSvg}
+      <ellipse cx="540" cy="842" rx="420" ry="72" fill="#0f172a" opacity="0.18"/>
+      <ellipse cx="550" cy="806" rx="330" ry="38" fill="#ffffff" opacity="0.18"/>
+    </svg>
+  `;
+}
+
+function buildShopeeUgcTextSvg(input: { copy: ReturnType<typeof getShopeeUgcCopy>; scene: ReturnType<typeof getShopeeProductScene>; layout: number }) {
+  const { copy, scene, layout } = input;
+  const topY = layout === 2 ? 48 : 56;
+  const bottomPanelY = layout === 2 ? 890 : 902;
+  const titleLines = wrapText(copy.title, 22, 2);
+  const chipStartX = layout === 4 ? 606 : 640;
+  const chipStartY = bottomPanelY + 46;
+
+  return `
+    <svg width="1080" height="1080" viewBox="0 0 1080 1080" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <filter id="labelShadow" x="-20%" y="-20%" width="140%" height="140%">
+          <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#0f172a" flood-opacity="0.18"/>
+        </filter>
+        <style>
+          .thai { font-family: &quot;Noto Sans Thai&quot;, &quot;Prompt&quot;, &quot;Sarabun&quot;, &quot;Tahoma&quot;, &quot;Arial Unicode MS&quot;, Arial, sans-serif; }
+          .heavy { font-weight: 900; }
+          .bold { font-weight: 800; }
+          .medium { font-weight: 650; }
+        </style>
+      </defs>
+      <g filter="url(#labelShadow)">
+        <rect x="56" y="${topY}" width="316" height="64" rx="32" fill="rgba(255,255,255,0.86)"/>
+        <circle cx="96" cy="${topY + 32}" r="18" fill="${scene.accent}"/>
+        <text x="126" y="${topY + 42}" font-size="28" class="thai bold" fill="#111827">${escapeXml(copy.label)}</text>
+      </g>
+      <g filter="url(#labelShadow)">
+        <rect x="54" y="${bottomPanelY}" width="972" height="132" rx="34" fill="rgba(255,255,255,0.86)"/>
+        <text x="86" y="${bottomPanelY + 48}" font-size="36" class="thai heavy" fill="#111827">${escapeXml(copy.headline)}</text>
+        <text x="86" y="${bottomPanelY + 88}" font-size="24" class="thai medium" fill="#64748b">${escapeXml(copy.note)}</text>
+        ${titleLines.map((line, index) => `<text x="86" y="${bottomPanelY + 122 + index * 30}" font-size="22" class="thai medium" fill="#334155">${escapeXml(line)}</text>`).join("")}
+        ${copy.chips.slice(0, 3).map((chip, index) => `
+          <rect x="${chipStartX}" y="${chipStartY + index * 37}" width="352" height="30" rx="15" fill="${index === 0 ? scene.accent : "rgba(255,255,255,0.72)"}" stroke="${scene.accent}" stroke-width="1.5"/>
+          <text x="${chipStartX + 18}" y="${chipStartY + 22 + index * 37}" font-size="18" class="thai bold" fill="${index === 0 ? "#ffffff" : scene.accent}">${escapeXml(truncateText(chip, 28))}</text>
+        `).join("")}
+      </g>
+    </svg>
+  `;
 }
 
 async function renderShopeeAffiliateCard(imageDoc: LeanAiGeneratedImage): Promise<ResolvedImage> {
@@ -505,107 +638,54 @@ async function renderShopeeAffiliateCard(imageDoc: LeanAiGeneratedImage): Promis
     throw new Error("Shopee product not found for generated image");
   }
 
-  const layout = getShopeeCardLayout(imageDoc.promptHistory);
+  const layout = getShopeeUgcLayout(imageDoc.promptHistory);
   const imageUrl = imageDoc.fallbackImageUrl || imageDoc.generatedImageUrl || product.productImageUrl || product.productImageUrls?.[0];
   if (!imageUrl) {
     throw new Error("Shopee product image is missing");
   }
 
   const productBuffer = await fetchRemoteImageBuffer(imageUrl);
-  const productPng = await sharp(productBuffer)
-    .resize(900, 690, { fit: "inside", withoutEnlargement: true, background: { r: 255, g: 255, b: 255, alpha: 0 } })
-    .png()
-    .toBuffer();
-  const productDataUrl = `data:image/png;base64,${productPng.toString("base64")}`;
-
-  const price = product.discountPrice || product.productPrice || 0;
-  const priceText = price ? `฿${price.toLocaleString("th-TH")}` : "ดูราคาใน Shopee";
-  const discountText = product.discountPercent ? `ลด ${product.discountPercent}%` : "ดีลน่าเช็ก";
-  const ratingText = product.rating ? `⭐ ${product.rating}/5` : "รีวิวดี";
-  const salesText = product.salesCount ? `ขายแล้ว ${product.salesCount.toLocaleString("th-TH")}+` : "กำลังมาแรง";
-  const categoryText = product.category || "ของน่าใช้";
-  const titleLines = wrapText(product.productName, 25, 2);
-  const descLines = wrapText(product.productDescription || categoryText, 30, 2);
-
-  const layoutMeta = [
-    { kicker: "รีวิวของน่าใช้", headline: "รุ่นนี้น่าเช็ก", accent: "#f97316", bg1: "#fff7ed", bg2: "#ffedd5" },
-    { kicker: "ดูรายละเอียดก่อนซื้อ", headline: "จุดเด่นเห็นชัด", accent: "#2563eb", bg1: "#eff6ff", bg2: "#dbeafe" },
-    { kicker: "ทำไมคนสนใจ", headline: "เหมาะกับสายคุ้ม", accent: "#16a34a", bg1: "#f0fdf4", bg2: "#dcfce7" },
-    { kicker: "กดดูดีลในแคปชั่น", headline: "ถ้ากำลังมองหาแนวนี้", accent: "#db2777", bg1: "#fdf2f8", bg2: "#fce7f3" }
+  const scene = getShopeeProductScene(product);
+  const copy = getShopeeUgcCopy(product, layout);
+  const placement = [
+    { width: 1010, height: 760, top: 142, fit: "inside" as const },
+    { width: 1080, height: 830, top: 86, fit: "cover" as const },
+    { width: 940, height: 760, top: 168, fit: "inside" as const },
+    { width: 1020, height: 760, top: 136, fit: "inside" as const }
   ][layout - 1];
 
-  const bullets =
-    layout === 1
-      ? [priceText, discountText, ratingText]
-      : layout === 2
-        ? [salesText, product.shopName ? `ร้าน ${product.shopName}` : categoryText, ratingText]
-        : layout === 3
-          ? [discountText, salesText, "ดูรายละเอียดก่อนตัดสินใจ"]
-          : [priceText, "ลิงก์อยู่ท้ายแคปชั่น", "กดดูรายละเอียด"];
-  const sticker =
-    layout === 1 ? "ดีลน่าเช็ก" : layout === 2 ? "ซูมรายละเอียด" : layout === 3 ? "คุ้มไหม?" : "ดูต่อในแคปชั่น";
-  const productY = layout === 2 ? 250 : 225;
-  const productHeight = layout === 2 ? 620 : 660;
-  const productWidth = layout === 2 ? 940 : 900;
-  const productX = (1080 - productWidth) / 2;
+  const background = await sharp(productBuffer)
+    .resize(1080, 1080, { fit: "cover", position: "attention" })
+    .blur(layout === 2 ? 12 : 20)
+    .modulate({ brightness: 0.82, saturation: 0.78 })
+    .jpeg({ quality: 92 })
+    .toBuffer();
 
-  const svg = `
-    <svg width="1080" height="1080" viewBox="0 0 1080 1080" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stop-color="${layoutMeta.bg1}"/>
-          <stop offset="54%" stop-color="#ffffff"/>
-          <stop offset="100%" stop-color="${layoutMeta.bg2}"/>
-        </linearGradient>
-        <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-          <feDropShadow dx="0" dy="20" stdDeviation="22" flood-color="#0f172a" flood-opacity="0.18"/>
-        </filter>
-        <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
-          <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#0f172a" flood-opacity="0.20"/>
-        </filter>
-        <style>
-          .thai { font-family: &quot;Noto Sans Thai&quot;, &quot;Prompt&quot;, &quot;Sarabun&quot;, &quot;Tahoma&quot;, &quot;Arial Unicode MS&quot;, Arial, sans-serif; }
-          .heavy { font-weight: 900; }
-          .bold { font-weight: 800; }
-          .medium { font-weight: 600; }
-        </style>
-      </defs>
-      <rect width="1080" height="1080" fill="url(#bg)"/>
-      <circle cx="948" cy="128" r="170" fill="${layoutMeta.accent}" opacity="0.12"/>
-      <circle cx="92" cy="934" r="190" fill="${layoutMeta.accent}" opacity="0.09"/>
-      <path d="M72 228 C210 142 306 156 408 218 C510 280 628 292 798 206 C904 152 996 164 1068 220 L1068 0 L0 0 L0 300 C22 274 42 248 72 228Z" fill="#ffffff" opacity="0.56"/>
+  const productLayer = await sharp(productBuffer)
+    .resize(placement.width, placement.height, {
+      fit: placement.fit,
+      position: "attention",
+      withoutEnlargement: false,
+      background: { r: 255, g: 255, b: 255, alpha: 0 }
+    })
+    .png()
+    .toBuffer();
+  const productMeta = await sharp(productLayer).metadata();
+  const productLeft = Math.max(0, Math.round((1080 - (productMeta.width ?? placement.width)) / 2));
+  const productTop = Math.max(0, placement.top + Math.round((placement.height - (productMeta.height ?? placement.height)) / 2));
 
-      <rect x="46" y="52" width="988" height="976" rx="48" fill="rgba(255,255,255,0.86)" filter="url(#shadow)"/>
-      <rect x="72" y="86" width="936" height="832" rx="44" fill="rgba(255,255,255,0.72)" stroke="rgba(255,255,255,0.72)" stroke-width="2"/>
+  const output = await sharp(background)
+    .composite([
+      { input: Buffer.from(buildShopeeUgcSceneSvg({ scene, layout }), "utf8"), left: 0, top: 0 },
+      { input: productLayer, left: productLeft, top: productTop },
+      { input: Buffer.from(buildShopeeUgcTextSvg({ copy, scene, layout }), "utf8"), left: 0, top: 0 }
+    ])
+    .jpeg({ quality: 94, mozjpeg: true })
+    .toBuffer();
 
-      <rect x="92" y="102" width="270" height="58" rx="29" fill="${layoutMeta.accent}"/>
-      <text x="122" y="140" font-size="28" class="thai bold" fill="#ffffff">${escapeXml(layoutMeta.kicker)}</text>
-      <text x="92" y="220" font-size="56" class="thai heavy" fill="#111827">${escapeXml(layoutMeta.headline)}</text>
-      <rect x="810" y="98" width="170" height="62" rx="31" fill="#111827" opacity="0.92"/>
-      <text x="840" y="139" font-size="28" class="thai bold" fill="#ffffff">${escapeXml(sticker)}</text>
-
-      <ellipse cx="540" cy="805" rx="355" ry="54" fill="#0f172a" opacity="0.11"/>
-      <image href="${productDataUrl}" x="${productX}" y="${productY}" width="${productWidth}" height="${productHeight}" preserveAspectRatio="xMidYMid meet" filter="url(#softShadow)"/>
-
-      <g>
-        ${titleLines.map((line, index) => `<text x="92" y="${940 + index * 43}" font-size="36" class="thai heavy" fill="#111827">${escapeXml(line)}</text>`).join("")}
-      </g>
-      <g>
-        ${descLines.map((line, index) => `<text x="92" y="${1012 + index * 30}" font-size="24" class="thai medium" fill="#64748b">${escapeXml(line)}</text>`).join("")}
-      </g>
-      <g>
-        ${bullets.slice(0, 3).map((line, index) => `
-          <rect x="${694}" y="${932 + index * 42}" width="288" height="32" rx="16" fill="${index === 0 ? layoutMeta.accent : "#ffffff"}" stroke="${layoutMeta.accent}" stroke-width="2" opacity="${index === 0 ? "1" : "0.94"}"/>
-          <text x="${712}" y="${956 + index * 42}" font-size="19" class="thai bold" fill="${index === 0 ? "#ffffff" : layoutMeta.accent}">${escapeXml(line)}</text>
-        `).join("")}
-      </g>
-    </svg>
-  `;
-
-  const output = await sharp(Buffer.from(svg)).jpeg({ quality: 94 }).toBuffer();
   return {
     kind: "binary",
-    fileName: `shopee-${product.productId}-layout-${layout}.jpg`,
+    fileName: `shopee-${product.productId}-ugc-${layout}.jpg`,
     bytes: Uint8Array.from(output).buffer,
     mimeType: "image/jpeg"
   };
