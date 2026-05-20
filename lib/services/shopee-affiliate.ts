@@ -1063,28 +1063,44 @@ export async function buildShopeePostPackage(input: {
   });
 
   const productImageForEdit = await fetchImageForAiEdit(input.product.productImageUrl);
-  const editedImageUrls = productImageForEdit
-    ? await Promise.all(
-        imagePromptSet.prompts.map(async (promptItem, index) => {
-          const edited = await generateProductReferenceImage({
-            imageBytes: productImageForEdit.bytes,
-            mimeType: productImageForEdit.mimeType,
-            prompt: [
-              promptItem.prompt,
-              `UGC frame ${index + 1} of 4. Make this a different camera angle/composition than the other images.`,
-              index === 0 ? "Front hero review angle, product fills the frame." : "",
-              index === 1 ? "Close detail/open/detail angle, product fills the frame." : "",
-              index === 2 ? "Lifestyle usage environment, candid creator review angle." : "",
-              index === 3 ? "CTA review angle, product foreground, natural social commerce photo." : ""
-            ]
-              .filter(Boolean)
-              .join("\n"),
-            userId: input.userId
-          });
-          return edited ? bufferToDataImageUrl(edited, "image/png") : "";
-        })
-      )
-    : [];
+  if (!productImageForEdit) {
+    throw new ShopeeProviderError(
+      "Shopee UGC image generation failed: product image could not be fetched for reference editing",
+      422,
+      "shopee_ugc_reference_image_unavailable",
+      "internal_api"
+    );
+  }
+
+  const editedImageUrls = await Promise.all(
+    imagePromptSet.prompts.map(async (promptItem, index) => {
+      const edited = await generateProductReferenceImage({
+        imageBytes: productImageForEdit.bytes,
+        mimeType: productImageForEdit.mimeType,
+        prompt: [
+          promptItem.prompt,
+          `UGC frame ${index + 1} of 4. Make this a different camera angle/composition than the other images.`,
+          index === 0 ? "Front hero review angle, product fills 70-85% of the frame." : "",
+          index === 1 ? "Close detail/open/detail angle, product fills 70-85% of the frame." : "",
+          index === 2 ? "Lifestyle usage environment, candid creator review angle, product fills 70-85% of the frame." : "",
+          index === 3 ? "CTA review angle, product foreground, natural social commerce photo, product fills 70-85% of the frame." : ""
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        userId: input.userId
+      });
+      return edited ? bufferToDataImageUrl(edited, "image/png") : "";
+    })
+  );
+
+  if (editedImageUrls.length !== 4 || editedImageUrls.some((url) => !url.startsWith("data:image/"))) {
+    throw new ShopeeProviderError(
+      "Shopee UGC image generation failed: OpenAI image edit did not return 4 UGC images. Posting was stopped to avoid publishing template/banner images.",
+      500,
+      "shopee_ugc_image_edit_required",
+      "internal_api"
+    );
+  }
 
   const imageDocs = await AiGeneratedImage.insertMany(
     imagePromptSet.prompts.map((promptItem, index) => ({
@@ -1092,9 +1108,9 @@ export async function buildShopeePostPackage(input: {
       productId: input.product.productId,
       prompt: promptItem.prompt,
       status: "generated",
-      generatedImageUrl: editedImageUrls[index] || input.product.productImageUrl,
+      generatedImageUrl: editedImageUrls[index],
       fallbackImageUrl: input.product.productImageUrl,
-      provider: editedImageUrls[index] ? "openai_reference_ugc_edit" : "shopee_ugc_lifestyle_renderer",
+      provider: "openai_reference_ugc_edit",
       promptHistory: [
         promptItem.title,
         `concept=${promptItem.concept}`,
