@@ -457,15 +457,153 @@ function buildShopeeAffiliateGraphqlQuery(query: ProductDiscoveryQuery) {
 }`;
 }
 
+function buildShopeeAffiliateGraphqlFallbackQuery(query: ProductDiscoveryQuery) {
+  const limit = Math.max(1, Math.min(query.limit ?? 20, 50));
+  return `query {
+  productOfferV2(limit: ${limit}, page: 1) {
+    nodes {
+      productName
+      itemId
+      shopId
+      productLink
+      offerLink
+      imageUrl
+      price
+      priceMin
+      priceMax
+      sales
+      ratingStar
+      commissionRate
+      shopName
+    }
+  }
+}`;
+}
+
+function isShopeeGraphqlSystemError(payload: Record<string, any>) {
+  return Array.isArray(payload.errors) && payload.errors.some((error) => {
+    const code = error?.extensions?.code ?? error?.code;
+    const message = String(error?.message ?? error?.extensions?.message ?? "").toLowerCase();
+    return String(code) === "10000" || message.includes("system error");
+  });
+}
+
+function normalizeCachedShopeeProduct(product: any, sourceTag: ShopeeSourceTag): ShopeeProductRecord {
+  return {
+    productId: String(product.productId),
+    shopId: String(product.shopId ?? ""),
+    itemId: String(product.itemId ?? product.productId),
+    productName: String(product.productName ?? "Shopee Product"),
+    productDescription: String(product.productDescription ?? ""),
+    productPrice: Number(product.productPrice ?? 0),
+    discountPrice: product.discountPrice === null || product.discountPrice === undefined ? undefined : Number(product.discountPrice),
+    discountPercent: product.discountPercent === null || product.discountPercent === undefined ? undefined : Number(product.discountPercent),
+    productImageUrl: String(product.productImageUrl ?? product.productImageUrls?.[0] ?? ""),
+    productImageUrls: Array.isArray(product.productImageUrls) ? product.productImageUrls.map(String).filter(Boolean) : undefined,
+    productUrl: String(product.productUrl ?? ""),
+    affiliateUrl: product.affiliateUrl ? String(product.affiliateUrl) : undefined,
+    category: String(product.category ?? "General"),
+    salesCount: product.salesCount === undefined || product.salesCount === null ? undefined : Number(product.salesCount),
+    reviewCount: product.reviewCount === undefined || product.reviewCount === null ? undefined : Number(product.reviewCount),
+    shopName: product.shopName ? String(product.shopName) : undefined,
+    rating: product.rating === undefined || product.rating === null ? undefined : Number(product.rating),
+    commissionRate: product.commissionRate === undefined || product.commissionRate === null ? undefined : Number(product.commissionRate),
+    sourceTag,
+    fetchedAt: product.fetchedAt ? new Date(product.fetchedAt) : new Date()
+  };
+}
+
+async function fetchCachedShopeeProducts(query: ProductDiscoveryQuery, reason: string) {
+  const sourceTag = query.sourceTag ?? "trending";
+  const limit = Math.max(1, Math.min(query.limit ?? 20, 50));
+  const mongoQuery: Record<string, unknown> = {
+    productImageUrl: { $ne: "" },
+    $or: [{ productUrl: { $ne: "" } }, { affiliateUrl: { $ne: "" } }]
+  };
+  if (query.category?.trim()) {
+    mongoQuery.category = { $regex: query.category.trim(), $options: "i" };
+  }
+  if (query.keyword?.trim()) {
+    const keyword = query.keyword.trim();
+    mongoQuery.$and = [
+      {
+        $or: [
+          { productName: { $regex: keyword, $options: "i" } },
+          { productDescription: { $regex: keyword, $options: "i" } },
+          { category: { $regex: keyword, $options: "i" } }
+        ]
+      }
+    ];
+  }
+
+  const cached = await ShopeeProduct.find(mongoQuery)
+    .sort({ fetchedAt: -1, salesCount: -1, rating: -1 })
+    .limit(limit)
+    .lean();
+
+  console.warn("[shopee/provider] using cached Shopee products after API failure", {
+    reason,
+    count: cached.length,
+    sourceTag,
+    hasKeyword: Boolean(query.keyword),
+    hasCategory: Boolean(query.category)
+  });
+
+  return cached.map((product) => normalizeCachedShopeeProduct(product, sourceTag));
+}
+
 async function fetchShopeeAffiliateGraphqlProducts(input: {
   endpoint: string;
   appId: string;
   secret: string;
   query: ProductDiscoveryQuery;
 }) {
+  const primaryQuery = buildShopeeAffiliateGraphqlQuery(input.query);
+  try {
+    return await fetchShopeeAffiliateGraphqlProductsWithQuery({
+      ...input,
+      graphqlQuery: primaryQuery,
+      queryMode: "primary"
+    });
+  } catch (error) {
+    if (!(error instanceof ShopeeProviderError) || error.code !== "shopee_graphql_system_error") {
+      throw error;
+    }
+
+    console.warn("[shopee/provider] retrying affiliate graphql with minimal query after system error", {
+      sourceTag: input.query.sourceTag ?? "trending",
+      hasKeyword: Boolean(input.query.keyword),
+      hasCategory: Boolean(input.query.category)
+    });
+
+    try {
+      return await fetchShopeeAffiliateGraphqlProductsWithQuery({
+        ...input,
+        graphqlQuery: buildShopeeAffiliateGraphqlFallbackQuery(input.query),
+        queryMode: "minimal"
+      });
+    } catch (fallbackError) {
+      if (fallbackError instanceof ShopeeProviderError && fallbackError.code === "shopee_graphql_system_error") {
+        const cachedProducts = await fetchCachedShopeeProducts(input.query, "shopee_graphql_system_error");
+        if (cachedProducts.length) {
+          return cachedProducts;
+        }
+      }
+      throw fallbackError;
+    }
+  }
+}
+
+async function fetchShopeeAffiliateGraphqlProductsWithQuery(input: {
+  endpoint: string;
+  appId: string;
+  secret: string;
+  query: ProductDiscoveryQuery;
+  graphqlQuery: string;
+  queryMode: "primary" | "minimal";
+}) {
   const url = new URL(input.endpoint);
-  const graphqlQuery = buildShopeeAffiliateGraphqlQuery(input.query);
-  const body = JSON.stringify({ query: graphqlQuery });
+  const body = JSON.stringify({ query: input.graphqlQuery });
   const timestamp = Math.floor(Date.now() / 1000).toString();
   const signature = crypto
     .createHash("sha256")
@@ -482,6 +620,7 @@ async function fetchShopeeAffiliateGraphqlProducts(input: {
     hasAppId: Boolean(input.appId),
     hasSecret: Boolean(input.secret),
     authMode: "affiliate_graphql",
+    queryMode: input.queryMode,
     signatureGenerated: Boolean(signature),
     authorizationScheme: "SHA256"
   });
@@ -504,6 +643,7 @@ async function fetchShopeeAffiliateGraphqlProducts(input: {
       status: response.status,
       bodySummary,
       authMode: "affiliate_graphql",
+      queryMode: input.queryMode,
       signatureGenerated: Boolean(signature)
     });
     const message =
@@ -519,9 +659,19 @@ async function fetchShopeeAffiliateGraphqlProducts(input: {
     console.warn("[shopee/provider] affiliate graphql returned errors", {
       endpointHost: url.host,
       endpointPath: url.pathname,
+      queryMode: input.queryMode,
       errorSummary: summary
     });
-    throw new ShopeeProviderError(`Shopee Affiliate API returned errors: ${summary}`, 502, "shopee_graphql_error", "shopee_api", summary);
+    const isSystemError = isShopeeGraphqlSystemError(payload);
+    throw new ShopeeProviderError(
+      isSystemError
+        ? `Shopee Affiliate API system error on productOfferV2. The system will retry with a minimal query or cached products. Details: ${summary}`
+        : `Shopee Affiliate API returned errors: ${summary}`,
+      502,
+      isSystemError ? "shopee_graphql_system_error" : "shopee_graphql_error",
+      "shopee_api",
+      summary
+    );
   }
 
   const nodes =
@@ -533,6 +683,7 @@ async function fetchShopeeAffiliateGraphqlProducts(input: {
   console.info("[shopee/provider] affiliate graphql product fetch completed", {
     endpointHost: url.host,
     endpointPath: url.pathname,
+    queryMode: input.queryMode,
     productsCount: Array.isArray(nodes) ? nodes.length : 0
   });
 
