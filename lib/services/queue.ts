@@ -642,24 +642,30 @@ function buildShopeeUgcSceneSvg(input: { scene: ReturnType<typeof getShopeeProdu
 }
 
 function buildShopeeUgcTextSvg(input: { copy: ReturnType<typeof getShopeeUgcCopy>; scene: ReturnType<typeof getShopeeProductScene>; layout: number }) {
-  const { copy, scene, layout } = input;
+  const { copy, layout } = input;
   const thaiFont = getNotoSansThaiFont();
-  const labelX = layout === 2 ? 52 : 58;
-  const labelY = layout === 2 ? 52 : 58;
-  const textX = layout === 4 ? 54 : 58;
-  const textY = layout === 2 ? 774 : 792;
-  const lines = copy.lines.slice(0, 3).map((line) => truncateText(line, 34));
-  const overlayText = [copy.label, ...lines].join(" ");
+  const textX = layout === 2 ? 50 : 56;
+  const textY = layout === 4 ? 806 : 792;
+  const lines = copy.lines.slice(0, 3).map((line) => truncateText(line, 30));
+  const overlayText = lines.join(" ");
 
   if (/[\uFFFD]/.test(overlayText) || lines.length > 3) {
     throw new Error("Shopee UGC image validation failed: Thai overlay text is invalid");
   }
 
+  const maxLineLength = Math.max(...lines.map((line) => line.length), 12);
+  const boxWidth = Math.min(920, Math.max(470, maxLineLength * 25 + 72));
+  const boxHeight = 34 + lines.length * 48;
+
   return `
     <svg width="1080" height="1080" viewBox="0 0 1080 1080" xmlns="http://www.w3.org/2000/svg">
       <defs>
+        <linearGradient id="captionFade" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stop-color="#000000" stop-opacity="0"/>
+          <stop offset="100%" stop-color="#000000" stop-opacity="0.42"/>
+        </linearGradient>
         <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
-          <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#0f172a" flood-opacity="0.28"/>
+          <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#000000" flood-opacity="0.34"/>
         </filter>
         <style>
           ${thaiFont
@@ -675,17 +681,12 @@ function buildShopeeUgcTextSvg(input: { copy: ReturnType<typeof getShopeeUgcCopy
           .bold { font-weight: 800; }
         </style>
       </defs>
+      <rect x="0" y="720" width="1080" height="360" fill="url(#captionFade)"/>
       <g filter="url(#softShadow)">
-        <rect x="${labelX}" y="${labelY}" width="290" height="56" rx="28" fill="rgba(15,23,42,0.68)"/>
-        <circle cx="${labelX + 32}" cy="${labelY + 28}" r="12" fill="${scene.accent}"/>
-        <text x="${labelX + 58}" y="${labelY + 38}" font-size="25" class="thai bold" fill="#ffffff">${escapeXml(copy.label)}</text>
-      </g>
-      <g filter="url(#softShadow)">
+        <rect x="${textX}" y="${textY}" width="${boxWidth}" height="${boxHeight}" rx="20" fill="rgba(17,24,39,0.72)"/>
         ${lines.map((line, index) => {
-          const width = Math.min(900, Math.max(390, line.length * 25 + 50));
-          const y = textY + index * 58;
-          return `<rect x="${textX}" y="${y}" width="${width}" height="48" rx="14" fill="rgba(17,24,39,0.72)"/>
-          <text x="${textX + 24}" y="${y + 34}" font-size="30" class="thai heavy" fill="#ffffff">${escapeXml(line)}</text>`;
+          const y = textY + 48 + index * 48;
+          return `<text x="${textX + 28}" y="${y}" font-size="34" class="thai heavy" fill="#ffffff">${escapeXml(line)}</text>`;
         }).join("")}
       </g>
     </svg>
@@ -706,36 +707,21 @@ async function renderShopeeAffiliateCard(imageDoc: LeanAiGeneratedImage): Promis
   const productBuffer = await fetchRemoteImageBuffer(imageUrl);
   const scene = getShopeeProductScene(product);
   const copy = getShopeeUgcCopy(product, layout);
-  const placement = [
-    { width: 1010, height: 760, top: 142, fit: "inside" as const },
-    { width: 1080, height: 830, top: 86, fit: "cover" as const },
-    { width: 940, height: 760, top: 168, fit: "inside" as const },
-    { width: 1020, height: 760, top: 136, fit: "inside" as const }
-  ][layout - 1];
+  const provider = imageDoc.provider ?? "";
+  const isOpenAiUgcPhoto = provider === "openai_shopee_ugc_photo";
 
-  const background = await sharp(productBuffer)
-    .resize(1080, 1080, { fit: "cover", position: "attention" })
-    .blur(layout === 2 ? 12 : 20)
-    .modulate({ brightness: 0.82, saturation: 0.78 })
-    .jpeg({ quality: 92 })
-    .toBuffer();
-
-  const productLayer = await sharp(productBuffer)
-    .resize(placement.width, placement.height, {
-      fit: placement.fit,
+  const basePhoto = await sharp(productBuffer)
+    .resize(1080, 1080, {
+      fit: isOpenAiUgcPhoto || layout === 2 ? "cover" : "cover",
       position: "attention",
-      withoutEnlargement: false,
-      background: { r: 255, g: 255, b: 255, alpha: 0 }
+      withoutEnlargement: false
     })
-    .png()
+    .modulate({ brightness: isOpenAiUgcPhoto ? 1 : 0.96, saturation: isOpenAiUgcPhoto ? 1 : 1.04 })
+    .jpeg({ quality: 94 })
     .toBuffer();
-  const productMeta = await sharp(productLayer).metadata();
-  const productLeft = Math.max(0, Math.round((1080 - (productMeta.width ?? placement.width)) / 2));
-  const productTop = Math.max(0, placement.top + Math.round((placement.height - (productMeta.height ?? placement.height)) / 2));
 
-  const output = await sharp(background)
+  const output = await sharp(basePhoto)
     .composite([
-      { input: productLayer, left: productLeft, top: productTop },
       { input: Buffer.from(buildShopeeUgcTextSvg({ copy, scene, layout }), "utf8"), left: 0, top: 0 }
     ])
     .jpeg({ quality: 94, mozjpeg: true })
