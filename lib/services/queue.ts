@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { readFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import path from "path";
 import sharp from "sharp";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
@@ -39,21 +39,43 @@ const COMMENT_REPLY_RATE_LIMIT_COOLDOWN_MINUTES = Number(process.env.COMMENT_REP
 const COMMENT_REPLY_IMMEDIATE_BATCH_SIZE = Number(process.env.COMMENT_REPLY_IMMEDIATE_BATCH_SIZE ?? "5");
 const USER_JOB_LOCK_WINDOW_MS = Number(process.env.USER_JOB_LOCK_WINDOW_MS ?? String(5 * 60 * 1000));
 
-let notoSansThaiFontDataUri: string | null = null;
+let notoSansThaiFont: { dataUri: string; format: "woff" | "woff2" } | null | undefined;
 
-function getNotoSansThaiFontDataUri() {
-  if (notoSansThaiFontDataUri) return notoSansThaiFontDataUri;
-  const fontPath = path.join(
-    process.cwd(),
-    "node_modules",
-    "@fontsource",
-    "noto-sans-thai",
-    "files",
-    "noto-sans-thai-thai-700-normal.woff"
-  );
+function readFontCandidate(fontPath: string) {
+  if (!existsSync(fontPath)) return null;
   const fontBytes = readFileSync(fontPath);
-  notoSansThaiFontDataUri = `data:font/woff;base64,${fontBytes.toString("base64")}`;
-  return notoSansThaiFontDataUri;
+  const format = fontPath.endsWith(".woff2") ? "woff2" : "woff";
+  return {
+    dataUri: `data:font/${format};base64,${fontBytes.toString("base64")}`,
+    format
+  } as const;
+}
+
+function getNotoSansThaiFont() {
+  if (notoSansThaiFont !== undefined) return notoSansThaiFont;
+
+  const fontCandidates = [
+    path.join(process.cwd(), "node_modules", "@fontsource", "noto-sans-thai", "files", "noto-sans-thai-thai-700-normal.woff"),
+    path.join(process.cwd(), "node_modules", "@fontsource", "noto-sans-thai", "files", "noto-sans-thai-thai-700-normal.woff2"),
+    path.join(process.cwd(), "node_modules", "@fontsource", "noto-sans-thai", "files", "noto-sans-thai-thai-400-normal.woff"),
+    path.join(process.cwd(), "node_modules", "@fontsource", "noto-sans-thai", "files", "noto-sans-thai-thai-400-normal.woff2")
+  ];
+
+  for (const candidate of fontCandidates) {
+    try {
+      const font = readFontCandidate(candidate);
+      if (font) {
+        notoSansThaiFont = font;
+        return notoSansThaiFont;
+      }
+    } catch {
+      // Font loading is a visual enhancement. It must never block publishing.
+    }
+  }
+
+  console.warn("[shopee-render] Thai font file was not found; falling back to system fonts.");
+  notoSansThaiFont = null;
+  return notoSansThaiFont;
 }
 
 type ResolvedImage =
@@ -621,7 +643,7 @@ function buildShopeeUgcSceneSvg(input: { scene: ReturnType<typeof getShopeeProdu
 
 function buildShopeeUgcTextSvg(input: { copy: ReturnType<typeof getShopeeUgcCopy>; scene: ReturnType<typeof getShopeeProductScene>; layout: number }) {
   const { copy, scene, layout } = input;
-  const fontDataUri = getNotoSansThaiFontDataUri();
+  const thaiFont = getNotoSansThaiFont();
   const labelX = layout === 2 ? 52 : 58;
   const labelY = layout === 2 ? 52 : 58;
   const textX = layout === 4 ? 54 : 58;
@@ -640,12 +662,14 @@ function buildShopeeUgcTextSvg(input: { copy: ReturnType<typeof getShopeeUgcCopy
           <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#0f172a" flood-opacity="0.28"/>
         </filter>
         <style>
-          @font-face {
+          ${thaiFont
+            ? `@font-face {
             font-family: "Noto Sans Thai Local";
-            src: url("${fontDataUri}") format("woff");
+            src: url("${thaiFont.dataUri}") format("${thaiFont.format}");
             font-weight: 700;
             font-style: normal;
-          }
+          }`
+            : ""}
           .thai { font-family: "Noto Sans Thai Local", "Noto Sans Thai", "Prompt", "Kanit", "Sarabun", "Tahoma", Arial, sans-serif; }
           .heavy { font-weight: 900; }
           .bold { font-weight: 800; }

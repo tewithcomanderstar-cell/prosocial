@@ -7,6 +7,9 @@ const nextConfig = {
         hostname: "**"
       }
     ]
+  },
+  outputFileTracingIncludes: {
+    "/api/**/*": ["./node_modules/@fontsource/noto-sans-thai/files/noto-sans-thai-thai-*.woff*"]
   }
 };
 
