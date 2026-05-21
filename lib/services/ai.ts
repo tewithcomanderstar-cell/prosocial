@@ -98,11 +98,11 @@ export async function generateProductReferenceImage(input: {
   const safePrompt = [
     input.prompt,
     "Create a realistic UGC product review photo, not a card, banner, poster, ecommerce thumbnail, or Canva template.",
-    "Use the provided image only as the product identity reference. Preserve the same product shape, colors, label/logo placement, proportions, and visible details.",
-    "Do not invent a new product. Do not redesign, recolor, rebrand, add fake logos, or add fake reviews.",
+    "Use the provided image as the strict product source of truth. Preserve the same product shape, colors, label/logo placement, proportions, packaging text placement, and visible details as much as possible.",
+    "Do not invent a new product. Do not redesign, recolor, rebrand, repair labels, rewrite packaging text, add fake logos, or add fake reviews.",
     "The product must be large in frame, 60-85% of the image area, with natural mobile photography, realistic lighting, depth, shadow, and lifestyle context.",
-    "Do not generate Thai text, English text, captions, labels, badges, UI elements, price labels, stickers, screenshots, text boxes, panels, or dark bars.",
-    "Thai review copy is rendered later by the server with a real Thai font to avoid unreadable or alien text."
+    "Do not generate Thai text, English text, captions, labels, badges, UI elements, price labels, stickers, screenshots, text boxes, panels, dark bars, or any added explanatory text.",
+    "If you cannot preserve the brand or packaging text accurately, keep the original product image unchanged rather than hallucinating or mutating text."
   ].join("\n");
 
   try {

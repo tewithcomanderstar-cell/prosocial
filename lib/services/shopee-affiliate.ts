@@ -1087,7 +1087,7 @@ export async function buildShopeePostPackage(input: {
         `concept=${promptItem.concept}`,
         `layout=${index + 1}`,
         "source=exact-shopee-product-image",
-        "thai_text=server-rendered-svg",
+        "no_text_overlay=true",
         imagePromptSet.negativePrompt
       ]
     }))
