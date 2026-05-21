@@ -1320,7 +1320,8 @@ async function executePostJob(job: JobExecution) {
     const blocked = await isDuplicatePostBlocked({
       userId: job.userId,
       fingerprint: job.fingerprint,
-      duplicateWindowHours
+      duplicateWindowHours,
+      targetPageId: job.targetPageId
     });
 
     if (blocked) {

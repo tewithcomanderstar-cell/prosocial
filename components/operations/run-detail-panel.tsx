@@ -38,6 +38,9 @@ type RunDetail = {
     maxAttempts: number;
     targetPageId?: string;
     fingerprint?: string;
+    errorCode?: string;
+    failureReason?: string;
+    errorDetails?: Record<string, unknown> | null;
   };
 };
 
@@ -137,10 +140,24 @@ export function RunDetailPanel({ runId }: { runId: string }) {
             <span>Fingerprint</span>
             <strong>{detail.diagnostics.fingerprint || "-"}</strong>
           </div>
+          <div className="list-item">
+            <span>Error code</span>
+            <strong>{detail.diagnostics.errorCode || "-"}</strong>
+          </div>
+          <div className="list-item">
+            <span>Failure reason</span>
+            <strong>{detail.diagnostics.failureReason || "-"}</strong>
+          </div>
         </div>
 
         {detail.run.errorMessage ? (
           <div className="composer-message composer-message-error">{detail.run.errorMessage}</div>
+        ) : null}
+        {detail.diagnostics.failureReason || detail.diagnostics.errorCode ? (
+          <div className="composer-message composer-message-error">
+            <strong>{detail.diagnostics.errorCode || "publish_failed"}</strong>
+            {detail.diagnostics.failureReason ? `: ${detail.diagnostics.failureReason}` : ""}
+          </div>
         ) : null}
       </section>
 
@@ -220,7 +237,10 @@ export function RunDetailPanel({ runId }: { runId: string }) {
             </div>
           </div>
           <pre className="card" style={{ overflowX: "auto", whiteSpace: "pre-wrap" }}>
-            {prettyJson(detail.run.outputJson)}
+            {prettyJson({
+              ...(detail.run.outputJson ?? {}),
+              errorDetails: detail.diagnostics.errorDetails ?? undefined
+            })}
           </pre>
         </section>
       </div>

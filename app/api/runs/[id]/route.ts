@@ -50,7 +50,10 @@ export async function GET(_request: Request, context: RouteContext) {
         attempts: Number(job.attempts || 0),
         maxAttempts: Number(job.maxAttempts || 0),
         targetPageId: job.targetPageId ? String(job.targetPageId) : undefined,
-        fingerprint: job.fingerprint ? String(job.fingerprint) : undefined
+        fingerprint: job.fingerprint ? String(job.fingerprint) : undefined,
+        errorCode: job.errorCode ? String(job.errorCode) : undefined,
+        failureReason: job.failureReason ? String(job.failureReason) : undefined,
+        errorDetails: (job.errorDetails as Record<string, unknown> | null | undefined) ?? null
       }
     });
   } catch {
