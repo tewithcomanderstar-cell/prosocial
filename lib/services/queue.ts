@@ -806,6 +806,18 @@ async function validateShopeeAffiliatePublishPayload(input: {
   const reasons: string[] = [];
   const shopeeLinkMatch = input.message.match(/https:\/\/s\.shopee\.co\.th\/\S+/);
   const payloadAffiliateLink = typeof input.job.payload?.affiliateLink === "string" ? input.job.payload.affiliateLink : "";
+  const hardSellPatterns = [
+    /สินค้าคุณภาพดี/i,
+    /โปรโมชั่นสุดคุ้ม/i,
+    /รีบสั่งซื้อ/i,
+    /พลาดไม่ได้/i,
+    /รีบซื้อด่วน/i,
+    /โปรโมชั่นห้ามพลาด/i,
+    /รีบกดก่อนหมด/i,
+    /ของมันต้องมี/i,
+    /ซื้อเลยตอนนี้/i
+  ];
+  const hashtagCount = input.message.match(/#[^\s#]+/g)?.length ?? 0;
 
   if (input.imageCount !== 4) {
     reasons.push("Shopee Affiliate post requires exactly 4 generated images");
@@ -827,6 +839,12 @@ async function validateShopeeAffiliatePublishPayload(input: {
   }
   if (input.message.length > 700) {
     reasons.push(`Caption is too long (${input.message.length}/700 characters)`);
+  }
+  if (hardSellPatterns.some((pattern) => pattern.test(input.message))) {
+    reasons.push("Caption contains hard-sell wording that is not allowed for Shopee UGC review style");
+  }
+  if (hashtagCount > 2) {
+    reasons.push(`Caption has too many hashtags (${hashtagCount}/2 max)`);
   }
 
   if (reasons.length === 0) {
