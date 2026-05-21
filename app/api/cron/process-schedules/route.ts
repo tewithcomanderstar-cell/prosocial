@@ -21,7 +21,7 @@ export async function GET(request: Request) {
     const startedAt = Date.now();
     const schedulerEngine = process.env.SCHEDULER_ENGINE === "prisma" ? "prisma" : "legacy";
     const inlinePublisherEnabled = process.env.ENABLE_INLINE_PUBLISHER !== "false";
-    const inlineBatchSize = Number(process.env.INLINE_PUBLISHER_BATCH_SIZE ?? "25");
+    const inlineBatchSize = Number(process.env.INLINE_PUBLISHER_BATCH_SIZE ?? "3");
     console.info("[SCHEDULER] started", { correlationId, schedulerEngine, inlinePublisherEnabled, inlineBatchSize });
 
     if (schedulerEngine === "prisma") {
@@ -36,12 +36,10 @@ export async function GET(request: Request) {
     }
 
     await connectDb();
-    const [scheduledQueued, autoPostsQueued, autoPostAiQueued, syncedComments] = await Promise.all([
-      queueDueSchedules(),
-      processDueAutoPosts(),
-      processDueAutoPostAiConfigs(),
-      syncTrackedAutoCommentPosts()
-    ]);
+    const scheduledQueued = await queueDueSchedules();
+    const autoPostsQueued = await processDueAutoPosts();
+    const autoPostAiQueued = await processDueAutoPostAiConfigs();
+    const syncedComments = await syncTrackedAutoCommentPosts();
     const processedJobs = inlinePublisherEnabled ? await processQueuedJobs(inlineBatchSize) : [];
     console.info("[SCHEDULER] completed", {
       correlationId,

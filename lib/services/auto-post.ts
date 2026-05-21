@@ -87,6 +87,7 @@ type QueueAutoPostsResult = {
 };
 
 const AUTO_POST_BATCH_PAGE_SPACING_MINUTES = Number(process.env.AUTO_POST_PAGE_SPACING_MINUTES ?? "10");
+const AUTO_POST_JOB_TIMEOUT_MS = Number(process.env.AUTO_POST_JOB_TIMEOUT_MS ?? "300000");
 const BANGKOK_UTC_OFFSET_HOURS = 7;
 const AUTO_POST_QUOTE_EXPANSION_PROMPT = `คุณคือผู้เชี่ยวชาญด้านการเขียนคอนเทนต์โซเชียลมีเดีย (Facebook/IG) ที่เน้นเพิ่ม Time Spend, Engagement (Like/Comment/Share) และความรู้สึกของผู้อ่าน
 
@@ -429,18 +430,85 @@ function hashValue(value: unknown) {
   return crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
+function normalizeAutoPostError(error: unknown, fallback = "Auto Post failed") {
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : fallback;
+  const normalized = message.toLowerCase();
+  if (normalized.includes("signal is aborted") || normalized.includes("aborterror") || normalized.includes("aborted")) {
+    return "Auto Post job was aborted or timed out. The job has been stopped safely; please retry after deployment finishes.";
+  }
+  return message || fallback;
+}
+
+async function logShopeeStep(input: {
+  config: LeanAutoPostConfig;
+  step: string;
+  status: "started" | "success" | "failed" | "skipped";
+  message: string;
+  pageId?: string;
+  productId?: string;
+  metadata?: Record<string, unknown>;
+  error?: unknown;
+}) {
+  await logShopeeAutomationEvent({
+    userId: input.config.userId,
+    level: input.status === "failed" ? "error" : input.status === "skipped" ? "warn" : "info",
+    message: `${input.step}: ${input.message}`,
+    pageId: input.pageId,
+    productId: input.productId,
+    metadata: {
+      autoPostConfigId: input.config._id,
+      step: input.step,
+      status: input.status,
+      ...(input.metadata ?? {}),
+      ...(input.error
+        ? {
+            error: normalizeAutoPostError(input.error),
+            stack: input.error instanceof Error ? input.error.stack?.split("\n").slice(0, 4).join("\n") : undefined
+          }
+        : {})
+    }
+  });
+}
+
 async function queueShopeeAutoPostsForConfig(
   config: LeanAutoPostConfig,
   options: QueueAutoPostsOptions,
   triggeredAt: Date,
   nextRunAt: Date
 ): Promise<QueueAutoPostsResult> {
+  await logShopeeStep({
+    config,
+    step: "START_JOB",
+    status: "started",
+    message: options.source === "manual-start" ? "Manual Shopee Auto Post started" : "Scheduled Shopee Auto Post started",
+    metadata: { source: options.source, immediate: options.immediate }
+  });
+
   let eligiblePageIds = config.targetPageIds;
   if (!eligiblePageIds.length) {
+    await logShopeeStep({
+      config,
+      step: "VALIDATE_FACEBOOK_PAGES",
+      status: "failed",
+      message: "No selected Facebook page"
+    });
     throw new Error("No Facebook pages selected for Shopee Affiliate Auto Post");
   }
 
+  await logShopeeStep({
+    config,
+    step: "VALIDATE_ENV",
+    status: "started",
+    message: "Checking Shopee affiliate configuration"
+  });
   ensureShopeeAffiliateConfigured(config.shopeeTrackingId);
+  await logShopeeStep({
+    config,
+    step: "VALIDATE_FACEBOOK_PAGES",
+    status: "started",
+    message: "Checking Facebook connection and selected pages",
+    metadata: { selectedPageCount: eligiblePageIds.length }
+  });
   await ensureValidFacebookConnection(config.userId);
 
   const maxPostsPerPage = Math.max(0, config.maxPostsPerPagePerDay ?? 0);
@@ -496,6 +564,18 @@ async function queueShopeeAutoPostsForConfig(
     triggeredAt: triggeredAt.toISOString()
   });
 
+  await logShopeeStep({
+    config,
+    step: "FETCH_SHOPEE_PRODUCTS",
+    status: "started",
+    message: "Fetching and scoring Shopee products",
+    metadata: {
+      sourceTag: config.shopeeSourceTag ?? "trending",
+      keyword: config.shopeeKeyword ?? "",
+      category: config.shopeeCategory ?? "",
+      pageCount: eligiblePageIds.length
+    }
+  });
   const selectedProducts = await selectShopeeProductsForPages({
     userId: config.userId,
     pageIds: eligiblePageIds,
@@ -509,6 +589,13 @@ async function queueShopeeAutoPostsForConfig(
     minRating: config.shopeeMinRating ?? 0,
     minSales: config.shopeeMinSales ?? 0,
     minDiscountPercent: config.shopeeMinDiscountPercent ?? 0
+  });
+  await logShopeeStep({
+    config,
+    step: "SELECT_PRODUCT",
+    status: selectedProducts.length ? "success" : "failed",
+    message: selectedProducts.length ? `Selected ${selectedProducts.length} product(s)` : "No eligible product found",
+    metadata: { selectedCount: selectedProducts.length }
   });
 
   let queued = 0;
@@ -526,6 +613,16 @@ async function queueShopeeAutoPostsForConfig(
     const selected = selectedProducts[index];
     const startAt = new Date(batchStartAt.getTime() + index * AUTO_POST_BATCH_PAGE_SPACING_MINUTES * 60 * 1000);
     const trackingId = config.shopeeTrackingId?.trim() || `page-${selected.pageId}`;
+    const stepStartedAt = Date.now();
+    await logShopeeStep({
+      config,
+      step: "GENERATE_POST_PACKAGE",
+      status: "started",
+      message: "Generating affiliate link, caption, and 4 UGC images",
+      pageId: selected.pageId,
+      productId: selected.product.productId,
+      metadata: { score: selected.score.productScore, reason: selected.score.reason }
+    });
     const packageResult = await buildShopeePostPackage({
       userId: config.userId,
       pageId: selected.pageId,
@@ -534,8 +631,33 @@ async function queueShopeeAutoPostsForConfig(
       captionStyle: config.shopeeCaptionStyle ?? "soft_sell",
       trackingId
     });
+    await logShopeeStep({
+      config,
+      step: "VALIDATE_POST_PAYLOAD",
+      status: "started",
+      message: "Validating Shopee short link and image count",
+      pageId: selected.pageId,
+      productId: selected.product.productId,
+      metadata: {
+        imageCount: packageResult.generatedImageUrls.length,
+        hasShortLink: Boolean(packageResult.shortAffiliateLink),
+        durationMs: Date.now() - stepStartedAt
+      }
+    });
 
     if (!packageResult.shortAffiliateLink || packageResult.generatedImageUrls.length < 4) {
+      await logShopeeStep({
+        config,
+        step: "VALIDATE_POST_PAYLOAD",
+        status: "failed",
+        message: "Shopee post package is incomplete",
+        pageId: selected.pageId,
+        productId: selected.product.productId,
+        metadata: {
+          imageCount: packageResult.generatedImageUrls.length,
+          hasShortLink: Boolean(packageResult.shortAffiliateLink)
+        }
+      });
       throw new Error("Shopee post package is incomplete: affiliate short link and 4 images are required");
     }
 
@@ -604,7 +726,7 @@ async function queueShopeeAutoPostsForConfig(
     await logShopeeAutomationEvent({
       userId: config.userId,
       level: "success",
-      message: "Shopee affiliate post queued",
+      message: "QUEUE_POST: Shopee affiliate post queued",
       productId: selected.product.productId,
       pageId: selected.pageId,
       metadata: {
@@ -649,6 +771,14 @@ async function queueShopeeAutoPostsForConfig(
       workflowRunId: records.workflowRunId,
       contentItemId: records.contentItemId
     }
+  });
+
+  await logShopeeStep({
+    config,
+    step: "JOB_SUCCESS",
+    status: "success",
+    message: config.approvalMode ? "Shopee previews created and waiting approval" : "Shopee posts queued for Facebook publishing",
+    metadata: { queued, approvalMode: Boolean(config.approvalMode) }
   });
 
   return {
@@ -954,7 +1084,11 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
   };
 }
 
-export async function processAutoPostConfigNow(userId: string, configId: string) {
+export async function processAutoPostConfigNow(
+  userId: string,
+  configId: string,
+  options: { processInline?: boolean } = {}
+) {
   const config = (await AutoPostConfig.findOne({ _id: configId, userId }).lean()) as unknown as LeanAutoPostConfig | null;
 
   if (!config) {
@@ -968,18 +1102,28 @@ export async function processAutoPostConfigNow(userId: string, configId: string)
       immediate: true
     });
   } catch (error) {
+    const message = normalizeAutoPostError(error);
     await updateAutoPostState(config._id, {
       lastRunAt: new Date(),
       nextRunAt: getNextAutoRun(config.intervalMinutes, config.postingWindowStart, config.postingWindowEnd),
       autoPostStatus: "failed",
       jobStatus: "failed",
       lastStatus: "failed",
-      lastError: error instanceof Error ? error.message : "Auto Post failed"
+      lastError: message
+    });
+    await logShopeeStep({
+      config,
+      step: "JOB_FAILED",
+      status: "failed",
+      message,
+      error
     });
     throw error;
   }
 
-  const processedJobs = await processQueuedJobs(Math.max(config.targetPageIds.length, 1));
+  const processedJobs = options.processInline === false
+    ? []
+    : await processQueuedJobs(Math.max(config.targetPageIds.length, 1));
 
   return {
     ...result,
@@ -1017,18 +1161,26 @@ export async function processDueAutoPosts() {
       });
       processed += result.queued;
     } catch (error) {
+      const message = normalizeAutoPostError(error);
       await updateAutoPostState(config._id, {
         lastRunAt: new Date(),
         nextRunAt: getNextAutoRun(config.intervalMinutes, config.postingWindowStart, config.postingWindowEnd),
         autoPostStatus: "failed",
         jobStatus: "failed",
         lastStatus: "failed",
-        lastError: error instanceof Error ? error.message : "Auto Post failed"
+        lastError: message
+      });
+      await logShopeeStep({
+        config,
+        step: "JOB_FAILED",
+        status: "failed",
+        message,
+        error
       });
 
       await logAndNotifyError({
         userId: config.userId,
-        message: error instanceof Error ? error.message : "Unable to process Auto Post",
+        message,
         metadata: { autoPost: true, autoPostConfigId: config._id, source: "schedule" },
         error
       });

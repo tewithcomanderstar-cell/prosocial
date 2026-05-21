@@ -201,12 +201,22 @@ async function readApiResult(response: Response) {
 
 async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 9000) {
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  const timer = window.setTimeout(
+    () => controller.abort(new Error(`Request timed out after ${timeoutMs}ms while calling ${url}`)),
+    timeoutMs
+  );
   try {
     return await fetch(url, {
       ...options,
       signal: controller.signal
     });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw controller.signal.reason instanceof Error
+        ? controller.signal.reason
+        : new Error(`Request was aborted while calling ${url}`);
+    }
+    throw error;
   } finally {
     window.clearTimeout(timer);
   }
@@ -298,6 +308,7 @@ export function AutoPostPanel() {
   const [starting, setStarting] = useState(false);
   const [pausing, setPausing] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const [clearingStuck, setClearingStuck] = useState(false);
 
   const loadStatus = useCallback(async (showLoader = false) => {
     if (showLoader) {
@@ -559,6 +570,26 @@ export function AutoPostPanel() {
       return <div className="composer-message">Connect Facebook Page first</div>;
     }
     return <div className="composer-message">Shopee Affiliate Auto Post is ready.</div>;
+  }
+
+  async function handleClearStuck() {
+    setClearingStuck(true);
+    setMessage("");
+    setError("");
+
+    try {
+      const response = await fetch("/api/auto-post/clear-stuck", { method: "POST" });
+      const result = await readApiResult(response);
+      if (!result.ok) throw new Error(result.message || "Unable to clear stuck Auto Post status");
+      setMessage("Cleared stuck posting status");
+      await loadStatus(false);
+    } catch (clearError) {
+      setError(
+        sanitizeAutomationError(clearError instanceof Error ? clearError.message : "Unable to clear stuck Auto Post status")
+      );
+    } finally {
+      setClearingStuck(false);
+    }
   }
 
   return (
@@ -877,6 +908,14 @@ export function AutoPostPanel() {
           </button>
           <button className="button button-secondary" type="button" onClick={handleStop} disabled={stopping || pausing}>
             {stopping ? "Stopping..." : "Stop"}
+          </button>
+          <button
+            className="button button-secondary"
+            type="button"
+            onClick={handleClearStuck}
+            disabled={clearingStuck || starting || pausing || stopping}
+          >
+            {clearingStuck ? "Clearing..." : "Clear stuck"}
           </button>
         </div>
 

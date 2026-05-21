@@ -2,7 +2,9 @@ import { jsonError, jsonOk } from "@/lib/api";
 import { processAutoPostConfigNow } from "@/lib/services/auto-post";
 import { logAction, logAndNotifyError } from "@/lib/services/logging";
 import { handleRoleError, requireRole } from "@/lib/services/permissions";
+import { processQueuedJobs } from "@/lib/services/queue";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
+import { after } from "next/server";
 
 type LeanAutoPostConfig = {
   _id: string;
@@ -24,6 +26,7 @@ type LeanAutoPostConfig = {
   autoPostStatus?: string;
   maxPostsPerDay?: number;
   maxPostsPerPagePerDay?: number;
+  lastRunAt?: Date | string | null;
 };
 
 function sanitizeLegacyMessage(value?: string | null) {
@@ -44,6 +47,7 @@ function sanitizeLegacyMessage(value?: string | null) {
 
 const BROKEN_FOLDER_ID = "1sbp9Ql8moMDs9xBSha5IWoKdE1WlEEWz";
 const FIXED_FOLDER_ID = "1sbp9Ql8moMDs9xBSha5lWoKdE1WiEEWz";
+const AUTO_POST_JOB_TIMEOUT_MS = Number(process.env.AUTO_POST_JOB_TIMEOUT_MS ?? "300000");
 
 function normalizeFolderId(value: string) {
   const trimmed = value.trim();
@@ -73,7 +77,33 @@ export async function POST() {
       return jsonError("Select up to 100 Facebook pages", 400);
     }
 
-    if (["running", "posting", "retrying"].includes(config.autoPostStatus ?? "")) {
+    const activeStatus = ["running", "posting", "retrying"].includes(config.autoPostStatus ?? "");
+    const lastRunAtMs = config.lastRunAt ? new Date(config.lastRunAt).getTime() : 0;
+    const staleActiveJob = activeStatus && lastRunAtMs > 0 && Date.now() - lastRunAtMs > AUTO_POST_JOB_TIMEOUT_MS;
+
+    if (staleActiveJob) {
+      const previousStatus = config.autoPostStatus;
+      await AutoPostConfig.findByIdAndUpdate(config._id, {
+        autoPostStatus: "failed",
+        jobStatus: "failed",
+        lastStatus: "failed",
+        lastError: `Previous Auto Post job timed out after ${AUTO_POST_JOB_TIMEOUT_MS}ms and was cleared before starting a new run.`
+      });
+      config.autoPostStatus = "failed";
+      await logAction({
+        userId,
+        type: "queue",
+        level: "warn",
+        message: "Cleared stale Auto Post status before manual start",
+        metadata: {
+          autoPost: true,
+          autoPostConfigId: config._id,
+          previousStatus,
+          lastRunAt: config.lastRunAt,
+          timeoutMs: AUTO_POST_JOB_TIMEOUT_MS
+        }
+      });
+    } else if (activeStatus) {
       return jsonError("Auto Post is already running", 409);
     }
 
@@ -96,7 +126,43 @@ export async function POST() {
       lastRunAt: new Date()
     });
 
-    const result = await processAutoPostConfigNow(userId, config._id);
+    const result = await processAutoPostConfigNow(userId, config._id, { processInline: false });
+
+    after(async () => {
+      try {
+        const processedJobs = await processQueuedJobs(Math.max(config.targetPageIds.length, 1), "post");
+        await logAction({
+          userId,
+          type: "queue",
+          level: "info",
+          message: "Auto Post background publisher completed",
+          metadata: {
+            autoPost: true,
+            autoPostConfigId: config._id,
+            source: "manual-start-after-response",
+            processedJobs: processedJobs.length
+          }
+        });
+      } catch (error) {
+        await AutoPostConfig.findByIdAndUpdate(config._id, {
+          autoPostStatus: "failed",
+          jobStatus: "failed",
+          lastStatus: "failed",
+          lastError: error instanceof Error ? error.message : "Auto Post background publisher failed"
+        });
+        await logAndNotifyError({
+          userId,
+          message: error instanceof Error ? error.message : "Auto Post background publisher failed",
+          metadata: {
+            autoPost: true,
+            autoPostConfigId: config._id,
+            source: "manual-start-after-response",
+            action: "publish-queued-jobs"
+          },
+          error
+        });
+      }
+    });
 
     await logAction({
       userId,
@@ -115,7 +181,8 @@ export async function POST() {
         source: "manual-start",
         destination: "in-app-automation-engine",
         queued: result.queued,
-        processedJobs: result.processedJobs.length,
+        processedJobs: 0,
+        processingMode: "queued-background",
         workflowId: result.workflowId,
         workflowRunId: result.workflowRunId,
         contentItemId: result.contentItemId
@@ -126,12 +193,13 @@ export async function POST() {
       {
         started: true,
         queued: result.queued,
-        processedJobs: result.processedJobs,
+        processedJobs: [],
+        processingMode: "queued-background",
         workflowId: result.workflowId,
         workflowRunId: result.workflowRunId,
         contentItemId: result.contentItemId
       },
-      "Auto Post started successfully"
+      "Auto Post queued successfully. The publisher will run in the background."
     );
   } catch (error) {
     if (error instanceof Error && error.message === "FORBIDDEN") {

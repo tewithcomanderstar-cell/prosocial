@@ -1003,6 +1003,24 @@ function classifyPublishFailure(error: unknown) {
   const message = error instanceof Error ? error.message : "Unknown publishing error";
   const normalized = message.toLowerCase();
 
+  if (
+    normalized.includes("signal is aborted") ||
+    normalized.includes("aborterror") ||
+    normalized.includes("aborted") ||
+    normalized.includes("timed out") ||
+    normalized.includes("timeout")
+  ) {
+    return {
+      errorCode: "job_aborted_or_timeout",
+      failureReason:
+        message === "Unknown publishing error"
+          ? "Publish job was aborted or timed out before it could complete."
+          : message,
+      errorDetails: error instanceof Error ? serializeError(error) : { reason: message },
+      retryable: true
+    };
+  }
+
   if (normalized.includes("token expired") || normalized.includes("reconnect")) {
     return {
       errorCode: "token_expired",
