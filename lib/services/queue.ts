@@ -700,13 +700,11 @@ async function renderShopeeAffiliateCard(imageDoc: LeanAiGeneratedImage): Promis
   }
 
   const layout = getShopeeUgcLayout(imageDoc.promptHistory);
-  const imageUrl = imageDoc.fallbackImageUrl || product.productImageUrl || product.productImageUrls?.[0] || imageDoc.generatedImageUrl;
+  const imageUrl = imageDoc.generatedImageUrl || imageDoc.fallbackImageUrl || product.productImageUrl || product.productImageUrls?.[0];
   if (!imageUrl) {
     throw new Error("Shopee product image is missing");
   }
   const productBuffer = await fetchRemoteImageBuffer(imageUrl);
-  const scene = getShopeeProductScene(product);
-  const copy = getShopeeUgcCopy(product, layout);
   const provider = imageDoc.provider ?? "";
   const isOpenAiUgcPhoto = provider === "openai_shopee_ugc_photo";
 
@@ -721,9 +719,6 @@ async function renderShopeeAffiliateCard(imageDoc: LeanAiGeneratedImage): Promis
     .toBuffer();
 
   const output = await sharp(basePhoto)
-    .composite([
-      { input: Buffer.from(buildShopeeUgcTextSvg({ copy, scene, layout }), "utf8"), left: 0, top: 0 }
-    ])
     .jpeg({ quality: 94, mozjpeg: true })
     .toBuffer();
 

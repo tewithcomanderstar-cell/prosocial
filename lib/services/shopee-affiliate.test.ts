@@ -82,7 +82,8 @@ function testImagePromptSetCreatesFourConsistentPrompts() {
     assert.ok(item.prompt.includes(sampleProduct.productName));
     assert.ok(item.prompt.includes("Product image reference URL"));
     assert.ok(item.prompt.includes("source of truth"));
-    assert.ok(item.prompt.includes("Do not generate Thai text"));
+    assert.ok(item.prompt.includes("Thai text to place naturally in the photo"));
+    assert.ok(item.prompt.includes("no text box"));
   }
   assert.ok(promptSet.negativePrompt.includes("no fake product"));
   console.log("PASS Shopee image prompt set creates 4 consistent CTR prompts");
