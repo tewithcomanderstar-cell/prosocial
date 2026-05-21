@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { buildShopeeImagePromptSet as buildShopeeImagePromptSetCore } from "@/lib/services/shopee-affiliate-core";
-import { generateFacebookContent, generateProductReferenceImage } from "@/lib/services/ai";
+import { generateFacebookContent } from "@/lib/services/ai";
 import { logAction } from "@/lib/services/logging";
 import { randomItem } from "@/lib/utils";
 import { AffiliateLink } from "@/models/AffiliateLink";
@@ -1073,63 +1073,21 @@ export async function buildShopeePostPackage(input: {
     );
   }
 
-  const fetchSourceImageForEdit = async (url: string) => {
-    const response = await fetch(url, { cache: "no-store" });
-    if (!response.ok) {
-      throw new Error(`Unable to fetch Shopee reference image for UGC edit: ${response.status}`);
-    }
-    const contentType = response.headers.get("content-type") || "image/jpeg";
-    return {
-      bytes: await response.arrayBuffer(),
-      mimeType: contentType.includes("png") ? "image/png" : contentType.includes("webp") ? "image/webp" : "image/jpeg"
-    };
-  };
-
-  const createGeneratedUgcImageUrl = async (prompt: string, referenceUrl: string) => {
-    const reference = await fetchSourceImageForEdit(referenceUrl);
-    const generated = await generateProductReferenceImage({
-      imageBytes: reference.bytes,
-      mimeType: reference.mimeType,
-      prompt,
-      userId: input.userId
-    });
-    return `data:image/png;base64,${generated.toString("base64")}`;
-  };
-
-  const generatedUgcImageUrls: string[] = [];
-  const imageGenerationErrors: string[] = [];
-  const canUseOpenAiImageEdit = Boolean(process.env.OPENAI_API_KEY) && process.env.SHOPEE_AI_IMAGE_EDIT_ENABLED !== "false";
-
-  if (canUseOpenAiImageEdit) {
-    for (const [index, promptItem] of imagePromptSet.prompts.entries()) {
-      try {
-        const referenceUrl = sourceImageUrls[index % sourceImageUrls.length];
-        generatedUgcImageUrls.push(await createGeneratedUgcImageUrl(promptItem.prompt, referenceUrl));
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Unknown Shopee UGC image edit error";
-        imageGenerationErrors.push(`image_${index + 1}: ${message}`);
-        break;
-      }
-    }
-  }
-
-  const useGeneratedUgcImages = generatedUgcImageUrls.length === 4;
-
   const imageDocs = await AiGeneratedImage.insertMany(
     imagePromptSet.prompts.map((promptItem, index) => ({
       userId: input.userId,
       productId: input.product.productId,
       prompt: promptItem.prompt,
       status: "generated",
-      generatedImageUrl: useGeneratedUgcImages ? generatedUgcImageUrls[index] : sourceImageUrls[index % sourceImageUrls.length],
-      fallbackImageUrl: input.product.productImageUrl,
-      provider: useGeneratedUgcImages ? "openai_shopee_ugc_photo" : "shopee_source_ugc_layout",
+      generatedImageUrl: sourceImageUrls[index % sourceImageUrls.length],
+      fallbackImageUrl: input.product.productImageUrl || sourceImageUrls[0],
+      provider: "shopee_exact_source_ugc",
       promptHistory: [
         promptItem.title,
         `concept=${promptItem.concept}`,
         `layout=${index + 1}`,
-        useGeneratedUgcImages ? "source=openai-image-edit-ugc" : "source=source-image-ugc-fallback",
-        ...imageGenerationErrors.map((message) => `image_edit_error=${message}`),
+        "source=exact-shopee-product-image",
+        "thai_text=server-rendered-svg",
         imagePromptSet.negativePrompt
       ]
     }))

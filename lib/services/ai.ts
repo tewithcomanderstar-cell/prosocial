@@ -101,8 +101,8 @@ export async function generateProductReferenceImage(input: {
     "Use the provided image only as the product identity reference. Preserve the same product shape, colors, label/logo placement, proportions, and visible details.",
     "Do not invent a new product. Do not redesign, recolor, rebrand, add fake logos, or add fake reviews.",
     "The product must be large in frame, 60-85% of the image area, with natural mobile photography, realistic lighting, depth, shadow, and lifestyle context.",
-    "If the prompt contains Thai text instructions, render only that Thai text directly and naturally inside the image.",
-    "No UI elements, no price labels, no stickers, no screenshots, no floating product on a white card, no text boxes, no panels, no badges, no dark bars."
+    "Do not generate Thai text, English text, captions, labels, badges, UI elements, price labels, stickers, screenshots, text boxes, panels, or dark bars.",
+    "Thai review copy is rendered later by the server with a real Thai font to avoid unreadable or alien text."
   ].join("\n");
 
   try {
