@@ -97,12 +97,12 @@ export async function generateProductReferenceImage(input: {
 
   const safePrompt = [
     input.prompt,
-    "Create a realistic UGC product review photo, not a card, banner, poster, ecommerce thumbnail, or Canva template.",
-    "Use the provided image as the strict product source of truth. Preserve the same product shape, colors, label/logo placement, proportions, packaging text placement, and visible details as much as possible.",
-    "Do not invent a new product. Do not redesign, recolor, rebrand, repair labels, rewrite packaging text, add fake logos, or add fake reviews.",
-    "The product must be large in frame, 60-85% of the image area, with natural mobile photography, realistic lighting, depth, shadow, and lifestyle context.",
-    "Do not generate Thai text, English text, captions, labels, badges, UI elements, price labels, stickers, screenshots, text boxes, panels, dark bars, or any added explanatory text.",
-    "If you cannot preserve the brand or packaging text accurately, keep the original product image unchanged rather than hallucinating or mutating text."
+    "Create a realistic UGC / real customer review photo, not a card, banner, poster, ecommerce thumbnail, marketplace catalog, or Canva template.",
+    "Use the provided image as the strict product source of truth. Preserve the same product shape, colors, brand/logo placement, label placement, material, model, proportions, packaging layout, accessories, and visible details as much as possible.",
+    "Do not invent a new product. Do not redesign, recolor, rebrand, translate, repair labels, rewrite packaging text, add fake logos, add fake reviews, or change the product category.",
+    "The product must be large in frame, 70-85% of the image area, with natural smartphone photography, real lighting, real shadows, believable depth, and lifestyle context.",
+    "Do not generate Thai text, English text, captions, headlines, labels, badges, UI elements, price labels, stickers, screenshots, text boxes, panels, overlays, borders, dark bars, navy rectangles, or any added explanatory text.",
+    "If you cannot preserve the brand or packaging text accurately, keep the original product area visually close to the reference or softly out of focus rather than hallucinating alien text."
   ].join("\n");
 
   try {
