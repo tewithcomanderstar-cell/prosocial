@@ -46,7 +46,11 @@ export function getLightweightModel() {
 }
 
 export function getImageModel() {
-  return process.env.OPENAI_IMAGE_MODEL || "gpt-image-1";
+  return process.env.OPENAI_IMAGE_MODEL?.trim() || "gpt-image-1";
+}
+
+function isSupportedImageEditModel(model: string) {
+  return model === "gpt-image-1" || model === "gpt-image-2";
 }
 
 function getSafeOpenAiErrorDetails(error: unknown) {
@@ -96,8 +100,9 @@ export async function generateProductReferenceImage(input: {
   if (process.env.SHOPEE_AI_IMAGE_EDIT_ENABLED === "false") {
     throw new Error("OpenAI image edit is disabled: SHOPEE_AI_IMAGE_EDIT_ENABLED=false");
   }
-  if (getImageModel() !== "gpt-image-1") {
-    throw new Error(`OpenAI image edit model is invalid for Shopee UGC: set OPENAI_IMAGE_MODEL=gpt-image-1, current=${getImageModel()}`);
+  const imageModel = getImageModel();
+  if (!isSupportedImageEditModel(imageModel)) {
+    throw new Error(`OpenAI image edit model is invalid for Shopee UGC: set OPENAI_IMAGE_MODEL to gpt-image-1 or gpt-image-2, current=${imageModel}`);
   }
 
   const safePrompt = [
@@ -124,7 +129,7 @@ export async function generateProductReferenceImage(input: {
     const imageInput = productFiles.length === 1 ? productFiles[0] : productFiles;
 
     const result = await client.images.edit({
-      model: getImageModel(),
+      model: imageModel,
       image: imageInput,
       prompt: safePrompt,
       size: "1024x1024",
@@ -145,9 +150,9 @@ export async function generateProductReferenceImage(input: {
       status,
       code,
       type,
-      model: getImageModel()
+      model: imageModel
     });
-    throw new Error(`OpenAI image edit failed: ${message} (status=${status}, code=${code}, type=${type}, model=${getImageModel()})`);
+    throw new Error(`OpenAI image edit failed: ${message} (status=${status}, code=${code}, type=${type}, model=${imageModel})`);
   }
 }
 
