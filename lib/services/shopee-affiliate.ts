@@ -792,6 +792,30 @@ function getSafeHostname(value: string) {
   }
 }
 
+const TH = {
+  note: "\u0e2b\u0e21\u0e32\u0e22\u0e40\u0e2b\u0e15\u0e38",
+  affiliateReview: "\u0e23\u0e35\u0e27\u0e34\u0e27\u0e2a\u0e34\u0e19\u0e04\u0e49\u0e32",
+  usefulItem: "\u0e02\u0e2d\u0e07\u0e19\u0e48\u0e32\u0e43\u0e0a\u0e49",
+  interestedCta: "\u0e43\u0e04\u0e23\u0e2a\u0e19\u0e43\u0e08\u0e25\u0e2d\u0e07\u0e14\u0e39\u0e44\u0e14\u0e49\u0e04\u0e23\u0e31\u0e1a",
+  detailsCta: "\u0e25\u0e2d\u0e07\u0e14\u0e39\u0e23\u0e32\u0e22\u0e25\u0e30\u0e40\u0e2d\u0e35\u0e22\u0e14\u0e44\u0e14\u0e49\u0e40\u0e25\u0e22",
+  linkCta: "\u0e41\u0e1b\u0e30\u0e25\u0e34\u0e07\u0e01\u0e4c\u0e44\u0e27\u0e49\u0e43\u0e2b\u0e49\u0e14\u0e49\u0e32\u0e19\u0e25\u0e48\u0e32\u0e07\u0e04\u0e23\u0e31\u0e1a",
+  moreCta: "\u0e25\u0e2d\u0e07\u0e01\u0e14\u0e14\u0e39\u0e40\u0e1e\u0e34\u0e48\u0e21\u0e40\u0e15\u0e34\u0e21\u0e44\u0e14\u0e49\u0e40\u0e25\u0e22",
+  categoryPrefix: "\u0e2a\u0e32\u0e22 ",
+  realUse: "\u0e43\u0e0a\u0e49\u0e07\u0e32\u0e19\u0e08\u0e23\u0e34\u0e07",
+  easyDetails: "\u0e23\u0e32\u0e22\u0e25\u0e30\u0e40\u0e2d\u0e35\u0e22\u0e14\u0e14\u0e39\u0e07\u0e48\u0e32\u0e22",
+  approxPrice: "\u0e23\u0e32\u0e04\u0e32\u0e2d\u0e22\u0e39\u0e48\u0e1b\u0e23\u0e30\u0e21\u0e32\u0e13 ",
+  baht: " \u0e1a\u0e32\u0e17",
+  discountAbout: " \u0e15\u0e2d\u0e19\u0e19\u0e35\u0e49\u0e25\u0e14\u0e1b\u0e23\u0e30\u0e21\u0e32\u0e13 ",
+  reviewFeelingStart: "\u0e1f\u0e35\u0e25\u0e43\u0e0a\u0e49\u0e07\u0e32\u0e19\u0e08\u0e23\u0e34\u0e07\u0e14\u0e39\u0e19\u0e48\u0e32\u0e43\u0e0a\u0e49 \u0e40\u0e2b\u0e21\u0e32\u0e30\u0e01\u0e31\u0e1a",
+  reviewFeelingEnd: " \u0e23\u0e32\u0e22\u0e25\u0e30\u0e40\u0e2d\u0e35\u0e22\u0e14\u0e44\u0e21\u0e48\u0e40\u0e22\u0e2d\u0e30\u0e40\u0e01\u0e34\u0e19 \u0e2d\u0e48\u0e32\u0e19\u0e41\u0e25\u0e49\u0e27\u0e15\u0e31\u0e14\u0e2a\u0e34\u0e19\u0e43\u0e08\u0e07\u0e48\u0e32\u0e22 \uD83D\uDC4D",
+  discountBullet: "- \u0e2a\u0e48\u0e27\u0e19\u0e25\u0e14\u0e1b\u0e23\u0e30\u0e21\u0e32\u0e13 ",
+  ratingBullet: "- \u0e04\u0e30\u0e41\u0e19\u0e19\u0e23\u0e35\u0e27\u0e34\u0e27 ",
+  salesBullet: "- \u0e22\u0e2d\u0e14\u0e02\u0e32\u0e22 ",
+  pieces: " \u0e0a\u0e34\u0e49\u0e19",
+  categoryBullet: "- \u0e40\u0e2b\u0e21\u0e32\u0e30\u0e01\u0e31\u0e1a\u0e2b\u0e21\u0e27\u0e14 ",
+  defaultProductName: "\u0e2a\u0e34\u0e19\u0e04\u0e49\u0e32 Shopee \u0e17\u0e35\u0e48\u0e19\u0e48\u0e32\u0e2a\u0e19\u0e43\u0e08"
+};
+
 const SHOPEE_HARD_SELL_PATTERNS = [
   /สินค้าคุณภาพดี/gi,
   /โปรโมชั่นสุดคุ้ม/gi,
@@ -802,26 +826,34 @@ const SHOPEE_HARD_SELL_PATTERNS = [
   /รีบกดก่อนหมด/gi,
   /ของมันต้องมี/gi,
   /ซื้อเลยตอนนี้/gi,
-  /สั่งเลย/gi,
   /ห้ามพลาด/gi,
+  /ลดกระหน่ำ/gi,
   /คุ้มสุด/gi
 ];
 
-const SHOPEE_SOFT_CTAS = [
-  "ใครกำลังหาอยู่ ลองดูรายละเอียดได้เลยครับ",
-  "แปะลิงก์ไว้ให้ เผื่ออยากดูรูปกับรายละเอียดเพิ่ม",
-  "ใครสนใจแนวนี้ ลองเข้าไปดูเพิ่มเติมได้ครับ",
-  "กดดูรายละเอียดเพิ่มได้ตรงนี้เลย",
-  "ถ้ากำลังเล็งของแนวนี้ ลองดูตัวนี้ไว้ก่อนครับ"
+const SHOPEE_FORBIDDEN_OPENERS = [
+  /^เข้าใจแล้วว่าทำไม/i,
+  /^ตอนแรกคิดว่า/i,
+  /^ตอนแรกไม่ได้/i,
+  /^อันนี้คือ/i,
+  /^เห็นคนรีวิวเยอะ/i,
+  /^ใช้แล้วเข้าใจเลย/i,
+  /^ของจริงสวยกว่า/i,
+  /^โคตรเหมาะกับ/i,
+  /^ใครกำลังหา.*ลองดูตัวนี้ก่อน/i,
+  /^Stop scrolling/i,
+  /^Here are Shopee finds/i
 ];
 
-const SHOPEE_HOOKS = [
-  "ตอนแรกไม่ได้คาดหวัง แต่พอดูรายละเอียดแล้วน่าสนใจกว่าที่คิด 😳",
-  "เข้าใจแล้วว่าทำไมคนกดดูกันเยอะ",
-  "อันนี้เหมาะกับคนที่กำลังหาของใช้ง่าย ๆ ในชีวิตประจำวัน",
-  "เห็นคนรีวิวเยอะเลยลองหยิบมาดู สรุปว่าน่าใช้จริง",
-  "ใครกำลังหาของแนวนี้ ลองดูตัวนี้ก่อน"
+const SHOPEE_SOFT_CTAS = [
+  TH.interestedCta,
+  TH.detailsCta,
+  TH.linkCta,
+  TH.moreCta,
+  "ใครสนใจลองดูรายละเอียดได้ครับ"
 ];
+
+const SHOPEE_HASHTAG_FALLBACKS = ["#" + TH.affiliateReview, "#Shopee", "#" + TH.usefulItem];
 
 function randomText(items: string[]) {
   return items[Math.floor(Math.random() * items.length)] ?? items[0] ?? "";
@@ -830,17 +862,16 @@ function randomText(items: string[]) {
 function compactProductText(value?: string, max = 92) {
   const normalized = (value ?? "").replace(/https?:\/\/\S+/gi, "").replace(/\s+/g, " ").trim();
   if (!normalized) return "";
-  return normalized.length > max ? `${normalized.slice(0, max).replace(/\s+\S*$/, "")}...` : normalized;
+  return normalized.length > max ? normalized.slice(0, max).replace(/\s+\S*$/, "") + "..." : normalized;
 }
 
 function stripForbiddenAffiliateDisclosure(caption: string) {
   return caption
-    .replace(/à¸«à¸¡à¸²à¸¢à¹€à¸«à¸•à¸¸/gi, "หมายเหตุ")
     .split(/\r?\n/)
     .filter((line) => {
       const normalized = line.trim().toLowerCase();
       if (!normalized) return true;
-      return !normalized.includes("หมายเหตุ") && !normalized.includes("affiliate");
+      return !normalized.includes(TH.note) && !normalized.includes("affiliate");
     })
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
@@ -854,76 +885,158 @@ function removeHardSellPhrases(caption: string) {
     .trim();
 }
 
-function limitHashtags(lines: string[]) {
-  const output: string[] = [];
-  let hashtagCount = 0;
+function normalizeHashtagToken(value: string) {
+  const cleaned = value.replace(/^#+/, "").replace(/[^\p{L}\p{N}_-]/gu, "").trim();
+  return cleaned ? "#" + cleaned : "";
+}
+
+function buildRelevantShopeeHashtags(product: ShopeeProductRecord) {
+  const candidates = [
+    product.category,
+    product.shopId ? "Shopee" : "",
+    product.productName.split(/\s+/).find((part) => /[\p{L}\p{N}]/u.test(part) && part.length >= 3),
+    TH.affiliateReview,
+    TH.usefulItem
+  ];
+  const tags = candidates
+    .map((item) => normalizeHashtagToken(String(item ?? "")))
+    .filter(Boolean);
+  return Array.from(new Set(tags)).slice(0, 5);
+}
+
+function extractHashtags(lines: string[], product?: ShopeeProductRecord) {
+  const tags: string[] = [];
+  const contentLines: string[] = [];
   for (const line of lines) {
-    const tags = line.match(/#[^\s#]+/g) ?? [];
-    if (tags.length === 0) {
-      output.push(line);
-      continue;
-    }
-    const allowed = tags.slice(0, Math.max(0, 2 - hashtagCount));
-    hashtagCount += allowed.length;
+    const matches = line.match(/#[^\s#]+/g) ?? [];
+    if (matches.length) tags.push(...matches.map(normalizeHashtagToken).filter(Boolean));
     const withoutTags = line.replace(/#[^\s#]+/g, "").trim();
-    if (withoutTags) output.push(withoutTags);
-    if (allowed.length) output.push(allowed.join(" "));
+    if (withoutTags) contentLines.push(withoutTags);
   }
-  return output;
+  const fallback = product ? buildRelevantShopeeHashtags(product) : SHOPEE_HASHTAG_FALLBACKS;
+  return {
+    contentLines,
+    hashtags: Array.from(new Set([...tags, ...fallback])).slice(0, 5)
+  };
 }
 
 function hasSoftCta(caption: string) {
-  return /(ลองดู|ดูรายละเอียด|แปะลิงก์|กดดู|เข้าไปดู|เผื่ออยากดู|สนใจ)/i.test(caption);
+  return /(ลองดู|สนใจ|รายละเอียด|ลิงก์|เพิ่มเติม|ด้านล่าง|กดดู)/i.test(caption);
+}
+
+function removeOldShopeeHookLines(lines: string[]) {
+  return lines.filter((line, index) => {
+    const trimmed = line.trim();
+    if (!trimmed) return true;
+    if (index > 2) return true;
+    return !SHOPEE_FORBIDDEN_OPENERS.some((pattern) => pattern.test(trimmed));
+  });
+}
+
+function buildShopeeReviewFeeling(product: ShopeeProductRecord) {
+  const category = product.category ? TH.categoryPrefix + product.category : TH.realUse;
+  const price = product.discountPrice || product.productPrice;
+  const priceText = price ? TH.approxPrice + price.toLocaleString("th-TH") + TH.baht : TH.easyDetails;
+  const discountText = product.discountPercent ? TH.discountAbout + product.discountPercent + "%" : "";
+  return TH.reviewFeelingStart + category + " " + priceText + discountText + TH.reviewFeelingEnd;
+}
+
+function buildShopeeDetailBullets(product: ShopeeProductRecord) {
+  const bullets = [
+    product.discountPercent ? TH.discountBullet + product.discountPercent + "%" : "",
+    product.rating ? TH.ratingBullet + product.rating + "/5" : "",
+    product.salesCount ? TH.salesBullet + product.salesCount.toLocaleString("th-TH") + TH.pieces : "",
+    product.category ? TH.categoryBullet + product.category : "",
+    product.productDescription ? "- " + compactProductText(product.productDescription, 64) : ""
+  ].filter(Boolean);
+  return bullets.slice(0, 3);
 }
 
 export function buildShopeeFallbackCaption(product: ShopeeProductRecord, shopeeShortUrl: string) {
-  const price = product.discountPrice || product.productPrice;
-  const review = compactProductText(product.productDescription, 120);
-  const bullets = [
-    product.discountPercent ? `✅ ลดประมาณ ${product.discountPercent}%` : price ? `✅ ราคาเริ่มที่ ${price.toLocaleString("th-TH")} บาท` : "",
-    product.rating ? `✅ คะแนน ${product.rating}/5` : "",
-    product.salesCount ? `✅ คนกดซื้อแล้ว ${product.salesCount.toLocaleString("th-TH")} ชิ้น` : "",
-    product.category ? `✅ เหมาะกับสาย ${product.category}` : ""
-  ].filter(Boolean).slice(0, 3);
-
   return sanitizeShopeeCaption(
     [
-      randomText(SHOPEE_HOOKS),
-      review || `${product.productName} เป็นอีกตัวที่ดูใช้ง่าย รายละเอียดไม่เยอะเกิน และเหมาะกับคนที่อยากเช็กก่อนตัดสินใจ`,
+      product.productName,
       "",
-      ...bullets,
+      buildShopeeReviewFeeling(product),
+      "",
+      ...buildShopeeDetailBullets(product),
       "",
       randomText(SHOPEE_SOFT_CTAS),
-      shopeeShortUrl
+      "",
+      shopeeShortUrl,
+      "",
+      buildRelevantShopeeHashtags(product).join(" ")
     ].join("\n"),
-    shopeeShortUrl
+    shopeeShortUrl,
+    product
   );
 }
 
-export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string) {
+export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string, product?: ShopeeProductRecord) {
   const withoutForbidden = removeHardSellPhrases(stripForbiddenAffiliateDisclosure(caption))
     .replace(/https?:\/\/prosocial-app-theta\.vercel\.app\/\S+/gi, "")
     .replace(/https?:\/\/[^ \n]*\/api\/s\/\S+/gi, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-  const lines = withoutForbidden
+
+  const rawLines = withoutForbidden
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line && line !== shopeeShortUrl && !/^Shopee\s*Link\s*:/i.test(line));
-  const limitedLines = limitHashtags(lines).slice(0, 9);
-  let base = limitedLines.join("\n").trim();
 
-  if (!hasSoftCta(base)) {
-    base = `${base}\n${randomText(SHOPEE_SOFT_CTAS)}`.trim();
-  }
-  if (base.length > 630) {
-    base = `${base.slice(0, 627).replace(/\s+\S*$/, "")}...`;
-  }
+  const noOldHooks = removeOldShopeeHookLines(rawLines);
+  const { contentLines, hashtags } = extractHashtags(noOldHooks, product);
+  const productName = product?.productName?.trim() || contentLines[0] || TH.defaultProductName;
+  const bodyLines = contentLines.filter((line) => line !== productName).slice(0, 7);
 
-  return `${base}\n${shopeeShortUrl}`
+  const reviewLine = compactProductText(
+    bodyLines.find((line) => !line.startsWith("-") && !hasSoftCta(line)) ||
+      buildShopeeReviewFeeling(product ?? ({ productName } as ShopeeProductRecord)),
+    180
+  );
+  const bulletLines = bodyLines.filter((line) => line.startsWith("-")).map((line) => compactProductText(line, 90)).slice(0, 3);
+  const ctaLine = compactProductText(bodyLines.find((line) => hasSoftCta(line)) || randomText(SHOPEE_SOFT_CTAS), 90);
+  const details = bulletLines.length ? bulletLines : product ? buildShopeeDetailBullets(product) : [];
+
+  const finalLines = [
+    productName,
+    "",
+    reviewLine,
+    "",
+    ...details,
+    "",
+    ctaLine,
+    "",
+    shopeeShortUrl,
+    "",
+    hashtags.join(" ")
+  ];
+
+  const normalizedCaption = finalLines
+    .join("\n")
     .replace(/\n{3,}/g, "\n\n")
-    .trim()
-    .slice(0, 700);
+    .trim();
+
+  if (normalizedCaption.length <= 700) {
+    return normalizedCaption;
+  }
+
+  return [
+    productName,
+    "",
+    compactProductText(reviewLine, 140),
+    "",
+    ...details.slice(0, 2).map((line) => compactProductText(line, 78)),
+    "",
+    ctaLine,
+    "",
+    shopeeShortUrl,
+    "",
+    hashtags.join(" ")
+  ]
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 export async function createOrReuseAffiliateShortLink(input: {
   userId: string;
@@ -1209,91 +1322,53 @@ export async function generateShopeeCaption(input: {
 }) {
   const { product } = input;
   const priceLine = product.discountPrice
-    ? `ราคาโปร: ${product.discountPrice.toLocaleString("th-TH")} บาท${product.discountPercent ? ` ลดประมาณ ${product.discountPercent}%` : ""}`
+    ? `\u0e23\u0e32\u0e04\u0e32\u0e42\u0e1b\u0e23: ${product.discountPrice.toLocaleString("th-TH")} \u0e1a\u0e32\u0e17${product.discountPercent ? ` \u0e25\u0e14\u0e1b\u0e23\u0e30\u0e21\u0e32\u0e13 ${product.discountPercent}%` : ""}`
     : product.productPrice
-      ? `ราคา: ${product.productPrice.toLocaleString("th-TH")} บาท`
-      : "ราคา: ดูรายละเอียดในลิงก์";
-  const audience = product.category || "คนที่กำลังหาของแนวนี้";
+      ? `\u0e23\u0e32\u0e04\u0e32: ${product.productPrice.toLocaleString("th-TH")} \u0e1a\u0e32\u0e17`
+      : "\u0e23\u0e32\u0e04\u0e32: \u0e14\u0e39\u0e23\u0e32\u0e22\u0e25\u0e30\u0e40\u0e2d\u0e35\u0e22\u0e14\u0e43\u0e19\u0e25\u0e34\u0e07\u0e01\u0e4c";
+  const audience = product.category || "\u0e04\u0e19\u0e17\u0e35\u0e48\u0e01\u0e33\u0e25\u0e31\u0e07\u0e2b\u0e32\u0e02\u0e2d\u0e07\u0e41\u0e19\u0e27\u0e19\u0e35\u0e49";
   const fallback = buildShopeeFallbackCaption(product, input.affiliateLink);
 
-  const customPrompt = `คุณคือ AI เขียนโพสต์รีวิวสินค้า Shopee สำหรับ Facebook Page
-
-เขียนให้เหมือนคนใช้งานจริงมาแชร์ประสบการณ์สินค้า
-โทนธรรมชาติ อ่านง่าย เหมือนโพสต์ใน Facebook feed / TikTok Shop review
-ไม่เป็นทางการ ไม่ใช่บทความ SEO ไม่ใช่โบรชัวร์ ไม่ใช่ประกาศขายของ
-
-CONTENT STYLE:
-- Social commerce
-- UGC review
-- Real customer feeling
-- Casual conversational Thai
-- Emotional hook opening
-- Soft sell
-- Natural CTA
-
-STRUCTURE ที่ต้องใช้:
-1. Hook เปิดแรง 1-2 บรรทัด ให้หยุดอ่าน
-2. รีวิวธรรมชาติ 2-4 บรรทัด เหมือนคนลองใช้/กำลังเล็งแล้วมาแชร์
-3. Bullet จุดเด่นไม่เกิน 3 ข้อ สั้นมาก
-4. CTA ธรรมชาติ 1 บรรทัด
-5. ปิดท้ายด้วย Shopee short link เท่านั้น
-
-ตัวอย่าง Hook ที่ใช้เป็นแนวทาง:
-- ตอนแรกไม่ได้คาดหวัง แต่พอใช้จริงคือดีเกินราคา 😳
-- เข้าใจแล้วว่าทำไมคนซื้อเยอะ
-- อันนี้คือซื้อมาแล้วใช้จริงทุกวัน
-- ของจริงสวยกว่าที่คิดมาก
-- เห็นคนรีวิวเยอะเลยลอง สรุปคือ…
-- ใช้แล้วเข้าใจเลยว่าทำไมขายดี
-- ใครกำลังหาของแนวนี้ ลองดูตัวนี้ก่อน
-- ตอนแรกคิดว่าธรรมดา แต่เอาจริงคือ…
-
-CTA ที่ใช้ได้:
-- ใครกำลังหาอยู่ ลองดูได้เลย
-- แปะลิงก์ไว้ให้ด้านล่าง
-- ดูรายละเอียดเพิ่มได้ตรงนี้
-- ลองเข้าไปดูเพิ่มเติมได้ครับ
-- ใครสนใจลองดูได้เลย
-- กดดูรูปเพิ่มเติมได้ในลิงก์
-
-ห้ามใช้คำ/สไตล์นี้:
-- ภาษาทางการ
-- SEO article
-- ขายตรงแข็ง ๆ
-- keyword stuffing
-- hashtag เยอะ
-- โทน corporate / brochure / marketplace catalog
-- สินค้าคุณภาพดี
-- โปรโมชั่นสุดคุ้ม
-- รีบสั่งซื้อ
-- พลาดไม่ได้
-- รีบซื้อด่วน
-- โปรโมชั่นห้ามพลาด
-- รีบกดก่อนหมด
-- ของมันต้องมี
-- ซื้อเลยตอนนี้
-- คำว่า affiliate
-- คำว่า หมายเหตุ
-
-ข้อมูลสินค้า:
-ชื่อสินค้า: ${product.productName}
-หมวดหมู่: ${product.category || "-"}
-จุดเด่น/รายละเอียด: ${product.productDescription || "-"}
-ราคา: ${priceLine}
-ยอดขาย: ${product.salesCount ?? "-"}
-รีวิว: ${product.reviewCount ?? "-"}
-คะแนน: ${product.rating ?? "-"}
-เหมาะกับ: ${audience}
-Shopee Link: ${input.affiliateLink}
-
-ข้อบังคับ:
-- ไม่เกิน 700 ตัวอักษร
-- ไม่เกิน 10 บรรทัด
-- bullet ไม่เกิน 3 ข้อ
-- ถ้ามี hashtag ให้ไม่เกิน 2 อัน และห้ามอยู่หลังลิงก์
-- ลิงก์ท้ายโพสต์ต้องเป็น ${input.affiliateLink}
-- ห้ามใช้ลิงก์ domain อื่น
-- Return caption only inside JSON variants[].caption. Hashtags can be empty.`;
+  const customPrompt = [
+    "\u0e40\u0e02\u0e35\u0e22\u0e19\u0e42\u0e1e\u0e2a\u0e15\u0e4c\u0e23\u0e35\u0e27\u0e34\u0e27\u0e2a\u0e34\u0e19\u0e04\u0e49\u0e32 Shopee Affiliate \u0e41\u0e1a\u0e1a\u0e18\u0e23\u0e23\u0e21\u0e0a\u0e32\u0e15\u0e34\u0e2a\u0e33\u0e2b\u0e23\u0e31\u0e1a Facebook",
+    "",
+    "Required format:",
+    `1. \u0e1a\u0e23\u0e23\u0e17\u0e31\u0e14\u0e41\u0e23\u0e01\u0e15\u0e49\u0e2d\u0e07\u0e40\u0e1b\u0e47\u0e19\u0e0a\u0e37\u0e48\u0e2d\u0e2a\u0e34\u0e19\u0e04\u0e49\u0e32\u0e40\u0e17\u0e48\u0e32\u0e19\u0e31\u0e49\u0e19: ${product.productName}`,
+    "2. \u0e22\u0e48\u0e2d\u0e2b\u0e19\u0e49\u0e32\u0e16\u0e31\u0e14\u0e44\u0e1b\u0e40\u0e1b\u0e47\u0e19\u0e1f\u0e34\u0e25\u0e25\u0e34\u0e48\u0e07/\u0e23\u0e35\u0e27\u0e34\u0e27\u0e41\u0e1a\u0e1a\u0e18\u0e23\u0e23\u0e21\u0e0a\u0e32\u0e15\u0e34 1-2 \u0e1a\u0e23\u0e23\u0e17\u0e31\u0e14",
+    "3. \u0e43\u0e2a\u0e48 bullet \u0e23\u0e32\u0e22\u0e25\u0e30\u0e40\u0e2d\u0e35\u0e22\u0e14/\u0e08\u0e38\u0e14\u0e40\u0e14\u0e48\u0e19 1-3 \u0e02\u0e49\u0e2d \u0e42\u0e14\u0e22\u0e02\u0e36\u0e49\u0e19\u0e15\u0e49\u0e19\u0e14\u0e49\u0e27\u0e22 -",
+    "4. \u0e43\u0e2a\u0e48 CTA \u0e41\u0e1a\u0e1a\u0e18\u0e23\u0e23\u0e21\u0e0a\u0e32\u0e15\u0e34 1 \u0e1a\u0e23\u0e23\u0e17\u0e31\u0e14",
+    `5. \u0e43\u0e2a\u0e48 Shopee short link \u0e1a\u0e23\u0e23\u0e17\u0e31\u0e14\u0e16\u0e31\u0e14\u0e44\u0e1b: ${input.affiliateLink}`,
+    "6. hashtags 3-5 \u0e2d\u0e31\u0e19\u0e15\u0e49\u0e2d\u0e07\u0e2d\u0e22\u0e39\u0e48\u0e1a\u0e23\u0e23\u0e17\u0e31\u0e14\u0e2a\u0e38\u0e14\u0e17\u0e49\u0e32\u0e22\u0e40\u0e17\u0e48\u0e32\u0e19\u0e31\u0e49\u0e19",
+    "",
+    "Style: Facebook organic review, TikTok Shop review, UGC review, casual Thai, human-written feeling.",
+    "",
+    "Forbidden opening lines:",
+    "- \u0e40\u0e02\u0e49\u0e32\u0e43\u0e08\u0e41\u0e25\u0e49\u0e27\u0e27\u0e48\u0e32\u0e17\u0e33\u0e44\u0e21",
+    "- \u0e15\u0e2d\u0e19\u0e41\u0e23\u0e01\u0e04\u0e34\u0e14\u0e27\u0e48\u0e32",
+    "- \u0e15\u0e2d\u0e19\u0e41\u0e23\u0e01\u0e44\u0e21\u0e48\u0e44\u0e14\u0e49",
+    "- \u0e2d\u0e31\u0e19\u0e19\u0e35\u0e49\u0e04\u0e37\u0e2d",
+    "- \u0e40\u0e2b\u0e47\u0e19\u0e04\u0e19\u0e23\u0e35\u0e27\u0e34\u0e27\u0e40\u0e22\u0e2d\u0e30",
+    "- \u0e43\u0e0a\u0e49\u0e41\u0e25\u0e49\u0e27\u0e40\u0e02\u0e49\u0e32\u0e43\u0e08\u0e40\u0e25\u0e22",
+    "- \u0e02\u0e2d\u0e07\u0e08\u0e23\u0e34\u0e07\u0e2a\u0e27\u0e22\u0e01\u0e27\u0e48\u0e32",
+    "- \u0e42\u0e04\u0e15\u0e23\u0e40\u0e2b\u0e21\u0e32\u0e30\u0e01\u0e31\u0e1a",
+    "- Stop scrolling",
+    "- Here are Shopee finds",
+    "",
+    "Forbidden words/phrases: affiliate, \u0e2b\u0e21\u0e32\u0e22\u0e40\u0e2b\u0e15\u0e38, internal redirect URL, hard-sell CTA.",
+    "",
+    "Product facts:",
+    `Product name: ${product.productName}`,
+    `Category: ${product.category || "-"}`,
+    `Description/features: ${product.productDescription || "-"}`,
+    `Price: ${priceLine}`,
+    `Sales count: ${product.salesCount ?? "-"}`,
+    `Review count: ${product.reviewCount ?? "-"}`,
+    `Rating: ${product.rating ?? "-"}`,
+    `Audience: ${audience}`,
+    `Shopee short link: ${input.affiliateLink}`,
+    "",
+    "Rules: max 700 characters, max 10 non-empty lines, Shopee link must be exact, hashtags bottom-most only. Return caption only inside JSON variants[].caption. Hashtags can be empty."
+  ].join("\n");
 
   try {
     const variants = await generateFacebookContent(product.productName, {
@@ -1315,13 +1390,12 @@ Shopee Link: ${input.affiliateLink}
     const withLink = chosen.caption.includes(input.affiliateLink)
       ? chosen.caption
       : `${chosen.caption.trim()}\n${input.affiliateLink}`;
-    const sanitized = sanitizeShopeeCaption(withLink, input.affiliateLink);
+    const sanitized = sanitizeShopeeCaption(withLink, input.affiliateLink, product);
     return sanitized.length > input.affiliateLink.length + 20 ? sanitized : fallback;
   } catch {
     return fallback;
   }
 }
-
 async function fetchShopeeReferenceImage(url: string) {
   const response = await fetch(url, { cache: "no-store" });
   if (!response.ok) {

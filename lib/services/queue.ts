@@ -741,6 +741,7 @@ async function validateShopeeAffiliatePublishPayload(input: {
   const reasons: string[] = [];
   const shopeeLinkMatch = input.message.match(/https:\/\/s\.shopee\.co\.th\/\S+/);
   const payloadAffiliateLink = typeof input.job.payload?.affiliateLink === "string" ? input.job.payload.affiliateLink : "";
+  const payloadProductName = typeof input.job.payload?.shopeeProductName === "string" ? input.job.payload.shopeeProductName.trim() : "";
   const hardSellPatterns = [
     /สินค้าคุณภาพดี/i,
     /โปรโมชั่นสุดคุ้ม/i,
@@ -752,6 +753,24 @@ async function validateShopeeAffiliatePublishPayload(input: {
     /ของมันต้องมี/i,
     /ซื้อเลยตอนนี้/i
   ];
+  const forbiddenOpeners = [
+    /^เข้าใจแล้วว่าทำไม/i,
+    /^ตอนแรกคิดว่า/i,
+    /^ตอนแรกไม่ได้/i,
+    /^อันนี้คือ/i,
+    /^เห็นคนรีวิวเยอะ/i,
+    /^ใช้แล้วเข้าใจเลย/i,
+    /^ของจริงสวยกว่า/i,
+    /^โคตรเหมาะกับ/i,
+    /^Stop scrolling/i,
+    /^Here are Shopee finds/i
+  ];
+  const nonEmptyLines = input.message
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const firstHashtagLineIndex = nonEmptyLines.findIndex((line) => /#[^\s#]+/.test(line));
+  const linkLineIndex = nonEmptyLines.findIndex((line) => /https:\/\/s\.shopee\.co\.th\/\S+/.test(line));
   const hashtagCount = input.message.match(/#[^\s#]+/g)?.length ?? 0;
 
   if (input.imageCount !== 4) {
@@ -778,8 +797,23 @@ async function validateShopeeAffiliatePublishPayload(input: {
   if (hardSellPatterns.some((pattern) => pattern.test(input.message))) {
     reasons.push("Caption contains hard-sell wording that is not allowed for Shopee UGC review style");
   }
-  if (hashtagCount > 2) {
-    reasons.push(`Caption has too many hashtags (${hashtagCount}/2 max)`);
+  if (payloadProductName && nonEmptyLines[0] !== payloadProductName) {
+    reasons.push("Caption first line must be the Shopee product name");
+  }
+  if (forbiddenOpeners.some((pattern) => pattern.test(nonEmptyLines[0] ?? ""))) {
+    reasons.push("Caption starts with a forbidden old hook style");
+  }
+  if (linkLineIndex === -1) {
+    reasons.push("Caption must place the Shopee short link before hashtags");
+  }
+  if (firstHashtagLineIndex !== -1 && firstHashtagLineIndex !== nonEmptyLines.length - 1) {
+    reasons.push("Hashtags must be on the final line only");
+  }
+  if (firstHashtagLineIndex !== -1 && linkLineIndex !== -1 && firstHashtagLineIndex < linkLineIndex) {
+    reasons.push("Hashtags must be placed after the Shopee short link");
+  }
+  if (hashtagCount > 5) {
+    reasons.push(`Caption has too many hashtags (${hashtagCount}/5 max)`);
   }
 
   if (reasons.length === 0) {

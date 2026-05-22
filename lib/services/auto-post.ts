@@ -699,6 +699,7 @@ async function queueShopeeAutoPostsForConfig(
             autoPostConfigId: config._id,
             autoSource: "shopee-affiliate",
             shopeeProductId: selected.product.productId,
+            shopeeProductName: selected.product.productName,
             shopeeProductScore: selected.score.productScore,
             shopeeSelectionReason: selected.score.reason,
             affiliateLink: packageResult.shortAffiliateLink,
