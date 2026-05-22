@@ -58,10 +58,11 @@ function getSafeOpenAiErrorDetails(error: unknown) {
   return { message, status, code, type };
 }
 
-function getReferenceImageFileName(mimeType: string) {
-  if (mimeType.includes("jpeg") || mimeType.includes("jpg")) return "shopee-product-reference.jpg";
-  if (mimeType.includes("webp")) return "shopee-product-reference.webp";
-  return "shopee-product-reference.png";
+function getReferenceImageFileName(mimeType: string, index = 0) {
+  const suffix = index > 0 ? `-${index + 1}` : "";
+  if (mimeType.includes("jpeg") || mimeType.includes("jpg")) return `shopee-product-reference${suffix}.jpg`;
+  if (mimeType.includes("webp")) return `shopee-product-reference${suffix}.webp`;
+  return `shopee-product-reference${suffix}.png`;
 }
 
 function extractJson(text: string) {
@@ -84,6 +85,10 @@ export async function generateProductReferenceImage(input: {
   mimeType: string;
   prompt: string;
   userId?: string;
+  referenceImages?: Array<{
+    imageBytes: ArrayBuffer;
+    mimeType: string;
+  }>;
 }) {
   if (!process.env.OPENAI_API_KEY) {
     throw new Error("OpenAI image edit is not configured: missing OPENAI_API_KEY");
@@ -107,13 +112,20 @@ export async function generateProductReferenceImage(input: {
   ].join("\n");
 
   try {
-    const productFile = await toFile(Buffer.from(input.imageBytes), getReferenceImageFileName(input.mimeType), {
-      type: input.mimeType || "image/png"
-    });
+    const referenceInputs = [
+      { imageBytes: input.imageBytes, mimeType: input.mimeType },
+      ...(input.referenceImages ?? [])
+    ].slice(0, 16);
+    const productFiles = await Promise.all(referenceInputs.map((reference, index) => toFile(
+      Buffer.from(reference.imageBytes),
+      getReferenceImageFileName(reference.mimeType, index),
+      { type: reference.mimeType || "image/png" }
+    )));
+    const imageInput = productFiles.length === 1 ? productFiles[0] : productFiles;
 
     const result = await client.images.edit({
       model: getImageModel(),
-      image: productFile,
+      image: imageInput,
       prompt: safePrompt,
       size: "1024x1024",
       quality: "medium",

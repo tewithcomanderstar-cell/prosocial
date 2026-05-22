@@ -648,11 +648,7 @@ async function renderShopeeAffiliateCard(imageDoc: LeanAiGeneratedImage): Promis
   }
 
   const layout = getShopeeUgcLayout(imageDoc.promptHistory);
-  const provider = imageDoc.provider ?? "";
-  const shouldIgnoreGeneratedImage = provider === "openai_shopee_ugc_photo";
-  const imageUrl = shouldIgnoreGeneratedImage
-    ? imageDoc.fallbackImageUrl || product.productImageUrl || product.productImageUrls?.[0]
-    : imageDoc.generatedImageUrl || imageDoc.fallbackImageUrl || product.productImageUrl || product.productImageUrls?.[0];
+  const imageUrl = imageDoc.generatedImageUrl || imageDoc.fallbackImageUrl || product.productImageUrl || product.productImageUrls?.[0];
   if (!imageUrl) {
     throw new Error("Shopee product image is missing");
   }
@@ -673,49 +669,6 @@ async function renderShopeeAffiliateCard(imageDoc: LeanAiGeneratedImage): Promis
     bytes: Uint8Array.from(output).buffer,
     mimeType: "image/jpeg"
   };
-}
-
-async function createShopeeSourceImageRefs(input: {
-  userId: string;
-  product: LeanShopeeProduct;
-  aiGeneratedPostId?: string | null;
-}) {
-  const sourceImageUrls = (input.product.productImageUrls?.length ? input.product.productImageUrls : [input.product.productImageUrl])
-    .filter((url): url is string => Boolean(url?.trim()));
-
-  if (sourceImageUrls.length === 0) {
-    throw new Error("Shopee Affiliate post validation failed: product image is missing");
-  }
-
-  const imageDocs = await AiGeneratedImage.insertMany(
-    [1, 2, 3, 4].map((layout, index) => ({
-      userId: input.userId,
-      productId: input.product.productId,
-      prompt: `Shopee source UGC layout ${layout}`,
-      status: "generated",
-      generatedImageUrl: sourceImageUrls[index % sourceImageUrls.length],
-      fallbackImageUrl: input.product.productImageUrl || sourceImageUrls[0],
-      provider: "shopee_source_ugc_layout",
-      promptHistory: [`layout=${layout}`, "source=auto-repair-before-publish", "no_text_overlay=true"]
-    }))
-  );
-
-  const refs = imageDocs.map((imageDoc) => `ai-image:${String(imageDoc._id)}`);
-
-  if (input.aiGeneratedPostId) {
-    await AiGeneratedPost.findByIdAndUpdate(input.aiGeneratedPostId, {
-      $set: {
-        status: "image_ready",
-        generatedImageUrl: refs[0],
-        "generationMetaJson.generatedImageUrls": refs,
-        "generationMetaJson.imageIds": imageDocs.map((imageDoc) => String(imageDoc._id)),
-        "generationMetaJson.source": "shopee-affiliate",
-        "generationMetaJson.repairedAt": new Date().toISOString()
-      }
-    });
-  }
-
-  return refs;
 }
 
 async function ensureShopeeAffiliateImageRefs(job: JobExecution, post: LeanPost) {
@@ -741,40 +694,22 @@ async function ensureShopeeAffiliateImageRefs(job: JobExecution, post: LeanPost)
     }
   }
 
-  const productId = typeof job.payload?.shopeeProductId === "string" ? job.payload.shopeeProductId : null;
-  if (!productId) {
-    throw new Error("Shopee Affiliate post validation failed: missing product id for image repair");
-  }
-
-  const product = (await ShopeeProduct.findOne({ userId: job.userId, productId }).lean()) as LeanShopeeProduct | null;
-  if (!product) {
-    throw new Error("Shopee Affiliate post validation failed: product data is missing for image repair");
-  }
-
-  const refs = await createShopeeSourceImageRefs({
-    userId: job.userId,
-    product,
-    aiGeneratedPostId
-  });
-
-  await Post.findByIdAndUpdate(post._id, { imageUrls: refs });
   await logAction({
     userId: job.userId,
     type: "queue",
-    level: "warn",
-    message: "Repaired Shopee Affiliate post images before publishing",
+    level: "error",
+    message: "Blocked Shopee Affiliate publish because generated UGC images are missing",
     relatedJobId: job._id,
     relatedPostId: job.postId,
     relatedScheduleId: job.scheduleId,
     metadata: {
       ...getAutoPostLogFlags(job),
-      productId,
       previousImageCount: post.imageUrls.length,
-      repairedImageCount: refs.length
+      sourceImageFallbackDisabled: true
     }
   });
 
-  return refs;
+  throw new Error("Shopee Affiliate post validation failed: generated UGC images are missing; source-image fallback is disabled");
 }
 
 function buildPublishMessage(caption: string, hashtags?: string[]) {

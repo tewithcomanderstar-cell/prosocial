@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { buildShopeeImagePromptSet as buildShopeeImagePromptSetCore } from "@/lib/services/shopee-affiliate-core";
-import { generateFacebookContent } from "@/lib/services/ai";
+import { generateFacebookContent, generateProductReferenceImage } from "@/lib/services/ai";
 import { logAction } from "@/lib/services/logging";
 import { randomItem } from "@/lib/utils";
 import { AffiliateLink } from "@/models/AffiliateLink";
@@ -1321,6 +1321,134 @@ Shopee Link: ${input.affiliateLink}
     return fallback;
   }
 }
+
+async function fetchShopeeReferenceImage(url: string) {
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) {
+    throw new ShopeeProviderError(
+      `Unable to fetch Shopee reference image: ${response.status}`,
+      502,
+      "shopee_reference_image_fetch_failed",
+      "internal_api"
+    );
+  }
+  const bytes = Buffer.from(await response.arrayBuffer());
+  const mimeType = response.headers.get("content-type")?.split(";")[0]?.trim() || "image/jpeg";
+  return {
+    bytes,
+    mimeType: mimeType.startsWith("image/") ? mimeType : "image/jpeg"
+  };
+}
+
+function bufferToArrayBuffer(buffer: Buffer) {
+  return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer;
+}
+
+function imageDataUrl(buffer: Buffer, mimeType = "image/png") {
+  return `data:${mimeType};base64,${buffer.toString("base64")}`;
+}
+
+function hashImageBuffer(buffer: Buffer) {
+  return crypto.createHash("sha256").update(buffer).digest("hex");
+}
+
+async function generateShopeeUgcImageDocs(input: {
+  userId: string;
+  product: ShopeeProductRecord;
+  promptSet: ReturnType<typeof buildShopeeImagePromptSet>;
+  sourceImageUrls: string[];
+}) {
+  const uniqueSourceImageUrls = Array.from(new Set(input.sourceImageUrls.filter((url) => Boolean(url?.trim())))).slice(0, 4);
+  const referenceImages = await Promise.all(uniqueSourceImageUrls.map(fetchShopeeReferenceImage));
+  if (referenceImages.length === 0) {
+    throw new ShopeeProviderError(
+      "Shopee UGC image generation failed: product reference images are missing",
+      422,
+      "shopee_ugc_reference_image_unavailable",
+      "internal_api"
+    );
+  }
+
+  const sourceHashes = new Set(referenceImages.map((image) => hashImageBuffer(image.bytes)));
+  const generatedHashes = new Set<string>();
+  const imageDocs = [];
+
+  for (const [index, promptItem] of input.promptSet.prompts.entries()) {
+    const primaryReference = referenceImages[index % referenceImages.length];
+    let generatedBuffer: Buffer | null = null;
+    let lastError: unknown = null;
+
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        generatedBuffer = await generateProductReferenceImage({
+          imageBytes: bufferToArrayBuffer(primaryReference.bytes),
+          mimeType: primaryReference.mimeType,
+          prompt: [
+            promptItem.prompt,
+            `Generate image ${index + 1} of 4 only. This image must have a unique angle, environment, distance, camera framing, hand position, and usage context compared with the other three images.`,
+            "Use all attached Shopee images as product identity references. Create a new realistic UGC lifestyle photo; do not copy, crop, resize, or reuse the original Shopee product image composition.",
+            "No text, no overlay, no product card, no catalog background, no studio packshot."
+          ].join("\n"),
+          userId: input.userId,
+          referenceImages: referenceImages
+            .filter((_, referenceIndex) => referenceIndex !== index % referenceImages.length)
+            .map((reference) => ({
+              imageBytes: bufferToArrayBuffer(reference.bytes),
+              mimeType: reference.mimeType
+            }))
+        });
+        const generatedHash = hashImageBuffer(generatedBuffer);
+        if (sourceHashes.has(generatedHash)) {
+          throw new Error("OpenAI returned the original Shopee product image instead of a new UGC lifestyle image");
+        }
+        if (generatedHashes.has(generatedHash)) {
+          throw new Error("OpenAI returned duplicate UGC images");
+        }
+        break;
+      } catch (error) {
+        lastError = error;
+        generatedBuffer = null;
+      }
+    }
+
+    if (!generatedBuffer) {
+      throw new ShopeeProviderError(
+        `Shopee UGC image generation failed: ${lastError instanceof Error ? lastError.message : "OpenAI did not return a usable UGC image"}`,
+        500,
+        "shopee_ugc_image_generation_failed",
+        "internal_api"
+      );
+    }
+    const generatedHash = hashImageBuffer(generatedBuffer);
+
+    generatedHashes.add(generatedHash);
+
+    const imageDoc = await AiGeneratedImage.create({
+      userId: input.userId,
+      productId: input.product.productId,
+      prompt: promptItem.prompt,
+      status: "generated",
+      generatedImageUrl: imageDataUrl(generatedBuffer),
+      fallbackImageUrl: input.product.productImageUrl || input.sourceImageUrls[0],
+      provider: "openai_shopee_ugc_photo",
+      promptHistory: [
+        promptItem.title,
+        `concept=${promptItem.concept}`,
+        `layout=${index + 1}`,
+        `reference_count=${referenceImages.length}`,
+        "source=openai-image-edit-multi-reference",
+        "source_fallback_disabled=true",
+        "new_ugc_lifestyle_image=true",
+        "no_text_overlay=true",
+        input.promptSet.negativePrompt
+      ]
+    });
+    imageDocs.push(imageDoc);
+  }
+
+  return imageDocs;
+}
+
 export async function buildShopeePostPackage(input: {
   userId: string;
   pageId: string;
@@ -1365,25 +1493,12 @@ export async function buildShopeePostPackage(input: {
     );
   }
 
-  const imageDocs = await AiGeneratedImage.insertMany(
-    imagePromptSet.prompts.map((promptItem, index) => ({
-      userId: input.userId,
-      productId: input.product.productId,
-      prompt: promptItem.prompt,
-      status: "generated",
-      generatedImageUrl: sourceImageUrls[index % sourceImageUrls.length],
-      fallbackImageUrl: input.product.productImageUrl || sourceImageUrls[0],
-      provider: "shopee_exact_source_ugc",
-      promptHistory: [
-        promptItem.title,
-        `concept=${promptItem.concept}`,
-        `layout=${index + 1}`,
-        "source=exact-shopee-product-image",
-        "no_text_overlay=true",
-        imagePromptSet.negativePrompt
-      ]
-    }))
-  );
+  const imageDocs = await generateShopeeUgcImageDocs({
+    userId: input.userId,
+    product: input.product,
+    promptSet: imagePromptSet,
+    sourceImageUrls
+  });
 
   const postDoc = await AiGeneratedPost.create({
     userId: input.userId,
