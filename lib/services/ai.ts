@@ -97,10 +97,11 @@ export async function generateProductReferenceImage(input: {
 
   const safePrompt = [
     input.prompt,
-    "Create a realistic UGC / real customer review photo, not a card, banner, poster, ecommerce thumbnail, marketplace catalog, or Canva template.",
-    "Use the provided image as the strict product source of truth. Preserve the same product shape, colors, brand/logo placement, label placement, material, model, proportions, packaging layout, accessories, and visible details as much as possible.",
+    "Create a realistic 100% UGC / real customer review photo from everyday use, not a studio product image, model catalog photo, isolated product packshot, background-cutout product, card, banner, poster, ecommerce thumbnail, marketplace catalog, or Canva template.",
+    "Use the provided image only as the strict product identity reference. Preserve the same product shape, colors, brand/logo placement, label placement, material, model, proportions, packaging layout, accessories, and visible details as much as possible.",
     "Do not invent a new product. Do not redesign, recolor, rebrand, translate, repair labels, rewrite packaging text, add fake logos, add fake reviews, or change the product category.",
-    "The product must be large in frame, 70-85% of the image area, with natural smartphone photography, real lighting, real shadows, believable depth, and lifestyle context.",
+    "The final image must show the product naturally in a real-life environment with casual smartphone photography, natural light, real shadows, believable depth, and real usage context.",
+    "The product must be large in frame, 70-85% of the image area, but must not be isolated on a plain white background or floating on a blank background.",
     "Do not generate Thai text, English text, captions, headlines, labels, badges, UI elements, price labels, stickers, screenshots, text boxes, panels, overlays, borders, dark bars, navy rectangles, or any added explanatory text.",
     "If you cannot preserve the brand or packaging text accurately, keep the original product area visually close to the reference or softly out of focus rather than hallucinating alien text."
   ].join("\n");
