@@ -50,7 +50,19 @@ export function getImageModel() {
 }
 
 function isSupportedImageEditModel(model: string) {
-  return model === "gpt-image-1" || model === "gpt-image-2";
+  return model === "gpt-image-1.5" || model === "gpt-image-1" || model === "gpt-image-1-mini";
+}
+
+function resolveImageEditModelForApi(requestedModel: string) {
+  const model = requestedModel.trim();
+  if (model === "gpt-image-2") {
+    return {
+      model: "gpt-image-1.5",
+      aliasNotice:
+        "OPENAI_IMAGE_MODEL=gpt-image-2 is not a direct Image API model in current OpenAI docs; using gpt-image-1.5 for Shopee UGC image edits."
+    };
+  }
+  return { model };
 }
 
 function getSafeOpenAiErrorDetails(error: unknown) {
@@ -100,9 +112,19 @@ export async function generateProductReferenceImage(input: {
   if (process.env.SHOPEE_AI_IMAGE_EDIT_ENABLED === "false") {
     throw new Error("OpenAI image edit is disabled: SHOPEE_AI_IMAGE_EDIT_ENABLED=false");
   }
-  const imageModel = getImageModel();
+  const requestedImageModel = getImageModel();
+  const { model: imageModel, aliasNotice } = resolveImageEditModelForApi(requestedImageModel);
+  if (aliasNotice) {
+    console.info("[ai/image] normalized image edit model", {
+      requestedModel: requestedImageModel,
+      apiModel: imageModel,
+      reason: aliasNotice
+    });
+  }
   if (!isSupportedImageEditModel(imageModel)) {
-    throw new Error(`OpenAI image edit model is invalid for Shopee UGC: set OPENAI_IMAGE_MODEL to gpt-image-1 or gpt-image-2, current=${imageModel}`);
+    throw new Error(
+      `OpenAI image edit model is invalid for Shopee UGC: set OPENAI_IMAGE_MODEL to gpt-image-1.5, gpt-image-1, or gpt-image-1-mini. If you set gpt-image-2, this app will route it to gpt-image-1.5. current=${requestedImageModel}`
+    );
   }
 
   const safePrompt = [
@@ -150,9 +172,10 @@ export async function generateProductReferenceImage(input: {
       status,
       code,
       type,
-      model: imageModel
+      model: imageModel,
+      requestedModel: requestedImageModel
     });
-    throw new Error(`OpenAI image edit failed: ${message} (status=${status}, code=${code}, type=${type}, model=${imageModel})`);
+    throw new Error(`OpenAI image edit failed: ${message} (status=${status}, code=${code}, type=${type}, model=${imageModel}, requestedModel=${requestedImageModel})`);
   }
 }
 
