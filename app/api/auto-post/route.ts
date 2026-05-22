@@ -169,11 +169,17 @@ export async function POST(request: Request) {
         : new Date()
       : current?.nextRunAt ?? new Date();
 
+    const activeStatuses = new Set(["running", "posting", "retrying"]);
     const autoPostStatus = payload.enabled
-      ? current?.autoPostStatus && current.autoPostStatus !== "paused"
+      ? current?.autoPostStatus && activeStatuses.has(current.autoPostStatus)
         ? current.autoPostStatus
         : "waiting"
       : "paused";
+    const jobStatus = payload.enabled
+      ? activeStatuses.has(autoPostStatus)
+        ? current?.jobStatus ?? "processing"
+        : "pending"
+      : "pending";
 
     const config = await AutoPostConfig.findOneAndUpdate(
       { userId },
@@ -196,9 +202,9 @@ export async function POST(request: Request) {
         watermarkSizePercent: payload.watermarkSizePercent,
         nextRunAt,
         autoPostStatus,
-        jobStatus: payload.enabled ? current?.jobStatus ?? "pending" : "pending",
-        lastStatus: payload.enabled ? (current?.jobStatus === "posted" ? "posted" : current?.lastError ? "failed" : "pending") : "paused",
-        lastError: payload.enabled ? sanitizeLegacyMessage(current?.lastError ?? null) : null,
+        jobStatus,
+        lastStatus: payload.enabled ? "pending" : "paused",
+        lastError: null,
         retryCount: payload.enabled ? current?.retryCount ?? 0 : 0,
         postingWindowStart: payload.postingWindowStart,
         postingWindowEnd: payload.postingWindowEnd
