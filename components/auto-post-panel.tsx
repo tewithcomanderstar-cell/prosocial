@@ -252,7 +252,7 @@ function statusLabel(status?: AutoPostStatus) {
     case "retrying":
       return "Retrying";
     case "waiting":
-      return "Waiting";
+      return "Scheduled";
     case "idle":
       return "Idle";
     case "paused":
@@ -292,6 +292,14 @@ function statusTone(status?: AutoPostStatus) {
     default:
       return "badge-neutral";
   }
+}
+
+function logStatusSuffix(log: StatusLog) {
+  const rawStatus = String(log.metadata?.autoPostStatus ?? "");
+  if (!rawStatus || ["waiting", "idle", "paused"].includes(rawStatus)) {
+    return "";
+  }
+  return ` • ${rawStatus}`;
 }
 
 export function AutoPostPanel() {
@@ -980,7 +988,7 @@ export function AutoPostPanel() {
                 <div className="muted">{formatDateTime(log.createdAt)}</div>
                 <div className="muted auto-post-log-meta">
                   {log.metadata?.pageId ? `Page ${String(log.metadata.pageId)}` : "System event"}
-                  {log.metadata?.autoPostStatus ? ` • ${String(log.metadata.autoPostStatus)}` : ""}
+                  {logStatusSuffix(log)}
                 </div>
               </article>
             )) : <div className="composer-media-empty">No logs yet.</div>}

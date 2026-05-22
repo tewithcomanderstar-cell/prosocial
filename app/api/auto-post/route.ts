@@ -173,7 +173,7 @@ export async function POST(request: Request) {
     const autoPostStatus = payload.enabled
       ? current?.autoPostStatus && activeStatuses.has(current.autoPostStatus)
         ? current.autoPostStatus
-        : "waiting"
+        : "idle"
       : "paused";
     const jobStatus = payload.enabled
       ? activeStatuses.has(autoPostStatus)
@@ -241,7 +241,6 @@ export async function POST(request: Request) {
         watermarkSizePercent: payload.watermarkSizePercent,
         postingWindowStart: payload.postingWindowStart,
         postingWindowEnd: payload.postingWindowEnd,
-        autoPostStatus,
         maxTargetPages: 100,
         imageAssignmentMode: "unique-per-page"
       }

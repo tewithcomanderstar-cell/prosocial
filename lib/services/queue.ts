@@ -1456,7 +1456,7 @@ async function executePostJob(job: JobExecution) {
     await updateBoundAutoPostState(
       job,
       {
-        autoPostStatus: "waiting",
+        autoPostStatus: "success",
         jobStatus: "posted",
         lastStatus: "posted",
         retryCount: 0,
@@ -1465,7 +1465,7 @@ async function executePostJob(job: JobExecution) {
         lastRunAt: new Date()
       },
       {
-        autoPostStatus: "waiting",
+        autoPostStatus: "success",
         currentJobStatus: "posted",
         lastError: null,
         message: "Post published successfully",
