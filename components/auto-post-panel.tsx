@@ -78,10 +78,29 @@ type ControlPanelStatus = {
   lastSuccessAt?: string | null;
   missingEnv?: string[];
   lastError?: {
-    source?: "internal_api" | "shopee_api" | "facebook_api" | "config" | "unknown";
+    source?: "internal_api" | "shopee_api" | "facebook_api" | "config" | "storage" | "unknown";
     status?: number | null;
     message?: string;
   } | null;
+  storage?: {
+    usedBytes: number;
+    limitBytes: number;
+    percent: number;
+    status: "ok" | "warning" | "critical";
+    lastCleanup?: {
+      at?: string | null;
+      deletedCount?: number;
+      estimatedFreedBytes?: number;
+      mode?: string;
+    } | null;
+    collections?: Array<{
+      name: string;
+      documents: number;
+      sizeBytes: number;
+      storageBytes: number;
+      indexBytes: number;
+    }>;
+  };
 };
 
 type StatusLog = {
@@ -198,6 +217,12 @@ function sanitizeAutomationError(value?: string | null) {
   }
 
   return sanitizeText(value);
+}
+
+function formatBytes(value?: number | null) {
+  if (!value || value <= 0) return "0 MB";
+  if (value >= 1024 * 1024 * 1024) return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 async function readApiResult(response: Response) {
@@ -343,6 +368,7 @@ export function AutoPostPanel() {
   const [pausing, setPausing] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [clearingStuck, setClearingStuck] = useState(false);
+  const [cleaningStorage, setCleaningStorage] = useState(false);
 
   const loadStatus = useCallback(async (showLoader = false) => {
     if (showLoader) {
@@ -625,6 +651,31 @@ export function AutoPostPanel() {
       );
     } finally {
       setClearingStuck(false);
+    }
+  }
+
+  async function handleRunCleanup() {
+    setCleaningStorage(true);
+    setMessage("");
+    setError("");
+
+    try {
+      const response = await fetch("/api/auto-post/cleanup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "monitor_button" })
+      });
+      const result = await readApiResult(response);
+      if (!result.ok) throw new Error(result.message || "Unable to run storage cleanup");
+      const cleanup = result.data?.cleanup;
+      setMessage(
+        `Storage cleanup completed. Deleted ${cleanup?.deletedTotal ?? 0} records, freed about ${formatBytes(cleanup?.estimatedFreedBytes ?? 0)}.`
+      );
+      await loadStatus(false);
+    } catch (cleanupError) {
+      setError(sanitizeAutomationError(cleanupError instanceof Error ? cleanupError.message : "Unable to run storage cleanup"));
+    } finally {
+      setCleaningStorage(false);
     }
   }
 
@@ -925,6 +976,37 @@ export function AutoPostPanel() {
           <div className="auto-post-metric-card"><span className="muted">Last publish time</span><strong>{formatDateTime(controlPanel?.lastPublishAt ?? undefined)}</strong></div>
         </div>
         <div className="grid cols-2 auto-post-metrics auto-post-metrics-minimal">
+          <div className="auto-post-metric-card">
+            <span className="muted">Storage used</span>
+            <strong>
+              {formatBytes(controlPanel?.storage?.usedBytes)} / {formatBytes(controlPanel?.storage?.limitBytes)}
+            </strong>
+          </div>
+          <div className="auto-post-metric-card">
+            <span className="muted">Storage percent</span>
+            <strong>{controlPanel?.storage?.percent ?? 0}% ({controlPanel?.storage?.status ?? "checking"})</strong>
+          </div>
+          <div className="auto-post-metric-card">
+            <span className="muted">Last cleanup</span>
+            <strong>{formatDateTime(controlPanel?.storage?.lastCleanup?.at ?? undefined)}</strong>
+          </div>
+          <div className="auto-post-metric-card">
+            <span className="muted">Cleanup deleted / freed</span>
+            <strong>
+              {controlPanel?.storage?.lastCleanup?.deletedCount ?? 0} / {formatBytes(controlPanel?.storage?.lastCleanup?.estimatedFreedBytes ?? 0)}
+            </strong>
+          </div>
+        </div>
+        {controlPanel?.storage?.status === "critical" ? (
+          <div className="composer-message composer-message-error">
+            Storage quota is nearly full. Run cleanup now before starting another auto-post job.
+          </div>
+        ) : controlPanel?.storage?.status === "warning" ? (
+          <div className="composer-message">
+            Storage is above the warning threshold. Cleanup will run before the next auto-post job.
+          </div>
+        ) : null}
+        <div className="grid cols-2 auto-post-metrics auto-post-metrics-minimal">
           <div className="auto-post-metric-card"><span className="muted">Current job id</span><strong>{controlPanel?.currentJobId ?? "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Current step</span><strong>{controlPanel?.currentStep ?? statusLabel(displayStatus)}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Selected pages</span><strong>{controlPanel?.selectedPagesCount ?? config.targetPageIds.length}</strong></div>
@@ -985,6 +1067,14 @@ export function AutoPostPanel() {
             disabled={clearingStuck || starting || pausing || stopping}
           >
             {clearingStuck ? "Clearing..." : "Clear stuck"}
+          </button>
+          <button
+            className="button button-secondary"
+            type="button"
+            onClick={handleRunCleanup}
+            disabled={cleaningStorage || starting || pausing || stopping}
+          >
+            {cleaningStorage ? "Cleaning..." : "Run Cleanup Now"}
           </button>
         </div>
 

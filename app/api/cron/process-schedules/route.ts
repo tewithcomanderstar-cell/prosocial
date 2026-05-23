@@ -5,6 +5,7 @@ import { processDueAutoPostAiConfigs } from "@/lib/services/auto-post-ai";
 import { syncTrackedAutoCommentPosts } from "@/lib/services/comment-automation";
 import { processQueuedJobs } from "@/lib/services/queue";
 import { queueDueSchedules } from "@/lib/services/scheduler";
+import { runStorageCleanup } from "@/lib/services/storage-cleanup";
 import { runPlatformScheduler } from "@/src/jobs/schedulers/run-platform-scheduler";
 import { randomUUID } from "crypto";
 
@@ -36,6 +37,7 @@ export async function GET(request: Request) {
     }
 
     await connectDb();
+    const cleanup = await runStorageCleanup({ reason: "pre_scheduler_tick" });
     const scheduledQueued = await queueDueSchedules();
     const autoPostsQueued = await processDueAutoPosts();
     const autoPostAiQueued = await processDueAutoPostAiConfigs();
@@ -48,6 +50,7 @@ export async function GET(request: Request) {
       autoPostAiQueued,
       syncedComments,
       processedJobs: processedJobs.length,
+      storageCleanupDeleted: cleanup.deletedTotal,
       durationMs: Date.now() - startedAt
     });
 
@@ -58,6 +61,12 @@ export async function GET(request: Request) {
         autoPostAiQueued,
         syncedComments,
         processedJobs,
+        storageCleanup: {
+          deletedTotal: cleanup.deletedTotal,
+          mode: cleanup.mode,
+          beforePercent: cleanup.before.percent,
+          afterPercent: cleanup.after.percent
+        },
         schedulerEngine,
         inlinePublisherEnabled,
         correlationId

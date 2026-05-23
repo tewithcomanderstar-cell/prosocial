@@ -14,6 +14,45 @@ type LogInput = {
   relatedScheduleId?: string;
 };
 
+const MAX_LOG_MESSAGE_CHARS = 1000;
+const MAX_LOG_STACK_CHARS = 3000;
+const MAX_METADATA_STRING_CHARS = 1000;
+
+function truncateText(value: string | null | undefined, maxLength = MAX_LOG_MESSAGE_CHARS) {
+  if (!value) return value ?? null;
+  return value.length > maxLength ? `${value.slice(0, maxLength - 3)}...` : value;
+}
+
+function sanitizeMetadataValue(value: unknown, depth = 0): unknown {
+  if (typeof value === "string") {
+    return truncateText(value, MAX_METADATA_STRING_CHARS);
+  }
+
+  if (value instanceof Date) {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return depth >= 4 ? `[array:${value.length}]` : value.slice(0, 25).map((item) => sanitizeMetadataValue(item, depth + 1));
+  }
+
+  if (value && typeof value === "object") {
+    if (depth >= 4) return "[object]";
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .slice(0, 50)
+        .map(([key, item]) => [
+          key,
+          /token|secret|password|authorization|cookie|key/i.test(key)
+            ? "[redacted]"
+            : sanitizeMetadataValue(item, depth + 1)
+        ])
+    );
+  }
+
+  return value;
+}
+
 function inferAuditAction(input: LogInput) {
   if (input.type === "post") return "post-action";
   if (input.type === "queue") return "queue-action";
@@ -36,14 +75,14 @@ export function serializeError(error: unknown) {
 
   if (error instanceof Error) {
     return {
-      reason: redact(error.message) ?? "unknown",
-      stack: redact(error.stack ?? null),
+      reason: truncateText(redact(error.message), MAX_LOG_MESSAGE_CHARS) ?? "unknown",
+      stack: truncateText(redact(error.stack ?? null), MAX_LOG_STACK_CHARS),
       name: error.name
     };
   }
 
   return {
-    reason: typeof error === "string" ? redact(error) ?? "unknown" : "unknown",
+    reason: typeof error === "string" ? truncateText(redact(error), MAX_LOG_MESSAGE_CHARS) ?? "unknown" : "unknown",
     stack: null,
     name: "UnknownError"
   };
@@ -56,8 +95,8 @@ export async function logAction(input: LogInput) {
     userId: input.userId,
     type: input.type,
     level: input.level ?? "info",
-    message: input.message,
-    metadata: input.metadata ?? {},
+    message: truncateText(input.message, MAX_LOG_MESSAGE_CHARS) ?? input.message,
+    metadata: sanitizeMetadataValue(input.metadata ?? {}),
     relatedJobId: input.relatedJobId,
     relatedPostId: input.relatedPostId,
     relatedScheduleId: input.relatedScheduleId
@@ -68,8 +107,8 @@ export async function logAction(input: LogInput) {
     action: inferAuditAction(input),
     entityType: input.type,
     entityId: input.relatedPostId ?? input.relatedJobId ?? input.relatedScheduleId,
-    summary: input.message,
-    metadata: input.metadata ?? {}
+    summary: truncateText(input.message, MAX_LOG_MESSAGE_CHARS) ?? input.message,
+    metadata: sanitizeMetadataValue(input.metadata ?? {})
   });
 
   return log;

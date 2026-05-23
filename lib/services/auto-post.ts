@@ -15,6 +15,7 @@ import {
   ShopeeSourceTag
 } from "@/lib/services/shopee-affiliate";
 import { randomItem } from "@/lib/utils";
+import { ensureStorageBeforeAutoPost, mapStorageQuotaMessage } from "@/lib/services/storage-cleanup";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
 import { Job } from "@/models/Job";
 import { Post } from "@/models/Post";
@@ -431,6 +432,11 @@ function hashValue(value: unknown) {
 }
 
 function normalizeAutoPostError(error: unknown, fallback = "Auto Post failed") {
+  const storageMessage = mapStorageQuotaMessage(error);
+  if (storageMessage) {
+    return storageMessage;
+  }
+
   const message = error instanceof Error ? error.message : typeof error === "string" ? error : fallback;
   const normalized = message.toLowerCase();
   if (normalized.includes("signal is aborted") || normalized.includes("aborterror") || normalized.includes("aborted")) {
@@ -920,6 +926,7 @@ async function buildCaption(config: LeanAutoPostConfig, image: DriveImage, drive
 async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: QueueAutoPostsOptions): Promise<QueueAutoPostsResult> {
   const triggeredAt = new Date();
   const nextRunAt = getNextAutoRun(config.intervalMinutes, config.postingWindowStart, config.postingWindowEnd, triggeredAt);
+  await ensureStorageBeforeAutoPost(config.userId);
 
   await updateAutoPostState(config._id, {
     autoPostStatus: "running",

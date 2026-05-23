@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { connectDb } from "@/lib/db";
 import { getSessionUserId } from "@/lib/auth";
+import { mapStorageQuotaMessage } from "@/lib/services/storage-cleanup";
 
 export class RouteError extends Error {
   constructor(
@@ -52,6 +53,15 @@ export function parseBody<T>(schema: z.ZodType<T>, body: unknown) {
 }
 
 export function normalizeRouteError(error: unknown, fallbackMessage = "Unable to complete request") {
+  const storageMessage = mapStorageQuotaMessage(error);
+  if (storageMessage) {
+    return {
+      status: 507,
+      message: storageMessage,
+      code: "storage_quota_full"
+    };
+  }
+
   if (isUnauthorizedError(error)) {
     return {
       status: 401,

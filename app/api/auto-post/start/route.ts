@@ -3,6 +3,7 @@ import { processAutoPostConfigNow } from "@/lib/services/auto-post";
 import { logAction, logAndNotifyError } from "@/lib/services/logging";
 import { handleRoleError, requireRole } from "@/lib/services/permissions";
 import { processQueuedJobs } from "@/lib/services/queue";
+import { ensureStorageBeforeAutoPost, mapStorageQuotaMessage } from "@/lib/services/storage-cleanup";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
 import { after } from "next/server";
 
@@ -57,6 +58,7 @@ function normalizeFolderId(value: string) {
 export async function POST() {
   try {
     const { userId } = await requireRole(["admin", "editor"]);
+    await ensureStorageBeforeAutoPost(userId);
     const config = (await AutoPostConfig.findOne({ userId }).lean()) as LeanAutoPostConfig | null;
     const normalizedFolderId = config?.folderId ? normalizeFolderId(config.folderId) : config?.folderId;
 
@@ -221,11 +223,17 @@ export async function POST() {
         metadata: { autoPost: true, source: "manual-start", destination: "in-app-automation-engine", action: "start" },
         error
       });
-    } catch {
-      return jsonError("Unauthorized", 401);
+    } catch (loggingError) {
+      if (loggingError instanceof Error && loggingError.message === "UNAUTHORIZED") {
+        return jsonError("Unauthorized", 401);
+      }
+      console.error("[auto-post/start] unable to persist start error", {
+        message: loggingError instanceof Error ? loggingError.message : "Unknown logging error"
+      });
     }
 
+    const quotaMessage = mapStorageQuotaMessage(error);
     const sanitizedMessage = sanitizeLegacyMessage(error instanceof Error ? error.message : null);
-    return jsonError(sanitizedMessage ?? "Unable to trigger Auto Post", 500);
+    return jsonError(quotaMessage ?? sanitizedMessage ?? "Unable to trigger Auto Post", quotaMessage ? 507 : 500, quotaMessage ? "storage_quota_full" : undefined);
   }
 }

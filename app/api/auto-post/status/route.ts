@@ -6,6 +6,7 @@ import { FacebookPostQueue } from "@/models/FacebookPostQueue";
 import { Job } from "@/models/Job";
 import { ShopeeProduct } from "@/models/ShopeeProduct";
 import { getShopeeAffiliateConfigStatus, getShopeeEnvStatus, getShopeeProductProvider } from "@/lib/services/shopee-affiliate";
+import { getStorageStatus, mapStorageQuotaMessage } from "@/lib/services/storage-cleanup";
 
 type AutoPostConfigStatusDoc = {
   _id: unknown;
@@ -62,6 +63,14 @@ function isLegacyMessage(value?: string | null) {
 function mapShopeeLastError(value?: string | null) {
   const message = sanitizeLegacyMessage(value);
   if (!message) return null;
+  const storageMessage = mapStorageQuotaMessage(message);
+  if (storageMessage) {
+    return {
+      source: "storage",
+      status: 507,
+      message: storageMessage
+    };
+  }
   const normalized = message.toLowerCase();
   if (normalized.includes("shopee") && (normalized.includes("401") || normalized.includes("rejected"))) {
     return {
@@ -78,9 +87,9 @@ function mapShopeeLastError(value?: string | null) {
     };
   }
   return {
-    source: "unknown",
-    status: null,
-    message
+      source: "unknown",
+      status: null,
+      message
   };
 }
 
@@ -162,6 +171,7 @@ export async function GET() {
     );
     const shopeeProvider = getShopeeProductProvider();
     const shopeeEnvStatus = getShopeeEnvStatus();
+    const storage = await getStorageStatus();
     const lastProduct = await ShopeeProduct.findOne({}).sort({ fetchedAt: -1 }).select("fetchedAt").lean();
     const lastPublishedQueueItem = await FacebookPostQueue.findOne({ userId, status: "published" })
       .sort({ updatedAt: -1 })
@@ -287,6 +297,7 @@ export async function GET() {
         configured: shopeeEnvStatus.configured
       },
       lastError,
+      storage,
       responseShape: {
         pages: "data.pages",
         status: "config.logs.controlPanel"
