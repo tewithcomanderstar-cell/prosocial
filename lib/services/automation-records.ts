@@ -26,7 +26,7 @@ type StartAutoPostRecordInput = {
 type UpdateAutoPostRecordInput = {
   configId: string;
   currentJobStatus?: "pending" | "processing" | "posted" | "failed";
-  autoPostStatus?: "idle" | "running" | "posting" | "success" | "failed" | "retrying" | "paused" | "waiting";
+  autoPostStatus?: "idle" | "running" | "posting" | "success" | "partial_success" | "failed" | "retrying" | "paused" | "waiting";
   lastError?: string | null;
   message?: string;
   pageId?: string;
@@ -49,7 +49,7 @@ function asObjectId(value: string) {
 }
 
 function mapRunStatus(input: UpdateAutoPostRecordInput): "pending" | "running" | "succeeded" | "failed" | "cancelled" {
-  if (input.currentJobStatus === "failed" || input.autoPostStatus === "failed") return "failed";
+  if (input.currentJobStatus === "failed" || input.autoPostStatus === "failed" || input.autoPostStatus === "partial_success") return "failed";
   if (input.currentJobStatus === "posted" || input.autoPostStatus === "success") return "succeeded";
   if (input.currentJobStatus === "processing" || ["running", "posting", "retrying"].includes(input.autoPostStatus || "")) return "running";
   if (["paused", "idle"].includes(input.autoPostStatus || "")) return "cancelled";
@@ -57,7 +57,7 @@ function mapRunStatus(input: UpdateAutoPostRecordInput): "pending" | "running" |
 }
 
 function mapContentStatus(input: UpdateAutoPostRecordInput): "draft" | "pending_review" | "approved" | "scheduled" | "publishing" | "published" | "failed" | "archived" {
-  if (input.currentJobStatus === "failed" || input.autoPostStatus === "failed") return "failed";
+  if (input.currentJobStatus === "failed" || input.autoPostStatus === "failed" || input.autoPostStatus === "partial_success") return "failed";
   if (input.currentJobStatus === "posted" || input.autoPostStatus === "success") return "published";
   if (input.currentJobStatus === "processing" || ["running", "posting", "retrying"].includes(input.autoPostStatus || "")) return "publishing";
   return "scheduled";

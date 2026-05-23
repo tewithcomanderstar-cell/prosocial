@@ -3,6 +3,7 @@ import { AutoPostConfig } from "@/models/AutoPostConfig";
 import { ActionLog } from "@/models/ActionLog";
 import { FacebookConnection } from "@/models/FacebookConnection";
 import { FacebookPostQueue } from "@/models/FacebookPostQueue";
+import { Job } from "@/models/Job";
 import { ShopeeProduct } from "@/models/ShopeeProduct";
 import { getShopeeAffiliateConfigStatus, getShopeeEnvStatus, getShopeeProductProvider } from "@/lib/services/shopee-affiliate";
 
@@ -11,7 +12,23 @@ type AutoPostConfigStatusDoc = {
   autoPostStatus?: string | null;
   lastStatus?: string | null;
   lastError?: string | null;
+  targetPageIds?: string[];
+  lastWorkflowRunId?: unknown;
   [key: string]: unknown;
+};
+
+type LeanJobStatus = {
+  _id: unknown;
+  targetPageId?: string;
+  status?: string;
+  createdAt?: Date;
+  completedAt?: Date;
+  processingStartedAt?: Date;
+  lastError?: string;
+  failureReason?: string;
+  errorCode?: string;
+  result?: unknown;
+  payload?: Record<string, unknown>;
 };
 
 function sanitizeLegacyMessage(value?: string | null) {
@@ -67,6 +84,20 @@ function mapShopeeLastError(value?: string | null) {
   };
 }
 
+function resolveResponseShape(value: unknown) {
+  if (!value || typeof value !== "object") return "unknown";
+  return Object.keys(value as Record<string, unknown>).join(".") || "object";
+}
+
+function normalizePageJobStatus(status?: string) {
+  if (status === "success") return "success";
+  if (status === "failed") return "failed";
+  if (status === "duplicate_blocked") return "skipped";
+  if (status === "processing") return "publishing";
+  if (status === "retrying" || status === "rate_limited") return "retrying";
+  return "pending";
+}
+
 export async function GET() {
   try {
     const { requireAuth } = await import("@/lib/api");
@@ -107,6 +138,11 @@ export async function GET() {
       lastError: null
     };
     const effectiveConfig = config ?? defaultConfig;
+    const effectiveConfigDoc = effectiveConfig as AutoPostConfigStatusDoc & {
+      targetPageIds?: string[];
+      lastWorkflowRunId?: unknown;
+      _id?: unknown;
+    };
 
     const logs = await ActionLog.find({
       userId,
@@ -119,7 +155,11 @@ export async function GET() {
     const legacyLastError = effectiveConfig?.lastError ?? null;
     const sanitizedLastError = sanitizeLegacyMessage(legacyLastError);
     const facebookConnection = await FacebookConnection.findOne({ userId }).lean();
-    const connectedPageCount = Array.isArray((facebookConnection as any)?.pages) ? (facebookConnection as any).pages.length : 0;
+    const facebookPages = Array.isArray((facebookConnection as any)?.pages) ? (facebookConnection as any).pages : [];
+    const connectedPageCount = facebookPages.length;
+    const pageNameById = new Map<string, string>(
+      facebookPages.map((page: any) => [String(page.pageId ?? ""), String(page.name ?? page.pageName ?? "Facebook Page")])
+    );
     const shopeeProvider = getShopeeProductProvider();
     const shopeeEnvStatus = getShopeeEnvStatus();
     const lastProduct = await ShopeeProduct.findOne({}).sort({ fetchedAt: -1 }).select("fetchedAt").lean();
@@ -133,7 +173,72 @@ export async function GET() {
     const affiliateStatus = getShopeeAffiliateConfigStatus(
       typeof effectiveConfig?.shopeeTrackingId === "string" ? effectiveConfig.shopeeTrackingId : ""
     );
-    const mappedLastError = mapShopeeLastError(sanitizedLastError);
+    const targetPageIds = Array.isArray(effectiveConfigDoc?.targetPageIds) ? effectiveConfigDoc.targetPageIds : [];
+    const workflowRunId = effectiveConfigDoc?.lastWorkflowRunId ? String(effectiveConfigDoc.lastWorkflowRunId) : null;
+    const jobQuery: Record<string, unknown> = {
+      userId,
+      type: "post",
+      "payload.autoSource": "shopee-affiliate"
+    };
+    if (workflowRunId) {
+      jobQuery["payload.workflowRunId"] = workflowRunId;
+    } else if (effectiveConfigDoc?._id) {
+      jobQuery["payload.autoPostConfigId"] = String(effectiveConfigDoc._id);
+    }
+
+    const runJobs = (await Job.find(jobQuery)
+      .sort({ createdAt: -1 })
+      .limit(Math.max(100, targetPageIds.length || 30))
+      .lean()) as LeanJobStatus[];
+    const latestProcessingJob = runJobs.find((job) => job.status === "processing") ?? null;
+    const latestFailedJob = runJobs.find((job) => job.status === "failed" || job.status === "duplicate_blocked") ?? null;
+    const selectedPagesCount = Math.max(
+      targetPageIds.length,
+      runJobs.length,
+      ...runJobs
+        .map((job) => Number(job.payload?.selectedPagesCount ?? 0))
+        .filter((value) => Number.isFinite(value))
+    );
+    const publishedPagesCount = runJobs.filter((job) => job.status === "success").length;
+    const failedPagesCount = runJobs.filter((job) => job.status === "failed" || job.status === "duplicate_blocked").length;
+    const pendingPagesCount = Math.max(0, selectedPagesCount - publishedPagesCount - failedPagesCount);
+    const pageResults = runJobs
+      .map((job) => ({
+        jobId: String(job._id),
+        pageId: String(job.targetPageId ?? ""),
+        pageName: pageNameById.get(String(job.targetPageId ?? "")) ?? "Facebook Page",
+        status: normalizePageJobStatus(job.status),
+        rawStatus: job.status ?? "queued",
+        facebookPostId: typeof (job.result as any)?.id === "string" ? (job.result as any).id : null,
+        errorCode: job.errorCode ?? null,
+        errorMessage: sanitizeLegacyMessage(job.failureReason ?? job.lastError ?? null),
+        startedAt: job.processingStartedAt ?? job.createdAt ?? null,
+        finishedAt: job.completedAt ?? null
+      }))
+      .reverse();
+    const currentStep = latestProcessingJob
+      ? "PAGE_PUBLISH_STARTED"
+      : runJobs.length
+        ? runJobs[0].status === "success"
+          ? "PAGE_PUBLISH_SUCCESS"
+          : runJobs[0].status === "failed"
+            ? "PAGE_PUBLISH_FAILED"
+            : "START_PUBLISH_TO_PAGES"
+        : String(effectiveConfig?.autoPostStatus ?? "paused");
+    const currentPublishingPage = latestProcessingJob
+      ? {
+          pageId: String(latestProcessingJob.targetPageId ?? ""),
+          pageName: pageNameById.get(String(latestProcessingJob.targetPageId ?? "")) ?? "Facebook Page"
+        }
+      : null;
+    const pageFailureMessage = latestFailedJob
+      ? `${pageNameById.get(String(latestFailedJob.targetPageId ?? "")) ?? "Facebook Page"}: ${
+          sanitizeLegacyMessage(latestFailedJob.failureReason ?? latestFailedJob.lastError ?? latestFailedJob.errorCode ?? "Publish failed")
+        }`
+      : null;
+    const mappedLastError = pageFailureMessage
+      ? { source: "facebook_api", status: null, message: pageFailureMessage }
+      : mapShopeeLastError(sanitizedLastError);
     const affiliateMissingMessage = affiliateStatus.missing.length
       ? `Shopee Affiliate setup required. Missing: ${affiliateStatus.missing.join(", ")}`
       : null;
@@ -165,13 +270,27 @@ export async function GET() {
       lastPublishAt: (lastPublishedQueueItem as any)?.updatedAt ?? null,
       provider: shopeeProvider.name,
       connectedPageCount,
+      currentJobId: latestProcessingJob ? String(latestProcessingJob._id) : runJobs[0]?._id ? String(runJobs[0]._id) : null,
+      currentStep,
+      selectedPagesCount,
+      publishedPagesCount,
+      failedPagesCount,
+      pendingPagesCount,
+      currentPublishingPage,
+      pageResults,
+      lastActivityAt: logs[0]?.createdAt ?? runJobs[0]?.createdAt ?? null,
+      lastSuccessAt: runJobs.find((job) => job.status === "success")?.completedAt ?? null,
       missingEnv,
       env: {
         ok: shopeeEnvStatus.ok,
         missing: shopeeEnvStatus.missing,
         configured: shopeeEnvStatus.configured
       },
-      lastError
+      lastError,
+      responseShape: {
+        pages: "data.pages",
+        status: "config.logs.controlPanel"
+      }
     };
 
     const sanitizedConfig = {

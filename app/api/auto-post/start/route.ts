@@ -192,6 +192,8 @@ export async function POST() {
     return jsonOk(
       {
         started: true,
+        jobId: String(result.workflowRunId),
+        selectedPagesCount: config.targetPageIds.length,
         queued: result.queued,
         processedJobs: [],
         processingMode: "queued-background",

@@ -120,6 +120,7 @@ type LeanDriveConnection = {
 type LeanFacebookConnection = {
   pages: Array<{
     pageId: string;
+    name?: string;
     pageAccessToken: string;
     profilePictureUrl?: string | null;
     profilePictureFetchedAt?: Date | string | null;
@@ -461,7 +462,7 @@ async function updateBoundAutoPostState(
   job: JobExecution,
   configUpdates: Record<string, unknown>,
   recordUpdates: {
-    autoPostStatus?: "idle" | "running" | "posting" | "success" | "failed" | "retrying" | "paused" | "waiting";
+    autoPostStatus?: "idle" | "running" | "posting" | "success" | "partial_success" | "failed" | "retrying" | "paused" | "waiting";
     currentJobStatus?: "pending" | "processing" | "posted" | "failed";
     lastError?: string | null;
     message?: string;
@@ -482,6 +483,145 @@ async function updateBoundAutoPostState(
     await AutoPostAiConfig.findByIdAndUpdate(autoPostAiConfigId, configUpdates);
     await updateAutoPostAiRecords({ configId: autoPostAiConfigId, ...recordUpdates });
   }
+}
+
+async function updateBoundShopeeAutoPostRunState(job: JobExecution) {
+  if (!isShopeeAffiliateJob(job) || !hasBoundAutoPostConfig(job)) {
+    return false;
+  }
+
+  const { autoPostConfigId } = getBoundAutoPostConfigIds(job);
+  if (!autoPostConfigId) {
+    return false;
+  }
+
+  const workflowRunId = typeof job.payload?.workflowRunId === "string" ? job.payload.workflowRunId : null;
+  const query: Record<string, unknown> = {
+    userId: job.userId,
+    type: "post",
+    "payload.autoSource": "shopee-affiliate",
+    "payload.autoPostConfigId": autoPostConfigId
+  };
+
+  if (workflowRunId) {
+    query["payload.workflowRunId"] = workflowRunId;
+  }
+
+  const runJobs = await Job.find(query).sort({ createdAt: 1 }).lean();
+  if (!runJobs.length) {
+    return false;
+  }
+
+  const selectedPagesCount = Math.max(
+    runJobs.length,
+    ...runJobs
+      .map((item) => Number((item.payload as Record<string, unknown> | undefined)?.selectedPagesCount ?? 0))
+      .filter((value) => Number.isFinite(value))
+  );
+  const successCount = runJobs.filter((item) => item.status === "success").length;
+  const failedJobs = runJobs.filter((item) => item.status === "failed" || item.status === "duplicate_blocked");
+  const retryingCount = runJobs.filter((item) => item.status === "retrying" || item.status === "rate_limited").length;
+  const activeCount = runJobs.filter((item) => item.status === "queued" || item.status === "processing").length;
+  const failedCount = failedJobs.length;
+  const pendingCount = Math.max(0, selectedPagesCount - successCount - failedCount);
+  const latestFailure = failedJobs[failedJobs.length - 1] ?? null;
+  const latestFailureMessage =
+    latestFailure?.failureReason ||
+    latestFailure?.lastError ||
+    (latestFailure?.errorCode ? `Publish failed with ${latestFailure.errorCode}` : null);
+
+  let autoPostStatus: "posting" | "success" | "partial_success" | "failed" | "retrying";
+  let currentJobStatus: "pending" | "processing" | "posted" | "failed";
+  let lastStatus: "pending" | "posted" | "failed";
+
+  if (activeCount > 0) {
+    autoPostStatus = "posting";
+    currentJobStatus = "processing";
+    lastStatus = "pending";
+  } else if (retryingCount > 0) {
+    autoPostStatus = "retrying";
+    currentJobStatus = "pending";
+    lastStatus = "pending";
+  } else if (successCount === selectedPagesCount && selectedPagesCount > 0) {
+    autoPostStatus = "success";
+    currentJobStatus = "posted";
+    lastStatus = "posted";
+  } else if (successCount > 0 && failedCount > 0) {
+    autoPostStatus = "partial_success";
+    currentJobStatus = "failed";
+    lastStatus = "failed";
+  } else {
+    autoPostStatus = "failed";
+    currentJobStatus = "failed";
+    lastStatus = "failed";
+  }
+
+  const summaryMessage =
+    autoPostStatus === "success"
+      ? `Published to all ${selectedPagesCount} selected page(s).`
+      : autoPostStatus === "partial_success"
+        ? `Published ${successCount}/${selectedPagesCount} page(s); ${failedCount} failed.`
+        : autoPostStatus === "posting"
+          ? `Publishing pages: ${successCount}/${selectedPagesCount} done, ${pendingCount} pending.`
+          : autoPostStatus === "retrying"
+            ? `Publishing paused for retry: ${successCount}/${selectedPagesCount} done, ${retryingCount} retrying.`
+            : latestFailureMessage ?? "Publishing failed for all selected pages.";
+
+  await updateBoundAutoPostState(
+    job,
+    {
+      autoPostStatus,
+      jobStatus: currentJobStatus,
+      lastStatus,
+      retryCount: Math.max(...runJobs.map((item) => Number(item.attempts ?? 0)), 0),
+      lastError: autoPostStatus === "success" || autoPostStatus === "posting" ? null : latestFailureMessage ?? summaryMessage,
+      lastPostId: job.postId,
+      lastRunAt: new Date()
+    },
+    {
+      autoPostStatus,
+      currentJobStatus,
+      lastError: autoPostStatus === "success" || autoPostStatus === "posting" ? null : latestFailureMessage ?? summaryMessage,
+      message: summaryMessage,
+      pageId: job.targetPageId,
+      imageUsed: typeof job.payload?.selectedImageId === "string" ? job.payload.selectedImageId : undefined,
+      lastRunAt: new Date().toISOString()
+    }
+  );
+
+  await logAction({
+    userId: job.userId,
+    type: "queue",
+    level: autoPostStatus === "failed" ? "error" : autoPostStatus === "partial_success" ? "warn" : "info",
+    message:
+      autoPostStatus === "success"
+        ? "JOB_SUCCESS: Shopee Affiliate Auto Post completed"
+        : autoPostStatus === "partial_success"
+          ? "JOB_PARTIAL_SUCCESS: Shopee Affiliate Auto Post completed with failed pages"
+          : autoPostStatus === "failed"
+            ? "JOB_FAILED: Shopee Affiliate Auto Post failed for all pages"
+            : "START_PUBLISH_TO_PAGES: Shopee Affiliate Auto Post progress updated",
+    relatedJobId: job._id,
+    relatedPostId: job.postId,
+    relatedScheduleId: job.scheduleId,
+    metadata: {
+      ...getAutoPostLogFlags(job),
+      autoPostConfigId,
+      workflowRunId,
+      targetPageId: job.targetPageId,
+      selectedPagesCount,
+      successCount,
+      failedCount,
+      pendingCount,
+      retryingCount,
+      autoPostStatus,
+      currentJobStatus,
+      lastError: latestFailureMessage,
+      correlationId: job.correlationId
+    }
+  });
+
+  return true;
 }
 
 function normalizeHashtags(hashtags?: string[]) {
@@ -1243,7 +1383,7 @@ async function executePostJob(job: JobExecution) {
 
     await applyUserPublishCooldown(job.userId, nextRetryAt, rateLimit.reason ?? "Rate limited", job._id);
 
-    if (hasBoundAutoPostConfig(job)) {
+    if (!(await updateBoundShopeeAutoPostRunState(job)) && hasBoundAutoPostConfig(job)) {
       await updateBoundAutoPostState(
         job,
         {
@@ -1304,7 +1444,7 @@ async function executePostJob(job: JobExecution) {
           autoPostAiConfigId: job.payload?.autoPostAiConfigId
         }
       });
-      if (hasBoundAutoPostConfig(job)) {
+      if (!(await updateBoundShopeeAutoPostRunState(job)) && hasBoundAutoPostConfig(job)) {
         await updateBoundAutoPostState(
           job,
           {
@@ -1338,6 +1478,25 @@ async function executePostJob(job: JobExecution) {
   if (!page) {
     throw new Error("Target page token was not found");
   }
+
+  await logAction({
+    userId: job.userId,
+    type: "queue",
+    level: "info",
+    message: "VALIDATE_PAGE_TOKEN: Facebook page token found",
+    relatedJobId: job._id,
+    relatedPostId: job.postId,
+    relatedScheduleId: job.scheduleId,
+    metadata: {
+      ...getAutoPostLogFlags(job),
+      targetPageId: page.pageId,
+      pageName: page.name,
+      autoPostConfigId: job.payload?.autoPostConfigId,
+      autoPostAiConfigId: job.payload?.autoPostAiConfigId,
+      workflowRunId: job.payload?.workflowRunId,
+      correlationId: job.correlationId
+    }
+  });
 
   let pageProfileImage: { bytes: ArrayBuffer; mimeType: string } | null = null;
   const watermarkSettings = hasBoundAutoPostConfig(job) ? await getWatermarkSettings(job) : null;
@@ -1396,6 +1555,24 @@ async function executePostJob(job: JobExecution) {
   const message = buildPublishMessage(chosenVariant.caption, chosenVariant.hashtags);
   const repairedImageRefs = await ensureShopeeAffiliateImageRefs(job, post);
   const imageRefs = post.randomizeImages && repairedImageRefs.length > 0 ? [randomItem(repairedImageRefs)] : repairedImageRefs;
+  await logAction({
+    userId: job.userId,
+    type: "queue",
+    level: "info",
+    message: "PAGE_UPLOAD_IMAGES_STARTED: Preparing images for Facebook upload",
+    relatedJobId: job._id,
+    relatedPostId: job.postId,
+    relatedScheduleId: job.scheduleId,
+    metadata: {
+      ...getAutoPostLogFlags(job),
+      targetPageId: page.pageId,
+      pageName: page.name,
+      imageCount: imageRefs.length,
+      autoPostConfigId: job.payload?.autoPostConfigId,
+      workflowRunId: job.payload?.workflowRunId,
+      correlationId: job.correlationId
+    }
+  });
   const images = await decorateAutoPostImages(
     await resolveImages(job.userId, imageRefs),
     job.payload?.automationMode,
@@ -1429,6 +1606,25 @@ async function executePostJob(job: JobExecution) {
       }
     );
   }
+
+  await logAction({
+    userId: job.userId,
+    type: "queue",
+    level: "info",
+    message: "PAGE_PUBLISH_STARTED: Publishing Shopee post to Facebook page",
+    relatedJobId: job._id,
+    relatedPostId: job.postId,
+    relatedScheduleId: job.scheduleId,
+    metadata: {
+      ...getAutoPostLogFlags(job),
+      targetPageId: page.pageId,
+      pageName: page.name,
+      imageCount: images.length,
+      autoPostConfigId: job.payload?.autoPostConfigId,
+      workflowRunId: job.payload?.workflowRunId,
+      correlationId: job.correlationId
+    }
+  });
 
   const publishResult = await publishPostToFacebook({
     pageId: page.pageId,
@@ -1472,7 +1668,7 @@ async function executePostJob(job: JobExecution) {
     userId: job.userId,
     type: "post",
     level: "success",
-    message: `[PUBLISHER] post ${post._id} success`,
+    message: `PAGE_PUBLISH_SUCCESS: Shopee post published to ${page.name}`,
     relatedJobId: job._id,
     relatedPostId: String(post._id),
     relatedScheduleId: job.scheduleId,
@@ -1486,7 +1682,7 @@ async function executePostJob(job: JobExecution) {
     }
   });
 
-  if (hasBoundAutoPostConfig(job)) {
+  if (!(await updateBoundShopeeAutoPostRunState(job)) && hasBoundAutoPostConfig(job)) {
     await updateBoundAutoPostState(
       job,
       {
@@ -1776,8 +1972,8 @@ export async function processQueuedJobs(limit = 10, jobType?: JobType) {
         await logAndNotifyError({
           userId: job.userId,
           message: shouldRetry
-            ? `[PUBLISHER] post ${job.postId} failed and will retry (${attempts}/${job.maxAttempts}): ${failure.failureReason}`
-            : `[PUBLISHER] post ${job.postId} failed after ${attempts} attempts: ${failure.failureReason}`,
+            ? `PAGE_PUBLISH_FAILED: post ${job.postId} failed and will retry (${attempts}/${job.maxAttempts}): ${failure.failureReason}`
+            : `PAGE_PUBLISH_FAILED: post ${job.postId} failed after ${attempts} attempts: ${failure.failureReason}`,
           metadata: {
             ...getAutoPostLogFlags(job),
             targetPageId: job.targetPageId,
@@ -1796,7 +1992,7 @@ export async function processQueuedJobs(limit = 10, jobType?: JobType) {
         });
       }
 
-        if (job.type !== "comment-reply" && hasBoundAutoPostConfig(job)) {
+        if (job.type !== "comment-reply" && !(await updateBoundShopeeAutoPostRunState(job)) && hasBoundAutoPostConfig(job)) {
           await updateBoundAutoPostState(
             job,
             {

@@ -1,4 +1,5 @@
 import { jsonError, jsonOk, requireAuth } from "@/lib/api";
+import { ActionLog } from "@/models/ActionLog";
 import { Job } from "@/models/Job";
 
 type RawJobStatus = "queued" | "processing" | "success" | "failed" | "retrying" | "rate_limited" | "duplicate_blocked";
@@ -28,13 +29,30 @@ function sanitizeLegacyMessage(value?: string | null) {
   return value;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const userId = await requireAuth();
-    const jobs = await Job.find({
+    const { searchParams } = new URL(request.url);
+    const jobId = searchParams.get("jobId");
+    const workflowRunId = searchParams.get("workflowRunId");
+    const jobQuery: Record<string, unknown> = {
       userId,
-      "payload.autoSource": "google-drive"
-    })
+      type: "post",
+      $or: [
+        { "payload.autoSource": "shopee-affiliate" },
+        { "payload.autoPostConfigId": { $exists: true } }
+      ]
+    };
+
+    if (jobId) {
+      jobQuery._id = jobId;
+    }
+
+    if (workflowRunId) {
+      jobQuery["payload.workflowRunId"] = workflowRunId;
+    }
+
+    const jobs = await Job.find(jobQuery)
       .sort({ createdAt: -1 })
       .limit(30)
       .lean();
@@ -57,7 +75,32 @@ export async function GET() {
       maxAttempts: job.maxAttempts ?? 3
     }));
 
-    return jsonOk({ jobs: normalizedJobs });
+    const actionQuery: Record<string, unknown> = {
+      userId,
+      "metadata.autoPost": true
+    };
+    if (jobId) {
+      actionQuery.relatedJobId = jobId;
+    }
+    if (workflowRunId) {
+      actionQuery["metadata.workflowRunId"] = workflowRunId;
+    }
+
+    const logs = await ActionLog.find(actionQuery)
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean();
+
+    return jsonOk({
+      jobs: normalizedJobs,
+      logs: logs.map((log) => ({
+        _id: String(log._id),
+        level: log.level,
+        message: sanitizeLegacyMessage(log.message),
+        createdAt: log.createdAt,
+        metadata: log.metadata ?? {}
+      }))
+    });
   } catch {
     return jsonError("Unauthorized", 401);
   }

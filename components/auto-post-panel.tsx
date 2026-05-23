@@ -2,7 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
-type AutoPostStatus = "idle" | "running" | "posting" | "success" | "failed" | "retrying" | "paused" | "waiting";
+type AutoPostStatus = "idle" | "running" | "posting" | "success" | "partial_success" | "failed" | "retrying" | "paused" | "waiting";
 type CaptionStrategy = "manual" | "ai" | "hybrid";
 
 type AutoPostConfig = {
@@ -54,9 +54,31 @@ type ControlPanelStatus = {
   lastPublishAt?: string | null;
   provider?: string;
   connectedPageCount?: number;
+  currentJobId?: string | null;
+  currentStep?: string | null;
+  selectedPagesCount?: number;
+  publishedPagesCount?: number;
+  failedPagesCount?: number;
+  pendingPagesCount?: number;
+  currentPublishingPage?: { pageId?: string; pageName?: string } | null;
+  pageResults?: Array<{
+    jobId: string;
+    pageId: string;
+    pageName: string;
+    status: "pending" | "publishing" | "success" | "failed" | "skipped" | "retrying";
+    rawStatus?: string;
+    facebookPostId?: string | null;
+    errorCode?: string | null;
+    errorMessage?: string | null;
+    startedAt?: string | null;
+    finishedAt?: string | null;
+  }>;
+  latestLogs?: StatusLog[];
+  lastActivityAt?: string | null;
+  lastSuccessAt?: string | null;
   missingEnv?: string[];
   lastError?: {
-    source?: "internal_api" | "shopee_api" | "config" | "unknown";
+    source?: "internal_api" | "shopee_api" | "facebook_api" | "config" | "unknown";
     status?: number | null;
     message?: string;
   } | null;
@@ -247,6 +269,8 @@ function statusLabel(status?: AutoPostStatus) {
       return "Posting";
     case "success":
       return "Success";
+    case "partial_success":
+      return "Partial success";
     case "failed":
       return "Failed";
     case "retrying":
@@ -282,6 +306,8 @@ function statusTone(status?: AutoPostStatus) {
       return "badge-info";
     case "success":
       return "badge-success";
+    case "partial_success":
+      return "badge-warn";
     case "failed":
       return "badge-warn";
     case "retrying":
@@ -348,7 +374,8 @@ export function AutoPostPanel() {
       if (statusJson.ok) {
         const statusData = statusJson.data as StatusResponse;
         setConfig((current) => ({ ...current, ...defaults, ...statusData.config }));
-        setLogs((statusData.logs ?? []).slice(0, 10).map((log) => ({ ...log, message: sanitizeText(log.message) })));
+        const liveLogs = statusData.controlPanel?.latestLogs ?? statusData.logs ?? [];
+        setLogs(liveLogs.slice(0, 20).map((log) => ({ ...log, message: sanitizeText(log.message) })));
         setControlPanel(statusData.controlPanel ?? null);
       } else if (statusJson.message) {
         setError(statusJson.message);
@@ -408,7 +435,7 @@ export function AutoPostPanel() {
   }, [loadStatus]);
 
   useEffect(() => {
-    const interval = window.setInterval(() => loadStatus(false), 10000);
+    const interval = window.setInterval(() => loadStatus(false), 4000);
     return () => window.clearInterval(interval);
   }, [loadStatus]);
 
@@ -542,7 +569,8 @@ export function AutoPostPanel() {
   const visibleState: PanelState = loading ? "loading" : panelState;
   const hasFacebookPages = pages.length > 0;
   const setupRequired = visibleState === "setup_required" || controlPanel?.affiliateConfigStatus === "setup_required";
-  const startDisabled = starting || saving || setupRequired || ["running", "posting", "retrying"].includes(config.autoPostStatus ?? "");
+  const displayStatus = ((controlPanel?.autoPostEngineStatus as AutoPostStatus | undefined) ?? config.autoPostStatus ?? "paused");
+  const startDisabled = starting || saving || setupRequired || ["running", "posting", "retrying"].includes(displayStatus);
   const facebookRequired = visibleState === "facebook_required" || !hasFacebookPages;
   const blockingError = visibleState === "error" ? error || "Unable to load Auto Post control panel" : "";
   const missingConfig = controlPanel?.missingEnv?.length ? ` Missing: ${controlPanel.missingEnv.join(", ")}` : "";
@@ -881,7 +909,7 @@ export function AutoPostPanel() {
             <div className="kicker">Status</div>
             <h3>Control & Monitor</h3>
           </div>
-          <span className={`badge ${statusTone(config.autoPostStatus)}`}>{statusLabel(config.autoPostStatus)}</span>
+          <span className={`badge ${statusTone(displayStatus)}`}>{statusLabel(displayStatus)}</span>
         </div>
 
         {renderStateBanner()}
@@ -896,6 +924,39 @@ export function AutoPostPanel() {
           <div className="auto-post-metric-card"><span className="muted">Last product fetch time</span><strong>{formatDateTime(controlPanel?.lastProductFetchAt ?? undefined)}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Last publish time</span><strong>{formatDateTime(controlPanel?.lastPublishAt ?? undefined)}</strong></div>
         </div>
+        <div className="grid cols-2 auto-post-metrics auto-post-metrics-minimal">
+          <div className="auto-post-metric-card"><span className="muted">Current job id</span><strong>{controlPanel?.currentJobId ?? "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Current step</span><strong>{controlPanel?.currentStep ?? statusLabel(displayStatus)}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Selected pages</span><strong>{controlPanel?.selectedPagesCount ?? config.targetPageIds.length}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Current page</span><strong>{controlPanel?.currentPublishingPage?.pageName ?? "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Published</span><strong>{controlPanel?.publishedPagesCount ?? 0}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Failed / Pending</span><strong>{controlPanel?.failedPagesCount ?? 0} / {controlPanel?.pendingPagesCount ?? 0}</strong></div>
+        </div>
+        {controlPanel?.pageResults?.length ? (
+          <div className="stack compact-stack">
+            <div className="split compact-row">
+              <strong>Page results</strong>
+              <span className="badge badge-neutral">{controlPanel.pageResults.length}</span>
+            </div>
+            <div className="auto-post-log-list auto-post-log-list-minimal">
+              {controlPanel.pageResults.map((result) => (
+                <article key={result.jobId} className="auto-post-log-item">
+                  <div className="split compact-row">
+                    <strong>{sanitizeText(result.pageName)}</strong>
+                    <span className={`badge ${result.status === "success" ? "badge-success" : result.status === "failed" ? "badge-warn" : "badge-neutral"}`}>
+                      {result.status}
+                    </span>
+                  </div>
+                  <div className="muted auto-post-log-meta">
+                    Job {result.jobId}
+                    {result.facebookPostId ? ` • Facebook post ${result.facebookPostId}` : ""}
+                    {result.errorMessage ? ` • ${sanitizeText(result.errorMessage)}` : ""}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+        ) : null}
         {controlPanel?.missingEnv?.length ? (
           <div className="composer-message composer-message-error">
             Shopee Affiliate setup required. Missing: {controlPanel.missingEnv.join(", ")}
@@ -931,7 +992,7 @@ export function AutoPostPanel() {
           <div className="auto-post-metric-card"><span className="muted">Last run</span><strong>{formatDateTime(config.lastRunAt)}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Next run</span><strong>{formatDateTime(config.nextRunAt)}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Current job</span><strong>{jobStatusLabel(config.jobStatus)}</strong></div>
-          <div className="auto-post-metric-card"><span className="muted">Last error</span><strong>{sanitizeText(config.lastError) || "None"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Last error</span><strong>{lastShopeeError || sanitizeText(config.lastError) || "None"}</strong></div>
         </div>
 
         <div className="stack compact-stack">

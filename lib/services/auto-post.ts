@@ -601,6 +601,7 @@ async function queueShopeeAutoPostsForConfig(
   let queued = 0;
   let lastPostId: unknown = null;
   const batchDelayMinutes = options.immediate ? 0 : getRandomDelayMinutes(config.minRandomDelayMinutes ?? 0, config.maxRandomDelayMinutes ?? 0);
+  const pageSpacingMinutes = options.immediate ? 0 : AUTO_POST_BATCH_PAGE_SPACING_MINUTES;
   const batchRequestedStartAt = new Date(Date.now() + batchDelayMinutes * 60 * 1000);
   const batchStartAt = fitBatchStartToPostingWindow(
     batchRequestedStartAt,
@@ -611,7 +612,7 @@ async function queueShopeeAutoPostsForConfig(
 
   for (let index = 0; index < selectedProducts.length; index += 1) {
     const selected = selectedProducts[index];
-    const startAt = new Date(batchStartAt.getTime() + index * AUTO_POST_BATCH_PAGE_SPACING_MINUTES * 60 * 1000);
+    const startAt = new Date(batchStartAt.getTime() + index * pageSpacingMinutes * 60 * 1000);
     const trackingId = config.shopeeTrackingId?.trim() || `page-${selected.pageId}`;
     const stepStartedAt = Date.now();
     await logShopeeStep({
@@ -706,7 +707,9 @@ async function queueShopeeAutoPostsForConfig(
             affiliateUrl: packageResult.affiliateLink,
             imageCount: packageResult.generatedImageUrls.length,
             aiGeneratedPostId: packageResult.aiGeneratedPostId,
-            scheduledDelayMinutes: batchDelayMinutes + index * AUTO_POST_BATCH_PAGE_SPACING_MINUTES,
+            selectedPagesCount: eligiblePageIds.length,
+            pageIndex: index + 1,
+            scheduledDelayMinutes: batchDelayMinutes + index * pageSpacingMinutes,
             workflowId: records.workflowId,
             workflowRunId: records.workflowRunId,
             contentItemId: records.contentItemId
