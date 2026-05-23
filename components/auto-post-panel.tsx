@@ -663,7 +663,10 @@ export function AutoPostPanel() {
       const response = await fetch("/api/auto-post/cleanup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason: "monitor_button" })
+        body: JSON.stringify({
+          aggressive: controlPanel?.storage?.status === "critical",
+          reason: controlPanel?.storage?.status === "critical" ? "critical_monitor_button" : "monitor_button"
+        })
       });
       const result = await readApiResult(response);
       if (!result.ok) throw new Error(result.message || "Unable to run storage cleanup");

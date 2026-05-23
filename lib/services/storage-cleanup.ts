@@ -5,8 +5,10 @@ import { AffiliateLink } from "@/models/AffiliateLink";
 import { AffiliatePerformance } from "@/models/AffiliatePerformance";
 import { AiGeneratedImage } from "@/models/AiGeneratedImage";
 import { AiGeneratedPost } from "@/models/AiGeneratedPost";
+import { AuditEntry } from "@/models/AuditEntry";
 import { FacebookPostQueue } from "@/models/FacebookPostQueue";
 import { Job } from "@/models/Job";
+import { Notification } from "@/models/Notification";
 import { ProductPostHistory } from "@/models/ProductPostHistory";
 import { ShopeeProduct } from "@/models/ShopeeProduct";
 import { safeLogAction } from "@/lib/services/logging";
@@ -23,6 +25,8 @@ type CleanupBucket =
   | "generatedCaptions"
   | "products"
   | "affiliateLinks"
+  | "auditEntries"
+  | "notifications"
   | "jobs"
   | "dynamicCollections";
 
@@ -138,6 +142,8 @@ function emptyCounts(): CleanupCounts {
     generatedCaptions: 0,
     products: 0,
     affiliateLinks: 0,
+    auditEntries: 0,
+    notifications: 0,
     jobs: 0,
     dynamicCollections: 0
   };
@@ -247,13 +253,20 @@ export async function ensureStorageIndexes() {
 
 export async function getStorageStatus() {
   await connectDb();
+  const db = mongoose.connection.db;
   const config = getStorageCleanupConfig();
   const usage = await getDatabaseUsageBytes();
   const percent = config.limitBytes > 0 ? Math.round((usage.usedBytes / config.limitBytes) * 1000) / 10 : 0;
 
-  const collectionStats = (
-    await Promise.all(SUMMARY_COLLECTIONS.map((name) => safeCollectionStats(name)))
-  )
+  const collectionNames = db
+    ? Array.from(
+        new Set([
+          ...SUMMARY_COLLECTIONS,
+          ...(await db.listCollections().toArray()).map((collection) => collection.name)
+        ])
+      )
+    : [...SUMMARY_COLLECTIONS];
+  const collectionStats = (await Promise.all(collectionNames.map((name) => safeCollectionStats(name))))
     .filter((item): item is CollectionStat => Boolean(item))
     .sort((a, b) => b.storageBytes + b.indexBytes - (a.storageBytes + a.indexBytes));
 
@@ -331,9 +344,11 @@ export async function runStorageCleanup(input: {
 } = {}) {
   await connectDb();
   const config = getStorageCleanupConfig();
-  const mode: CleanupMode = input.aggressive ? "aggressive" : "normal";
   const startedAt = new Date();
   const before = await getStorageStatus();
+  const shouldForceAggressive = before.percent >= config.criticalThresholdPercent;
+  const aggressive = input.aggressive || shouldForceAggressive;
+  const mode: CleanupMode = aggressive ? "aggressive" : "normal";
   const counts = emptyCounts();
 
   if (!config.enabled) {
@@ -351,14 +366,20 @@ export async function runStorageCleanup(input: {
     };
   }
 
-  await ensureStorageIndexes();
+  if (!aggressive) {
+    await ensureStorageIndexes().catch((error) => {
+      console.warn("[storage-cleanup] skipped index creation before cleanup", {
+        message: error instanceof Error ? error.message : "Unknown index error"
+      });
+    });
+  }
 
-  const logsCutoff = input.aggressive ? dateBefore(DAY_MS) : dateBefore(config.autoPostLogRetentionDays * DAY_MS);
-  const failedCutoff = input.aggressive ? dateBefore(DAY_MS) : dateBefore(config.failedJobRetentionDays * DAY_MS);
-  const rawCutoff = input.aggressive ? dateBefore(0) : dateBefore(config.rawResponseRetentionDays * DAY_MS);
-  const previewCutoff = input.aggressive ? dateBefore(0) : dateBefore(config.previewRetentionHours * HOUR_MS);
-  const unusedImageCutoff = input.aggressive ? dateBefore(0) : dateBefore(config.unusedImageRetentionHours * HOUR_MS);
-  const staleProductCutoff = input.aggressive ? dateBefore(config.autoPostLogRetentionDays * DAY_MS) : dateBefore(7 * DAY_MS);
+  const logsCutoff = aggressive ? dateBefore(HOUR_MS) : dateBefore(config.autoPostLogRetentionDays * DAY_MS);
+  const failedCutoff = aggressive ? dateBefore(HOUR_MS) : dateBefore(config.failedJobRetentionDays * DAY_MS);
+  const rawCutoff = aggressive ? dateBefore(0) : dateBefore(config.rawResponseRetentionDays * DAY_MS);
+  const previewCutoff = aggressive ? dateBefore(0) : dateBefore(config.previewRetentionHours * HOUR_MS);
+  const unusedImageCutoff = aggressive ? dateBefore(0) : dateBefore(config.unusedImageRetentionHours * HOUR_MS);
+  const staleProductCutoff = aggressive ? dateBefore(0) : dateBefore(7 * DAY_MS);
   const protectedProductIds = await getProtectedProductIds();
 
   const autoPostLogDelete = await ActionLog.deleteMany({
@@ -377,6 +398,22 @@ export async function runStorageCleanup(input: {
     $or: [{ "metadata.autoPost": true }, { "metadata.shopeeAffiliate": true }, { type: "error" }]
   });
   counts.failedLogs += failedLogDelete.deletedCount ?? 0;
+
+  const auditDelete = await AuditEntry.deleteMany({
+    createdAt: { $lt: logsCutoff },
+    $or: [
+      { action: { $in: ["queue-action", "post-action", "system-event", "settings-update", "analytics-action"] } },
+      { entityType: { $in: ["queue", "post", "error", "settings", "analytics"] } },
+      { summary: /Shopee|Auto Post|auto post|QUEUE_|JOB_/i }
+    ]
+  });
+  counts.auditEntries += auditDelete.deletedCount ?? 0;
+
+  const notificationDelete = await Notification.deleteMany({
+    createdAt: { $lt: failedCutoff },
+    type: { $in: ["error", "system", "rate_limit"] }
+  });
+  counts.notifications += notificationDelete.deletedCount ?? 0;
 
   const failedImageDelete = await AiGeneratedImage.deleteMany({
     createdAt: { $lt: unusedImageCutoff },
@@ -428,7 +465,7 @@ export async function runStorageCleanup(input: {
 
   for (const collectionName of DYNAMIC_CLEANUP_COLLECTIONS) {
     const cutoff = collectionName.startsWith("raw_") ? rawCutoff : failedCutoff;
-    const deleted = await deleteDynamicCollectionRows(collectionName, cutoff, input.aggressive ?? false);
+    const deleted = await deleteDynamicCollectionRows(collectionName, cutoff, aggressive);
     if (collectionName.startsWith("raw_")) {
       counts.rawResponses += deleted;
     } else if (collectionName.includes("image")) {
@@ -456,6 +493,7 @@ export async function runStorageCleanup(input: {
         cleanupType: "storage",
         mode,
         reason: input.reason ?? "manual",
+        forcedAggressive: shouldForceAggressive,
         deleted: counts,
         deletedTotal,
         estimatedFreedBytes,
