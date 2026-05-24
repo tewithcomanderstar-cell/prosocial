@@ -197,7 +197,11 @@ export async function cleanupAutoPostBlobs(input: {
 }
 
 function isLargeMongoField(key: string, value: unknown) {
-  const sensitiveKey = /base64|imageBase64|rawImage|rawResponse|rawBuffer|binary|buffer|bytes/i.test(key);
+  const normalizedKey = key.toLowerCase();
+  const safeMetadataKeys = new Set(["sizebytes", "bytesize", "contentlength", "contenttype"]);
+  const sensitiveKey =
+    !safeMetadataKeys.has(normalizedKey) &&
+    /(base64|imagebase64|rawimage|rawresponse|rawbuffer|binary|buffer|bytesbase64|filebytes|imagebytes|rawbytes)/i.test(key);
   if (sensitiveKey) return true;
 
   if (typeof value === "string") {
