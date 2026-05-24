@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type AutoPostStatus = "idle" | "running" | "posting" | "success" | "partial_success" | "failed" | "retrying" | "paused" | "waiting";
 type CaptionStrategy = "manual" | "ai" | "hybrid";
@@ -54,6 +54,7 @@ type ControlPanelStatus = {
   lastPublishAt?: string | null;
   provider?: string;
   connectedPageCount?: number;
+  facebookPages?: FacebookPage[];
   currentJobId?: string | null;
   currentStep?: string | null;
   selectedPagesCount?: number;
@@ -369,8 +370,20 @@ export function AutoPostPanel() {
   const [stopping, setStopping] = useState(false);
   const [clearingStuck, setClearingStuck] = useState(false);
   const [cleaningStorage, setCleaningStorage] = useState(false);
+  const loadStatusInFlightRef = useRef(false);
+  const pagesRef = useRef<FacebookPage[]>([]);
+
+  useEffect(() => {
+    pagesRef.current = pages;
+  }, [pages]);
 
   const loadStatus = useCallback(async (showLoader = false) => {
+    if (loadStatusInFlightRef.current) {
+      console.info("[auto-post/control-panel] fetch skipped because previous request is still running");
+      return;
+    }
+
+    loadStatusInFlightRef.current = true;
     if (showLoader) {
       setLoading(true);
       setPanelState("loading");
@@ -379,7 +392,7 @@ export function AutoPostPanel() {
 
     try {
       const [statusResult, pagesResult, queueResult] = await Promise.allSettled([
-        fetchWithTimeout("/api/auto-post/status", { cache: "no-store" }),
+        fetchWithTimeout("/api/auto-post/status", { cache: "no-store" }, 20000),
         fetchWithTimeout("/api/facebook/pages", { cache: "no-store" }, 20000),
         fetchWithTimeout("/api/shopee/queue", { cache: "no-store" })
       ]);
@@ -397,24 +410,42 @@ export function AutoPostPanel() {
           ? await readApiResult(queueResult.value)
           : { ok: false, message: queueResult.reason instanceof Error ? queueResult.reason.message : "Unable to load Shopee queue" };
 
+      let statusData: StatusResponse | null = null;
       if (statusJson.ok) {
-        const statusData = statusJson.data as StatusResponse;
-        setConfig((current) => ({ ...current, ...defaults, ...statusData.config }));
-        const liveLogs = statusData.controlPanel?.latestLogs ?? statusData.logs ?? [];
+        const loadedStatusData = statusJson.data as StatusResponse;
+        statusData = loadedStatusData;
+        setConfig((current) => ({ ...current, ...defaults, ...loadedStatusData.config }));
+        const liveLogs = loadedStatusData.controlPanel?.latestLogs ?? loadedStatusData.logs ?? [];
         setLogs(liveLogs.slice(0, 20).map((log) => ({ ...log, message: sanitizeText(log.message) })));
-        setControlPanel(statusData.controlPanel ?? null);
+        setControlPanel(loadedStatusData.controlPanel ?? null);
       } else if (statusJson.message) {
         setError(statusJson.message);
       }
 
       const parsedPages = pagesJson.ok ? normalizePagesResponse(pagesJson) : [];
+      const statusPages = normalizePagesResponse(statusData?.controlPanel?.facebookPages ?? []);
+      const existingPages = pagesRef.current;
+      const fallbackPages = statusPages.length > 0 ? statusPages : existingPages;
+      const effectivePageCount =
+        parsedPages.length ||
+        fallbackPages.length ||
+        Number(statusData?.controlPanel?.connectedPageCount ?? 0) ||
+        Number(statusData?.controlPanel?.selectedPagesCount ?? 0) ||
+        (Array.isArray(statusData?.config?.targetPageIds) ? statusData.config.targetPageIds.length : 0);
+
       if (parsedPages.length > 0) {
         setPages(parsedPages);
+        pagesRef.current = parsedPages;
         if (pagesJson.data?.warning || pagesJson.warning) {
           setMessage(String(pagesJson.data?.warning ?? pagesJson.warning));
         }
-      } else if (pagesJson.message) {
-        setPages([]);
+      } else if (fallbackPages.length > 0) {
+        setPages(fallbackPages);
+        pagesRef.current = fallbackPages;
+        if (!pagesJson.ok && pagesJson.message) {
+          setMessage(`Using cached Facebook pages. Live refresh issue: ${pagesJson.message}`);
+        }
+      } else if (pagesJson.message && effectivePageCount === 0) {
         setError(pagesJson.message);
       }
 
@@ -423,17 +454,17 @@ export function AutoPostPanel() {
         setQueuePreview(parsedQueue);
       }
 
-      const statusState = statusJson.ok ? (statusJson.data as StatusResponse).controlPanel?.state : undefined;
-      const shopeeApiStatus = statusJson.ok ? (statusJson.data as StatusResponse).controlPanel?.shopeeApiStatus : undefined;
+      const statusState = statusData?.controlPanel?.state;
+      const shopeeApiStatus = statusData?.controlPanel?.shopeeApiStatus;
       const nextState: PanelState = !statusJson.ok
         ? "error"
         : shopeeApiStatus === "unauthorized"
           ? "unauthorized"
           : shopeeApiStatus === "mock"
             ? "mock_mode"
-            : statusState === "setup_required"
+          : statusState === "setup_required"
           ? "setup_required"
-          : parsedPages.length === 0
+          : effectivePageCount === 0
             ? "facebook_required"
             : "ready";
       setPanelState(nextState);
@@ -441,6 +472,8 @@ export function AutoPostPanel() {
         statusOk: Boolean(statusJson.ok),
         pagesOk: Boolean(pagesJson.ok),
         parsedPagesCount: parsedPages.length,
+        statusPagesCount: statusPages.length,
+        effectivePageCount,
         queuePreviewCount: parsedQueue.length,
         responseKeys: pagesJson ? Object.keys(pagesJson) : [],
         shopeeApiStatus,
@@ -453,6 +486,7 @@ export function AutoPostPanel() {
       setPanelState("error");
     } finally {
       setLoading(false);
+      loadStatusInFlightRef.current = false;
     }
   }, []);
 

@@ -107,6 +107,52 @@ function normalizePageJobStatus(status?: string) {
   return "pending";
 }
 
+function storageStatusFallback() {
+  const limitMb = Number(process.env.MONGODB_STORAGE_LIMIT_MB ?? process.env.STORAGE_LIMIT_MB ?? 512);
+  const limitBytes = Number.isFinite(limitMb) && limitMb > 0 ? limitMb * 1024 * 1024 : 512 * 1024 * 1024;
+
+  return {
+    enabled: process.env.STORAGE_CLEANUP_ENABLED !== "false",
+    usedBytes: 0,
+    dataBytes: 0,
+    storageBytes: 0,
+    indexBytes: 0,
+    limitBytes,
+    percent: 0,
+    warningThresholdPercent: Number(process.env.STORAGE_WARNING_THRESHOLD_PERCENT ?? 85),
+    criticalThresholdPercent: Number(process.env.STORAGE_CRITICAL_THRESHOLD_PERCENT ?? 95),
+    status: "ok" as const,
+    lastCleanup: null,
+    collections: [],
+    warning: "storage_status_timeout"
+  };
+}
+
+async function withSoftTimeout<T>(task: Promise<T>, timeoutMs: number, fallback: T, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  return Promise.race([
+    task.catch((error) => {
+      console.warn("[auto-post/control-panel] optional status task failed", {
+        label,
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
+      return fallback;
+    }),
+    new Promise<T>((resolve) => {
+      timer = setTimeout(() => {
+        console.warn("[auto-post/control-panel] optional status task timed out", {
+          label,
+          timeoutMs
+        });
+        resolve(fallback);
+      }, timeoutMs);
+    })
+  ]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
 export async function GET() {
   try {
     const { requireAuth } = await import("@/lib/api");
@@ -171,7 +217,7 @@ export async function GET() {
     );
     const shopeeProvider = getShopeeProductProvider();
     const shopeeEnvStatus = getShopeeEnvStatus();
-    const storage = await getStorageStatus();
+    const storage = await withSoftTimeout(getStorageStatus(), 2500, storageStatusFallback(), "storage-status");
     const lastProduct = await ShopeeProduct.findOne({}).sort({ fetchedAt: -1 }).select("fetchedAt").lean();
     const lastPublishedQueueItem = await FacebookPostQueue.findOne({ userId, status: "published" })
       .sort({ updatedAt: -1 })
@@ -280,6 +326,10 @@ export async function GET() {
       lastPublishAt: (lastPublishedQueueItem as any)?.updatedAt ?? null,
       provider: shopeeProvider.name,
       connectedPageCount,
+      facebookPages: facebookPages.map((page: any) => ({
+        pageId: String(page.pageId ?? page.id ?? page.externalPageId ?? ""),
+        name: String(page.name ?? page.pageName ?? "Facebook Page")
+      })).filter((page: { pageId: string; name: string }) => page.pageId.length > 0),
       currentJobId: latestProcessingJob ? String(latestProcessingJob._id) : runJobs[0]?._id ? String(runJobs[0]._id) : null,
       currentStep,
       selectedPagesCount,
