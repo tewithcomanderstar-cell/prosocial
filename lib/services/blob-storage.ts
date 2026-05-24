@@ -211,6 +211,18 @@ function isLargeMongoField(key: string, value: unknown) {
   return Buffer.isBuffer(value);
 }
 
+function shouldTraverseMongoPayload(value: unknown) {
+  if (!value || typeof value !== "object") return false;
+  if (Buffer.isBuffer(value)) return false;
+  if (value instanceof Date) return false;
+
+  const maybeBson = value as { _bsontype?: unknown };
+  if (typeof maybeBson._bsontype === "string") return false;
+
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
 export function assertNoLargeMongoFields(value: unknown, context = "MongoDB payload") {
   const stack: Array<{ path: string; value: unknown }> = [{ path: context, value }];
 
@@ -224,6 +236,10 @@ export function assertNoLargeMongoFields(value: unknown, context = "MongoDB payl
     }
 
     if (!current.value || typeof current.value !== "object") {
+      continue;
+    }
+
+    if (!shouldTraverseMongoPayload(current.value)) {
       continue;
     }
 
