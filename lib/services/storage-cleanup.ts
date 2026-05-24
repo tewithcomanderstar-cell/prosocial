@@ -8,6 +8,7 @@ import { AiGeneratedPost } from "@/models/AiGeneratedPost";
 import { AuditEntry } from "@/models/AuditEntry";
 import { FacebookPostQueue } from "@/models/FacebookPostQueue";
 import { Job } from "@/models/Job";
+import { MediaCache } from "@/models/MediaCache";
 import { Notification } from "@/models/Notification";
 import { ProductPostHistory } from "@/models/ProductPostHistory";
 import { ShopeeProduct } from "@/models/ShopeeProduct";
@@ -28,6 +29,8 @@ type CleanupBucket =
   | "auditEntries"
   | "notifications"
   | "jobs"
+  | "mediaCache"
+  | "legacyBase64Images"
   | "dynamicCollections";
 
 type CleanupCounts = Record<CleanupBucket, number>;
@@ -58,6 +61,7 @@ const HOUR_MS = 60 * 60 * 1000;
 const SUMMARY_COLLECTIONS = [
   "actionlogs",
   "jobs",
+  "mediacaches",
   "facebookpostqueues",
   "aigeneratedimages",
   "aigeneratedposts",
@@ -145,6 +149,8 @@ function emptyCounts(): CleanupCounts {
     auditEntries: 0,
     notifications: 0,
     jobs: 0,
+    mediaCache: 0,
+    legacyBase64Images: 0,
     dynamicCollections: 0
   };
 }
@@ -206,7 +212,9 @@ async function getDatabaseUsageBytes() {
   const indexBytes = Number(stats.indexSize ?? 0);
 
   return {
-    usedBytes: storageBytes + indexBytes,
+    // Use logical data + index size for quota decisions. WiredTiger storageSize may
+    // stay high after deletes until compaction, which makes cleanup look ineffective.
+    usedBytes: dataBytes + indexBytes,
     dataBytes,
     storageBytes,
     indexBytes
@@ -337,6 +345,26 @@ async function getProtectedProductIds() {
   return Array.from(new Set([...postedProducts, ...activeLinks, ...activeQueue, ...analyticsProducts].map(String)));
 }
 
+async function deleteByBatches(collection: mongoose.Collection, query: Record<string, unknown>, batchSize = 250) {
+  let deleted = 0;
+
+  for (;;) {
+    const docs = await collection
+      .find(query, { projection: { _id: 1 } })
+      .limit(batchSize)
+      .toArray();
+
+    if (docs.length === 0) break;
+
+    const result = await collection.deleteMany({ _id: { $in: docs.map((doc) => doc._id) } });
+    deleted += result.deletedCount ?? 0;
+
+    if (docs.length < batchSize) break;
+  }
+
+  return deleted;
+}
+
 export async function runStorageCleanup(input: {
   userId?: string;
   aggressive?: boolean;
@@ -347,6 +375,7 @@ export async function runStorageCleanup(input: {
   const startedAt = new Date();
   const before = await getStorageStatus();
   const shouldForceAggressive = before.percent >= config.criticalThresholdPercent;
+  const emergency = before.percent >= 100;
   const aggressive = input.aggressive || shouldForceAggressive;
   const mode: CleanupMode = aggressive ? "aggressive" : "normal";
   const counts = emptyCounts();
@@ -374,8 +403,8 @@ export async function runStorageCleanup(input: {
     });
   }
 
-  const logsCutoff = aggressive ? dateBefore(HOUR_MS) : dateBefore(config.autoPostLogRetentionDays * DAY_MS);
-  const failedCutoff = aggressive ? dateBefore(HOUR_MS) : dateBefore(config.failedJobRetentionDays * DAY_MS);
+  const logsCutoff = emergency ? dateBefore(0) : aggressive ? dateBefore(HOUR_MS) : dateBefore(config.autoPostLogRetentionDays * DAY_MS);
+  const failedCutoff = emergency ? dateBefore(0) : aggressive ? dateBefore(HOUR_MS) : dateBefore(config.failedJobRetentionDays * DAY_MS);
   const rawCutoff = aggressive ? dateBefore(0) : dateBefore(config.rawResponseRetentionDays * DAY_MS);
   const previewCutoff = aggressive ? dateBefore(0) : dateBefore(config.previewRetentionHours * HOUR_MS);
   const unusedImageCutoff = aggressive ? dateBefore(0) : dateBefore(config.unusedImageRetentionHours * HOUR_MS);
@@ -414,6 +443,32 @@ export async function runStorageCleanup(input: {
     type: { $in: ["error", "system", "rate_limit"] }
   });
   counts.notifications += notificationDelete.deletedCount ?? 0;
+
+  const mediaCacheDelete = await MediaCache.deleteMany(
+    emergency
+      ? {}
+      : {
+          $or: [
+            { expiresAt: { $lt: new Date() } },
+            { createdAt: { $lt: previewCutoff } },
+            { source: { $in: ["google-drive", "upload", "auto-post"] } }
+          ]
+        }
+  );
+  counts.mediaCache += mediaCacheDelete.deletedCount ?? 0;
+
+  const legacyBase64Query = {
+    generatedImageUrl: /^data:image\//,
+    ...(emergency
+      ? {}
+      : {
+          $or: [
+            { createdAt: { $lt: unusedImageCutoff } },
+            { status: { $in: ["failed", "skipped", "pending", "generating"] } }
+          ]
+        })
+  };
+  counts.legacyBase64Images += await deleteByBatches(AiGeneratedImage.collection, legacyBase64Query, emergency ? 500 : 200);
 
   const failedImageDelete = await AiGeneratedImage.deleteMany({
     createdAt: { $lt: unusedImageCutoff },
@@ -482,7 +537,7 @@ export async function runStorageCleanup(input: {
   const estimatedFreedBytes = Math.max(0, before.usedBytes - after.usedBytes);
   const finishedAt = new Date();
 
-  if (input.userId) {
+  if (input.userId && !emergency) {
     await safeLogAction({
       userId: input.userId,
       type: "queue",
@@ -494,6 +549,7 @@ export async function runStorageCleanup(input: {
         mode,
         reason: input.reason ?? "manual",
         forcedAggressive: shouldForceAggressive,
+        emergency,
         deleted: counts,
         deletedTotal,
         estimatedFreedBytes,
