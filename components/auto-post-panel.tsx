@@ -380,7 +380,7 @@ export function AutoPostPanel() {
     try {
       const [statusResult, pagesResult, queueResult] = await Promise.allSettled([
         fetchWithTimeout("/api/auto-post/status", { cache: "no-store" }),
-        fetchWithTimeout("/api/facebook/pages", { cache: "no-store" }),
+        fetchWithTimeout("/api/facebook/pages", { cache: "no-store" }, 20000),
         fetchWithTimeout("/api/shopee/queue", { cache: "no-store" })
       ]);
 

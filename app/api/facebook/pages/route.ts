@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { jsonError, normalizeRouteError, requireAuth } from "@/lib/api";
 import { connectDb } from "@/lib/db";
-import { resolveCurrentWorkspaceOrCreate } from "@/lib/services/workspace";
 import { getCachedFacebookPagesState, getResolvedFacebookPagesState } from "@/lib/services/facebook-pages-state";
 import { FacebookConnection } from "@/models/FacebookConnection";
 
@@ -24,13 +23,10 @@ function shouldValidateLive(request: Request) {
 
 export async function GET(request: Request) {
   let userId: string | null = null;
-  let workspaceId: string | null = null;
 
   try {
     await connectDb();
     userId = await requireAuth();
-    const workspace = await resolveCurrentWorkspaceOrCreate(userId);
-    workspaceId = String(workspace._id);
     const validateLive = shouldValidateLive(request);
     const payload = validateLive
       ? await getResolvedFacebookPagesState(userId)
@@ -38,8 +34,6 @@ export async function GET(request: Request) {
 
     console.info("[facebook/pages] resolved pages list", {
       userId,
-      workspaceId,
-      workspaceIdPresent: Boolean(workspace?._id),
       validateLive,
       responseShape: payload.responseShape,
       connectedPageCount: payload.storedConnectedPageCount,
@@ -78,7 +72,6 @@ export async function GET(request: Request) {
         const normalized = normalizeRouteError(error, "Unable to validate Facebook pages right now.");
         console.warn("[facebook/pages] returned cached pages after warning", {
           userId,
-          workspaceId,
           responseShape: "data.pages",
           pagesCount: cachedPages.length,
           parsedPagesCount: cachedPages.length,
