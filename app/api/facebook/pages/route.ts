@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { jsonError, normalizeRouteError, requireAuth } from "@/lib/api";
 import { connectDb } from "@/lib/db";
 import { resolveCurrentWorkspaceOrCreate } from "@/lib/services/workspace";
-import { getResolvedFacebookPagesState } from "@/lib/services/facebook-pages-state";
+import { getCachedFacebookPagesState, getResolvedFacebookPagesState } from "@/lib/services/facebook-pages-state";
 import { FacebookConnection } from "@/models/FacebookConnection";
 
 type CachedFacebookConnection = {
@@ -17,7 +17,12 @@ type CachedFacebookConnection = {
   }>;
 };
 
-export async function GET() {
+function shouldValidateLive(request: Request) {
+  const url = new URL(request.url);
+  return url.searchParams.get("validate") === "1" || url.searchParams.get("live") === "1";
+}
+
+export async function GET(request: Request) {
   let userId: string | null = null;
   let workspaceId: string | null = null;
 
@@ -26,12 +31,16 @@ export async function GET() {
     userId = await requireAuth();
     const workspace = await resolveCurrentWorkspaceOrCreate(userId);
     workspaceId = String(workspace._id);
-    const payload = await getResolvedFacebookPagesState(userId);
+    const validateLive = shouldValidateLive(request);
+    const payload = validateLive
+      ? await getResolvedFacebookPagesState(userId)
+      : await getCachedFacebookPagesState(userId);
 
     console.info("[facebook/pages] resolved pages list", {
       userId,
       workspaceId,
       workspaceIdPresent: Boolean(workspace?._id),
+      validateLive,
       responseShape: payload.responseShape,
       connectedPageCount: payload.storedConnectedPageCount,
       pagesCount: payload.count,

@@ -69,3 +69,34 @@ export async function getResolvedFacebookPagesState(userId: string) {
     responseShape: "data.pages" as const
   };
 }
+
+export async function getCachedFacebookPagesState(userId: string) {
+  const storedConnection = (await FacebookConnection.findOne({ userId }).lean()) as LeanFacebookConnection | null;
+
+  if (!storedConnection) {
+    throw new IntegrationConnectionError("Facebook is not connected.", "provider_not_connected", 404);
+  }
+
+  const pages =
+    (storedConnection.pages ?? []).map((page) => ({
+      pageId: page.pageId,
+      name: page.name,
+      category: page.category,
+      profilePictureUrl: page.profilePictureUrl ?? null,
+      profilePictureFetchedAt: page.profilePictureFetchedAt ?? null
+    })) ?? [];
+
+  return {
+    pages,
+    count: pages.length,
+    tokenStatus: storedConnection.tokenStatus ?? "unknown",
+    warning: null,
+    warningCode: null,
+    source: "database_cache" as const,
+    fallbackToCachedPages: true,
+    storedConnectedPageCount: storedConnection.pages?.length ?? 0,
+    storedValidPageTokenCount: (storedConnection.pages ?? []).filter((page) => Boolean(page.pageAccessToken)).length,
+    lastPagesErrorCode: storedConnection.lastErrorCode ?? null,
+    responseShape: "data.pages" as const
+  };
+}
