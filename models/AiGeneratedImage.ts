@@ -6,7 +6,12 @@ const aiGeneratedImageSchema = new Schema(
     productId: { type: String, required: true, index: true },
     prompt: { type: String, required: true },
     generatedImageUrl: { type: String, default: "" },
+    pathname: { type: String, default: "", index: true },
     fallbackImageUrl: { type: String, default: "" },
+    fallbackPathname: { type: String, default: "" },
+    rawResponseUrl: { type: String, default: "" },
+    contentType: { type: String, default: "image/png" },
+    sizeBytes: { type: Number, default: 0 },
     provider: { type: String, default: "fallback_product_image" },
     status: {
       type: String,
@@ -22,5 +27,22 @@ const aiGeneratedImageSchema = new Schema(
 );
 
 aiGeneratedImageSchema.index({ userId: 1, productId: 1, createdAt: -1 });
+
+aiGeneratedImageSchema.pre("validate", function preventLargeImagePayloads(next) {
+  const generatedImageUrl = String(this.get("generatedImageUrl") ?? "");
+  const rawResponseUrl = String(this.get("rawResponseUrl") ?? "");
+
+  if (generatedImageUrl.startsWith("data:image/")) {
+    next(new Error("AiGeneratedImage.generatedImageUrl must be a Blob URL/path, not base64 data."));
+    return;
+  }
+
+  if (rawResponseUrl.length > 0 && !/^https?:\/\//.test(rawResponseUrl)) {
+    next(new Error("AiGeneratedImage.rawResponseUrl must be a Blob URL."));
+    return;
+  }
+
+  next();
+});
 
 export const AiGeneratedImage = models.AiGeneratedImage || model("AiGeneratedImage", aiGeneratedImageSchema);

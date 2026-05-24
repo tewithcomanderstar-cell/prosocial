@@ -2,7 +2,6 @@ import { z } from "zod";
 import { jsonError, jsonOk, normalizeRouteError, parseBody } from "@/lib/api";
 import { cleanupAutoPostBlobs } from "@/lib/services/blob-storage";
 import { handleRoleError, requireRole } from "@/lib/services/permissions";
-import { runStorageCleanup } from "@/lib/services/storage-cleanup";
 
 const cleanupSchema = z.object({
   aggressive: z.boolean().optional(),
@@ -11,33 +10,21 @@ const cleanupSchema = z.object({
 
 export async function POST(request: Request) {
   try {
-    const { userId } = await requireRole(["admin", "editor"]);
+    await requireRole(["admin", "editor"]);
     const body = request.headers.get("content-length") === "0" ? {} : await request.json().catch(() => ({}));
     const payload = parseBody(cleanupSchema, body);
-    const result = await runStorageCleanup({
-      userId,
+    const result = await cleanupAutoPostBlobs({
       aggressive: payload.aggressive,
       reason: payload.reason ?? "manual_button"
     });
-    const blobCleanup = process.env.BLOB_READ_WRITE_TOKEN
-      ? await cleanupAutoPostBlobs({
-          aggressive: payload.aggressive,
-          reason: payload.reason ?? "manual_button"
-        })
-      : {
-          ok: false,
-          enabled: false,
-          reason: "missing_blob_token",
-          deletedTotal: 0
-        };
 
-    return jsonOk({ cleanup: result, blobCleanup }, "Storage cleanup completed");
+    return jsonOk({ cleanup: result }, "Blob cleanup completed");
   } catch (error) {
     if (error instanceof Error && (error.message === "FORBIDDEN" || error.message === "UNAUTHORIZED")) {
       return handleRoleError(error);
     }
 
-    const normalized = normalizeRouteError(error, "Unable to run storage cleanup");
+    const normalized = normalizeRouteError(error, "Unable to run blob cleanup");
     return jsonError(normalized.message, normalized.status, normalized.code);
   }
 }

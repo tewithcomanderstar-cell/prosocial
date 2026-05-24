@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { buildShopeeImagePromptSet as buildShopeeImagePromptSetCore } from "@/lib/services/shopee-affiliate-core";
 import { generateFacebookContent, generateProductReferenceImage } from "@/lib/services/ai";
+import { assertNoLargeMongoFields, uploadAutoPostImage } from "@/lib/services/blob-storage";
 import { logAction } from "@/lib/services/logging";
 import { randomItem } from "@/lib/utils";
 import { AffiliateLink } from "@/models/AffiliateLink";
@@ -147,6 +148,7 @@ export function getShopeeEnvStatus(): ShopeeEnvStatus {
     "SHOPEE_APP_SECRET",
     "SHOPEE_AUTH_MODE",
     "SHOPEE_AFFILIATE_QUERY_MODE",
+    "BLOB_READ_WRITE_TOKEN",
     "CRON_SECRET"
   ];
   const missing = providerMode === "mock" ? [] : requiredGroups.filter((item) => !item.ok).map((item) => item.label);
@@ -185,11 +187,25 @@ export function getShopeeAffiliateConfigStatus(trackingId?: string | null) {
 
 export function ensureShopeeAffiliateConfigured(trackingId?: string | null) {
   const status = getShopeeAffiliateConfigStatus(trackingId);
+  const missingRuntime: string[] = [];
+
+  if (!hasEnv("BLOB_READ_WRITE_TOKEN")) {
+    missingRuntime.push("BLOB_READ_WRITE_TOKEN");
+  }
+
   if (status.status === "setup_required") {
     throw new ShopeeProviderError(
       `Shopee Affiliate setup required. Missing: ${status.missing.join(", ")}`,
       400,
       "shopee_affiliate_setup_required",
+      "config"
+    );
+  }
+  if (missingRuntime.length > 0) {
+    throw new ShopeeProviderError(
+      `Shopee Affiliate storage setup required. Missing: ${missingRuntime.join(", ")}`,
+      400,
+      "shopee_blob_storage_setup_required",
       "config"
     );
   }
@@ -1418,16 +1434,13 @@ function bufferToArrayBuffer(buffer: Buffer) {
   return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer;
 }
 
-function imageDataUrl(buffer: Buffer, mimeType = "image/png") {
-  return `data:${mimeType};base64,${buffer.toString("base64")}`;
-}
-
 function hashImageBuffer(buffer: Buffer) {
   return crypto.createHash("sha256").update(buffer).digest("hex");
 }
 
 async function generateShopeeUgcImageDocs(input: {
   userId: string;
+  jobId?: string;
   product: ShopeeProductRecord;
   promptSet: ReturnType<typeof buildShopeeImagePromptSet>;
   sourceImageUrls: string[];
@@ -1497,14 +1510,26 @@ async function generateShopeeUgcImageDocs(input: {
 
     generatedHashes.add(generatedHash);
 
-    const imageDoc = await AiGeneratedImage.create({
+    const uploadedImage = await uploadAutoPostImage({
+      jobId: input.jobId ?? `shopee-${Date.now()}`,
+      productId: input.product.productId,
+      index: index + 1,
+      buffer: generatedBuffer,
+      mimeType: "image/png",
+      kind: "image"
+    });
+
+    const imagePayload = {
       userId: input.userId,
       productId: input.product.productId,
       prompt: promptItem.prompt,
       status: "generated",
-      generatedImageUrl: imageDataUrl(generatedBuffer),
+      generatedImageUrl: uploadedImage.url,
+      pathname: uploadedImage.pathname,
       fallbackImageUrl: input.product.productImageUrl || input.sourceImageUrls[0],
-      provider: "openai_shopee_ugc_photo",
+      provider: "vercel_blob_openai_shopee_ugc_photo",
+      contentType: uploadedImage.contentType,
+      sizeBytes: uploadedImage.sizeBytes,
       promptHistory: [
         promptItem.title,
         `concept=${promptItem.concept}`,
@@ -1516,7 +1541,9 @@ async function generateShopeeUgcImageDocs(input: {
         "no_text_overlay=true",
         input.promptSet.negativePrompt
       ]
-    });
+    };
+    assertNoLargeMongoFields(imagePayload, "AiGeneratedImage");
+    const imageDoc = await AiGeneratedImage.create(imagePayload);
     imageDocs.push(imageDoc);
   }
 
@@ -1530,6 +1557,7 @@ export async function buildShopeePostPackage(input: {
   scheduledAt: Date;
   captionStyle?: ShopeeCaptionStyle;
   trackingId?: string;
+  jobId?: string;
 }) {
   const linkResult = await createOrReuseAffiliateShortLink({
     userId: input.userId,
@@ -1569,6 +1597,7 @@ export async function buildShopeePostPackage(input: {
 
   const imageDocs = await generateShopeeUgcImageDocs({
     userId: input.userId,
+    jobId: input.jobId,
     product: input.product,
     promptSet: imagePromptSet,
     sourceImageUrls

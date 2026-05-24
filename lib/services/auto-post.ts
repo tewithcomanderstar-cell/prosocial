@@ -636,7 +636,8 @@ async function queueShopeeAutoPostsForConfig(
       product: selected.product,
       scheduledAt: startAt,
       captionStyle: config.shopeeCaptionStyle ?? "soft_sell",
-      trackingId
+      trackingId,
+      jobId: records.workflowRunId
     });
     await logShopeeStep({
       config,
