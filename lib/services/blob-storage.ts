@@ -1,5 +1,6 @@
 import { del, list, put } from "@vercel/blob";
 import { AiGeneratedImage } from "@/models/AiGeneratedImage";
+import { AiGeneratedPost } from "@/models/AiGeneratedPost";
 
 type BlobKind = "image" | "preview" | "temp";
 
@@ -15,6 +16,7 @@ type UploadAutoPostImageInput = {
 
 type BlobCleanupCounts = {
   images: number;
+  publishedImages: number;
   previews: number;
   temp: number;
   rawOpenAi: number;
@@ -160,6 +162,83 @@ async function cleanupUnusedGeneratedImageBlobs(cutoff: Date) {
   return pathnames.length;
 }
 
+function collectImageIdsFromPostMeta(meta: unknown) {
+  if (!meta || typeof meta !== "object") return [];
+  const data = meta as { imageId?: unknown; imageIds?: unknown; generatedImageUrls?: unknown };
+  const ids = new Set<string>();
+
+  if (typeof data.imageId === "string" && data.imageId.trim()) {
+    ids.add(data.imageId.trim());
+  }
+
+  if (Array.isArray(data.imageIds)) {
+    data.imageIds.forEach((value) => {
+      if (typeof value === "string" && value.trim()) ids.add(value.trim());
+    });
+  }
+
+  if (Array.isArray(data.generatedImageUrls)) {
+    data.generatedImageUrls.forEach((value) => {
+      if (typeof value !== "string") return;
+      const match = value.match(/^ai-image:(.+)$/);
+      if (match?.[1]?.trim()) ids.add(match[1].trim());
+    });
+  }
+
+  return Array.from(ids);
+}
+
+async function cleanupPublishedGeneratedImageBlobs(cutoff: Date) {
+  assertBlobConfigured();
+
+  const publishedPosts = await AiGeneratedPost.find({
+    updatedAt: { $lt: cutoff },
+    status: "published",
+    generationMetaJson: { $exists: true }
+  })
+    .select("generationMetaJson")
+    .limit(1000)
+    .lean<Array<{ generationMetaJson?: unknown }>>();
+
+  const imageIds = Array.from(
+    new Set(publishedPosts.flatMap((post) => collectImageIdsFromPostMeta(post.generationMetaJson)))
+  );
+
+  if (imageIds.length === 0) return 0;
+
+  const publishedImages = await AiGeneratedImage.find({
+    _id: { $in: imageIds },
+    provider: /vercel_blob|openai_shopee_ugc_photo/i,
+    pathname: { $type: "string", $ne: "" }
+  })
+    .select("pathname")
+    .limit(1000)
+    .lean<Array<{ _id: unknown; pathname?: string }>>();
+
+  const pathnames = publishedImages
+    .map((image) => image.pathname)
+    .filter((pathname): pathname is string => Boolean(pathname?.startsWith("auto-post/images/")));
+
+  if (pathnames.length === 0) return 0;
+
+  const uniquePathnames = Array.from(new Set(pathnames));
+  await del(uniquePathnames);
+  await AiGeneratedImage.updateMany(
+    { pathname: { $in: uniquePathnames } },
+    {
+      $set: {
+        generatedImageUrl: "",
+        pathname: "",
+        provider: "vercel_blob_deleted_after_publish",
+        blobDeletedAt: new Date(),
+        blobDeleteReason: "published_retention_expired"
+      }
+    }
+  );
+
+  return uniquePathnames.length;
+}
+
 export async function cleanupAutoPostBlobs(input: {
   aggressive?: boolean;
   reason?: string;
@@ -169,9 +248,11 @@ export async function cleanupAutoPostBlobs(input: {
   const previewHours = input.aggressive ? 1 : envNumber("BLOB_PREVIEW_RETENTION_HOURS", 24);
   const rawHours = input.aggressive ? 1 : envNumber("BLOB_RAW_OPENAI_RETENTION_HOURS", 24);
   const unusedImageHours = input.aggressive ? 1 : envNumber("BLOB_UNUSED_IMAGE_RETENTION_HOURS", 24);
+  const publishedImageHours = input.aggressive ? 24 : envNumber("BLOB_PUBLISHED_IMAGE_RETENTION_HOURS", 72);
 
   const counts: BlobCleanupCounts = {
     images: 0,
+    publishedImages: 0,
     previews: 0,
     temp: 0,
     rawOpenAi: 0
@@ -181,6 +262,7 @@ export async function cleanupAutoPostBlobs(input: {
   counts.previews = await deleteOldBlobsByPrefix("auto-post/previews/", new Date(Date.now() - previewHours * HOUR_MS));
   counts.rawOpenAi = await deleteOldBlobsByPrefix("auto-post/raw-openai/", new Date(Date.now() - rawHours * HOUR_MS));
   counts.images = await cleanupUnusedGeneratedImageBlobs(new Date(Date.now() - unusedImageHours * HOUR_MS));
+  counts.publishedImages = await cleanupPublishedGeneratedImageBlobs(new Date(Date.now() - publishedImageHours * HOUR_MS));
 
   const deletedTotal = Object.values(counts).reduce((sum, value) => sum + value, 0);
 

@@ -12,6 +12,8 @@ const aiGeneratedImageSchema = new Schema(
     rawResponseUrl: { type: String, default: "" },
     contentType: { type: String, default: "image/png" },
     sizeBytes: { type: Number, default: 0 },
+    blobDeletedAt: { type: Date, default: null },
+    blobDeleteReason: { type: String, default: null },
     provider: { type: String, default: "fallback_product_image" },
     status: {
       type: String,

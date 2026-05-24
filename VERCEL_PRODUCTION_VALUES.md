@@ -32,6 +32,13 @@ GOOGLE_CLIENT_ID=your-google-client-id
 GOOGLE_CLIENT_SECRET=your-google-client-secret
 GOOGLE_REDIRECT_URI=https://prosocial-app-theta.vercel.app/api/google-drive/oauth/callback
 GOOGLE_AUTH_REDIRECT_URI=https://prosocial-app-theta.vercel.app/api/auth/google/callback
+
+BLOB_READ_WRITE_TOKEN=your-vercel-blob-read-write-token
+BLOB_TEMP_RETENTION_HOURS=6
+BLOB_PREVIEW_RETENTION_HOURS=24
+BLOB_RAW_OPENAI_RETENTION_HOURS=24
+BLOB_UNUSED_IMAGE_RETENTION_HOURS=24
+BLOB_PUBLISHED_IMAGE_RETENTION_HOURS=72
 ```
 
 Optional Facebook Pages OAuth debug envs:
