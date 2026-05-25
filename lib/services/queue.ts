@@ -480,8 +480,24 @@ async function updateBoundAutoPostState(
   }
 
   if (autoPostAiConfigId) {
-    await AutoPostAiConfig.findByIdAndUpdate(autoPostAiConfigId, configUpdates);
-    await updateAutoPostAiRecords({ configId: autoPostAiConfigId, ...recordUpdates });
+    const aiConfigUpdates = { ...configUpdates };
+    const aiRecordUpdates = { ...recordUpdates };
+
+    // AutoPostAiConfig does not have a partial_success enum. Persist a completed
+    // state instead of letting Mongoose reject the update and leave "posting" stuck.
+    if (aiConfigUpdates.autoPostStatus === "partial_success") {
+      aiConfigUpdates.autoPostStatus = "success";
+      aiConfigUpdates.jobStatus = "posted";
+      aiConfigUpdates.lastStatus = "posted";
+    }
+
+    if (aiRecordUpdates.autoPostStatus === "partial_success") {
+      aiRecordUpdates.autoPostStatus = "success";
+      aiRecordUpdates.currentJobStatus = "posted";
+    }
+
+    await AutoPostAiConfig.findByIdAndUpdate(autoPostAiConfigId, aiConfigUpdates);
+    await updateAutoPostAiRecords({ configId: autoPostAiConfigId, ...aiRecordUpdates });
   }
 }
 

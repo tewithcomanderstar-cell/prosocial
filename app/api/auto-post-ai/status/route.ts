@@ -1,6 +1,7 @@
 ﻿import { isUnauthorizedError, jsonError, jsonOk } from "@/lib/api";
 import { AutoPostAiConfig } from "@/models/AutoPostAiConfig";
 import { ActionLog } from "@/models/ActionLog";
+import { Job } from "@/models/Job";
 
 type AutoPostConfigStatusDoc = {
   _id: unknown;
@@ -38,6 +39,99 @@ function isLegacyMessage(value?: string | null) {
   );
 }
 
+async function getRuntimeStatusOverride(config: AutoPostConfigStatusDoc, userId: string) {
+  const activeStatus = ["running", "posting", "retrying"].includes(String(config.autoPostStatus ?? ""));
+  if (!activeStatus || !config._id) {
+    return null;
+  }
+
+  const query: Record<string, unknown> = {
+    userId,
+    type: "post",
+    "payload.autoPostAiConfigId": String(config._id)
+  };
+
+  if (config.lastWorkflowRunId) {
+    query["payload.workflowRunId"] = String(config.lastWorkflowRunId);
+  }
+
+  const jobs = (await Job.find(query)
+    .sort({ createdAt: 1 })
+    .select("status failureReason lastError errorCode nextRunAt")
+    .lean()) as Array<{
+    status?: string;
+    failureReason?: string;
+    lastError?: string;
+    errorCode?: string;
+    nextRunAt?: Date | string | null;
+  }>;
+
+  if (!jobs.length) {
+    return null;
+  }
+
+  const successCount = jobs.filter((job) => job.status === "success").length;
+  const failedJobs = jobs.filter((job) => job.status === "failed" || job.status === "duplicate_blocked");
+  const activeCount = jobs.filter((job) => job.status === "processing").length;
+  const retryingCount = jobs.filter((job) => job.status === "retrying" || job.status === "rate_limited").length;
+  const queuedCount = jobs.filter((job) => job.status === "queued").length;
+  const latestFailure = failedJobs[failedJobs.length - 1] ?? null;
+  const latestFailureMessage =
+    latestFailure?.failureReason ||
+    latestFailure?.lastError ||
+    (latestFailure?.errorCode ? `Publish failed with ${latestFailure.errorCode}` : null);
+
+  if (activeCount > 0) {
+    return {
+      autoPostStatus: "posting",
+      jobStatus: "processing",
+      lastStatus: "pending",
+      lastError: null
+    };
+  }
+
+  if (retryingCount > 0) {
+    return {
+      autoPostStatus: "retrying",
+      jobStatus: "pending",
+      lastStatus: "pending",
+      lastError: latestFailureMessage
+    };
+  }
+
+  if (queuedCount > 0) {
+    return {
+      autoPostStatus: "waiting",
+      jobStatus: "pending",
+      lastStatus: "pending",
+      lastError: null
+    };
+  }
+
+  if (successCount > 0) {
+    return {
+      autoPostStatus: "success",
+      jobStatus: "posted",
+      lastStatus: "posted",
+      lastError:
+        failedJobs.length > 0
+          ? latestFailureMessage ?? `Published ${successCount}/${jobs.length} page(s); ${failedJobs.length} failed.`
+          : null
+    };
+  }
+
+  if (failedJobs.length > 0) {
+    return {
+      autoPostStatus: "failed",
+      jobStatus: "failed",
+      lastStatus: "failed",
+      lastError: latestFailureMessage ?? "Publishing failed for all selected pages."
+    };
+  }
+
+  return null;
+}
+
 export async function GET() {
   try {
     const { requireAuth } = await import("@/lib/api");
@@ -70,10 +164,13 @@ export async function GET() {
     const legacyLastError = config?.lastError ?? null;
     const sanitizedLastError = sanitizeLegacyMessage(legacyLastError);
 
+    const runtimeStatusOverride = await getRuntimeStatusOverride(config, userId);
+
     const sanitizedConfig = config
       ? {
           ...config,
-          lastError: isLegacyMessage(legacyLastError) ? null : sanitizedLastError
+          ...(runtimeStatusOverride ?? {}),
+          lastError: runtimeStatusOverride?.lastError ?? (isLegacyMessage(legacyLastError) ? null : sanitizedLastError)
         }
       : config;
 

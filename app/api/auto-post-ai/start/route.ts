@@ -4,6 +4,7 @@ import { logAction, logAndNotifyError } from "@/lib/services/logging";
 import { handleRoleError, requireRole } from "@/lib/services/permissions";
 import { processQueuedJobs } from "@/lib/services/queue";
 import { AutoPostAiConfig } from "@/models/AutoPostAiConfig";
+import { Job } from "@/models/Job";
 import { after } from "next/server";
 
 type LeanAutoPostConfig = {
@@ -45,6 +46,134 @@ const AUTO_POST_JOB_TIMEOUT_MS = Number(process.env.AUTO_POST_JOB_TIMEOUT_MS ?? 
 function normalizeFolderId(value: string) {
   const trimmed = value.trim();
   return trimmed === BROKEN_FOLDER_ID ? FIXED_FOLDER_ID : trimmed;
+}
+
+async function finalizeBackgroundPublisherState(input: {
+  userId: string;
+  configId: string;
+  workflowRunId?: string | null;
+  selectedPagesCount: number;
+  processedJobsCount: number;
+}) {
+  const query: Record<string, unknown> = {
+    userId: input.userId,
+    type: "post",
+    "payload.autoPostAiConfigId": input.configId
+  };
+
+  if (input.workflowRunId) {
+    query["payload.workflowRunId"] = input.workflowRunId;
+  }
+
+  const jobs = (await Job.find(query)
+    .sort({ createdAt: 1 })
+    .select("status attempts targetPageId failureReason lastError errorCode nextRunAt completedAt")
+    .lean()) as Array<{
+    status?: string;
+    attempts?: number;
+    targetPageId?: string;
+    failureReason?: string;
+    lastError?: string;
+    errorCode?: string;
+    nextRunAt?: Date | string | null;
+  }>;
+
+  if (!jobs.length) {
+    await AutoPostAiConfig.findByIdAndUpdate(input.configId, {
+      autoPostStatus: "failed",
+      jobStatus: "failed",
+      lastStatus: "failed",
+      lastError: "Auto Post AI publisher completed but no queued Facebook publish jobs were found."
+    });
+    return {
+      autoPostStatus: "failed",
+      message: "No queued Facebook publish jobs were found.",
+      jobsCount: 0,
+      successCount: 0,
+      failedCount: 0,
+      pendingCount: 0
+    };
+  }
+
+  const selectedPagesCount = Math.max(input.selectedPagesCount, jobs.length);
+  const successCount = jobs.filter((job) => job.status === "success").length;
+  const failedJobs = jobs.filter((job) => job.status === "failed" || job.status === "duplicate_blocked");
+  const failedCount = failedJobs.length;
+  const activeCount = jobs.filter((job) => job.status === "processing").length;
+  const retryingCount = jobs.filter((job) => job.status === "retrying" || job.status === "rate_limited").length;
+  const queuedCount = jobs.filter((job) => job.status === "queued").length;
+  const pendingCount = Math.max(0, selectedPagesCount - successCount - failedCount);
+  const latestFailure = failedJobs[failedJobs.length - 1] ?? null;
+  const latestFailureMessage =
+    latestFailure?.failureReason ||
+    latestFailure?.lastError ||
+    (latestFailure?.errorCode ? `Publish failed with ${latestFailure.errorCode}` : null);
+  const pendingRunAt = jobs
+    .filter((job) => job.status === "queued" || job.status === "retrying" || job.status === "rate_limited")
+    .map((job) => (job.nextRunAt ? new Date(job.nextRunAt).getTime() : Number.POSITIVE_INFINITY))
+    .filter((value) => Number.isFinite(value))
+    .sort((a, b) => a - b)[0];
+
+  let autoPostStatus: "posting" | "waiting" | "success" | "failed" | "retrying";
+  let jobStatus: "pending" | "processing" | "posted" | "failed";
+  let lastStatus: "pending" | "posted" | "failed";
+  let lastError: string | null = null;
+  let message: string;
+
+  if (activeCount > 0) {
+    autoPostStatus = "posting";
+    jobStatus = "processing";
+    lastStatus = "pending";
+    message = `Publishing pages: ${successCount}/${selectedPagesCount} done, ${pendingCount} pending.`;
+  } else if (retryingCount > 0) {
+    autoPostStatus = "retrying";
+    jobStatus = "pending";
+    lastStatus = "pending";
+    lastError = latestFailureMessage;
+    message = `Publishing will retry: ${successCount}/${selectedPagesCount} done, ${retryingCount} retrying.`;
+  } else if (queuedCount > 0) {
+    autoPostStatus = "waiting";
+    jobStatus = "pending";
+    lastStatus = "pending";
+    message = `Facebook publish jobs are queued: ${successCount}/${selectedPagesCount} done, ${queuedCount} waiting.`;
+  } else if (successCount === selectedPagesCount && selectedPagesCount > 0) {
+    autoPostStatus = "success";
+    jobStatus = "posted";
+    lastStatus = "posted";
+    message = `Published to all ${selectedPagesCount} selected page(s).`;
+  } else if (successCount > 0) {
+    autoPostStatus = "success";
+    jobStatus = "posted";
+    lastStatus = "posted";
+    lastError = latestFailureMessage ?? `Published ${successCount}/${selectedPagesCount} page(s); ${failedCount} failed.`;
+    message = lastError;
+  } else {
+    autoPostStatus = "failed";
+    jobStatus = "failed";
+    lastStatus = "failed";
+    lastError = latestFailureMessage ?? "Publishing failed for all selected pages.";
+    message = lastError;
+  }
+
+  await AutoPostAiConfig.findByIdAndUpdate(input.configId, {
+    autoPostStatus,
+    jobStatus,
+    lastStatus,
+    lastError,
+    retryCount: Math.max(...jobs.map((job) => Number(job.attempts ?? 0)), 0),
+    lastRunAt: new Date(),
+    ...(pendingRunAt ? { nextRunAt: new Date(pendingRunAt) } : {})
+  });
+
+  return {
+    autoPostStatus,
+    message,
+    jobsCount: jobs.length,
+    successCount,
+    failedCount,
+    pendingCount,
+    processedJobsCount: input.processedJobsCount
+  };
 }
 
 export async function POST() {
@@ -118,16 +247,24 @@ export async function POST() {
     after(async () => {
       try {
         const processedJobs = await processQueuedJobs(Math.max(config.targetPageIds.length, 1), "post");
+        const finalState = await finalizeBackgroundPublisherState({
+          userId,
+          configId: String(config._id),
+          workflowRunId: result.workflowRunId || null,
+          selectedPagesCount: config.targetPageIds.length,
+          processedJobsCount: processedJobs.length
+        });
         await logAction({
           userId,
           type: "queue",
           level: "info",
-          message: "Auto Post AI background publisher completed",
+          message: `Auto Post AI background publisher completed: ${finalState.message}`,
           metadata: {
             autoPostAi: true,
             autoPostAiConfigId: config._id,
             source: "manual-start-after-response",
-            processedJobs: processedJobs.length
+            processedJobs: processedJobs.length,
+            ...finalState
           }
         });
       } catch (error) {
@@ -213,4 +350,3 @@ export async function POST() {
     return jsonError(sanitizedMessage ?? "Unable to trigger Auto Post AI", 500);
   }
 }
-
