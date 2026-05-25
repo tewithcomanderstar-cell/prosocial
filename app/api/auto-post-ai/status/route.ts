@@ -43,21 +43,21 @@ export async function GET() {
     const { requireAuth } = await import("@/lib/api");
     const userId = await requireAuth();
 
-    const configResult = await AutoPostAiConfig.findOneAndUpdate(
-      { userId },
-      {
-        $setOnInsert: {
-          userId,
-          nextRunAt: new Date(),
-          autoPostStatus: "paused",
-          jobStatus: "pending",
-          retryCount: 0
-        }
-      },
-      { upsert: true, new: true }
-    ).lean();
+    // This endpoint is polled by the dashboard. Keep it read-only so a slow or
+    // quota-blocked MongoDB write cannot make the status card hang.
+    const configResult = await AutoPostAiConfig.findOne({ userId }).lean();
 
-    const config = (configResult as AutoPostConfigStatusDoc | null) ?? null;
+    const config =
+      (configResult as AutoPostConfigStatusDoc | null) ??
+      ({
+        _id: null,
+        userId,
+        nextRunAt: new Date(),
+        autoPostStatus: "paused",
+        jobStatus: "pending",
+        retryCount: 0,
+        lastError: null
+      } as AutoPostConfigStatusDoc);
 
     const logs = await ActionLog.find({
       userId,
@@ -70,17 +70,10 @@ export async function GET() {
     const legacyLastError = config?.lastError ?? null;
     const sanitizedLastError = sanitizeLegacyMessage(legacyLastError);
 
-    if (config && isLegacyMessage(legacyLastError)) {
-      await AutoPostAiConfig.findByIdAndUpdate(config._id, {
-        lastError: null,
-        lastStatus: config.autoPostStatus === "paused" ? "paused" : config.lastStatus ?? "pending"
-      });
-    }
-
     const sanitizedConfig = config
       ? {
           ...config,
-          lastError: sanitizedLastError
+          lastError: isLegacyMessage(legacyLastError) ? null : sanitizedLastError
         }
       : config;
 

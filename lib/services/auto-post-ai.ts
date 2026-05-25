@@ -1278,7 +1278,11 @@ async function queueAutoPostsForConfig(config: LeanAutoPostConfig, options: Queu
   };
 }
 
-export async function processAutoPostAiConfigNow(userId: string, configId: string) {
+export async function processAutoPostAiConfigNow(
+  userId: string,
+  configId: string,
+  options: { processInline?: boolean } = {}
+) {
   const config = (await AutoPostAiConfig.findOne({ _id: configId, userId }).lean()) as unknown as LeanAutoPostConfig | null;
 
   if (!config) {
@@ -1333,7 +1337,9 @@ export async function processAutoPostAiConfigNow(userId: string, configId: strin
     };
   }
 
-  const processedJobs = await processQueuedJobs(Math.max(config.targetPageIds.length, 1));
+  const processedJobs = options.processInline === false
+    ? []
+    : await processQueuedJobs(Math.max(config.targetPageIds.length, 1));
 
   return {
     ...result,
@@ -1419,6 +1425,5 @@ export async function processDueAutoPostAiConfigs() {
 
   return processed;
 }
-
 
 

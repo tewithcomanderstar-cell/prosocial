@@ -23,6 +23,7 @@ type LeanJobStatus = {
   targetPageId?: string;
   status?: string;
   createdAt?: Date;
+  nextRunAt?: Date;
   completedAt?: Date;
   processingStartedAt?: Date;
   lastError?: string;
@@ -199,17 +200,56 @@ export async function GET() {
       _id?: unknown;
     };
 
-    const logs = await ActionLog.find({
-      userId,
-      "metadata.autoPost": true
-    })
-      .sort({ createdAt: -1 })
-      .limit(30)
-      .lean();
+    const logsPromise = withSoftTimeout(
+      ActionLog.find({
+        userId,
+        "metadata.autoPost": true
+      })
+        .sort({ createdAt: -1 })
+        .limit(30)
+        .select("level message createdAt metadata")
+        .lean()
+        .exec(),
+      3000,
+      [],
+      "activity-logs"
+    );
 
     const legacyLastError = effectiveConfig?.lastError ?? null;
     const sanitizedLastError = sanitizeLegacyMessage(legacyLastError);
-    const facebookConnection = await FacebookConnection.findOne({ userId }).lean();
+    const facebookConnectionPromise = withSoftTimeout(
+      FacebookConnection.findOne({ userId })
+        .select("pages.pageId pages.id pages.externalPageId pages.name pages.pageName pages.pageAccessToken tokenStatus")
+        .lean()
+        .exec(),
+      3500,
+      null,
+      "facebook-connection"
+    );
+    const storagePromise = withSoftTimeout(getStorageStatus(), 2500, storageStatusFallback(), "storage-status");
+    const lastProductPromise = withSoftTimeout(
+      ShopeeProduct.findOne({}).sort({ fetchedAt: -1 }).select("fetchedAt").lean().exec(),
+      2500,
+      null,
+      "last-product"
+    );
+    const lastPublishedQueueItemPromise = withSoftTimeout(
+      FacebookPostQueue.findOne({ userId, status: "published" })
+        .sort({ updatedAt: -1 })
+        .select("updatedAt")
+        .lean()
+        .exec(),
+      2500,
+      null,
+      "last-published"
+    );
+    const [logs, facebookConnection, storage, lastProduct, lastPublishedQueueItem] = await Promise.all([
+      logsPromise,
+      facebookConnectionPromise,
+      storagePromise,
+      lastProductPromise,
+      lastPublishedQueueItemPromise
+    ]);
     const facebookPages = Array.isArray((facebookConnection as any)?.pages) ? (facebookConnection as any).pages : [];
     const connectedPageCount = facebookPages.length;
     const pageNameById = new Map<string, string>(
@@ -217,12 +257,6 @@ export async function GET() {
     );
     const shopeeProvider = getShopeeProductProvider();
     const shopeeEnvStatus = getShopeeEnvStatus();
-    const storage = await withSoftTimeout(getStorageStatus(), 2500, storageStatusFallback(), "storage-status");
-    const lastProduct = await ShopeeProduct.findOne({}).sort({ fetchedAt: -1 }).select("fetchedAt").lean();
-    const lastPublishedQueueItem = await FacebookPostQueue.findOne({ userId, status: "published" })
-      .sort({ updatedAt: -1 })
-      .select("updatedAt")
-      .lean();
     const contentSource = String(effectiveConfig?.contentSource ?? "shopee-affiliate");
     const shopeeSourceReady = contentSource === "shopee-affiliate" && Boolean(effectiveConfig?.shopeeSourceTag);
     const facebookReady = connectedPageCount > 0;
@@ -242,36 +276,68 @@ export async function GET() {
       jobQuery["payload.autoPostConfigId"] = String(effectiveConfigDoc._id);
     }
 
-    const runJobs = (await Job.find(jobQuery)
-      .sort({ createdAt: -1 })
-      .limit(Math.max(100, targetPageIds.length || 30))
-      .lean()) as LeanJobStatus[];
+    const runJobs = (await withSoftTimeout(
+      Job.find(jobQuery)
+        .sort({ createdAt: -1 })
+        .limit(Math.max(100, targetPageIds.length || 30))
+        .select("_id targetPageId status createdAt nextRunAt completedAt processingStartedAt lastError failureReason errorCode result payload")
+        .lean()
+        .exec(),
+      4000,
+      [],
+      "publish-jobs"
+    )) as LeanJobStatus[];
     const latestProcessingJob = runJobs.find((job) => job.status === "processing") ?? null;
     const latestFailedJob = runJobs.find((job) => job.status === "failed" || job.status === "duplicate_blocked") ?? null;
-    const selectedPagesCount = Math.max(
-      targetPageIds.length,
-      runJobs.length,
-      ...runJobs
-        .map((job) => Number(job.payload?.selectedPagesCount ?? 0))
-        .filter((value) => Number.isFinite(value))
-    );
-    const publishedPagesCount = runJobs.filter((job) => job.status === "success").length;
-    const failedPagesCount = runJobs.filter((job) => job.status === "failed" || job.status === "duplicate_blocked").length;
-    const pendingPagesCount = Math.max(0, selectedPagesCount - publishedPagesCount - failedPagesCount);
-    const pageResults = runJobs
-      .map((job) => ({
+    const uniqueTargetPageIds = Array.from(new Set(targetPageIds.map((pageId) => String(pageId)).filter(Boolean)));
+    const jobByPageId = new Map<string, LeanJobStatus>();
+    for (const job of runJobs) {
+      const pageId = String(job.targetPageId ?? "");
+      if (pageId && !jobByPageId.has(pageId)) {
+        jobByPageId.set(pageId, job);
+      }
+    }
+    const pageIdsForResults =
+      uniqueTargetPageIds.length > 0
+        ? uniqueTargetPageIds
+        : Array.from(jobByPageId.keys());
+    const pageResults = pageIdsForResults.map((pageId) => {
+      const job = jobByPageId.get(pageId);
+      if (!job) {
+        return {
+          jobId: null,
+          pageId,
+          pageName: pageNameById.get(pageId) ?? "Facebook Page",
+          status: "pending",
+          rawStatus: "scheduled",
+          facebookPostId: null,
+          errorCode: null,
+          errorMessage: null,
+          startedAt: null,
+          scheduledAt: null,
+          finishedAt: null
+        };
+      }
+
+      return {
         jobId: String(job._id),
-        pageId: String(job.targetPageId ?? ""),
-        pageName: pageNameById.get(String(job.targetPageId ?? "")) ?? "Facebook Page",
+        pageId,
+        pageName: pageNameById.get(pageId) ?? "Facebook Page",
         status: normalizePageJobStatus(job.status),
         rawStatus: job.status ?? "queued",
         facebookPostId: typeof (job.result as any)?.id === "string" ? (job.result as any).id : null,
         errorCode: job.errorCode ?? null,
         errorMessage: sanitizeLegacyMessage(job.failureReason ?? job.lastError ?? null),
         startedAt: job.processingStartedAt ?? job.createdAt ?? null,
+        scheduledAt: job.nextRunAt ?? null,
         finishedAt: job.completedAt ?? null
-      }))
-      .reverse();
+      };
+    });
+    const selectedPagesCount = pageResults.length;
+    const publishedPagesCount = pageResults.filter((page) => page.status === "success").length;
+    const failedPagesCount = pageResults.filter((page) => page.status === "failed" || page.status === "skipped").length;
+    const activePagesCount = pageResults.filter((page) => page.status === "publishing" || page.status === "retrying").length;
+    const pendingPagesCount = Math.max(0, selectedPagesCount - publishedPagesCount - failedPagesCount - activePagesCount);
     const currentStep = latestProcessingJob
       ? "PAGE_PUBLISH_STARTED"
       : runJobs.length

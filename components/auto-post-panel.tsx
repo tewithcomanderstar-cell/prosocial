@@ -63,7 +63,7 @@ type ControlPanelStatus = {
   pendingPagesCount?: number;
   currentPublishingPage?: { pageId?: string; pageName?: string } | null;
   pageResults?: Array<{
-    jobId: string;
+    jobId: string | null;
     pageId: string;
     pageName: string;
     status: "pending" | "publishing" | "success" | "failed" | "skipped" | "retrying";
@@ -72,6 +72,7 @@ type ControlPanelStatus = {
     errorCode?: string | null;
     errorMessage?: string | null;
     startedAt?: string | null;
+    scheduledAt?: string | null;
     finishedAt?: string | null;
   }>;
   latestLogs?: StatusLog[];
@@ -1059,7 +1060,7 @@ export function AutoPostPanel() {
             </div>
             <div className="auto-post-log-list auto-post-log-list-minimal">
               {controlPanel.pageResults.map((result) => (
-                <article key={result.jobId} className="auto-post-log-item">
+                <article key={result.jobId ?? result.pageId} className="auto-post-log-item">
                   <div className="split compact-row">
                     <strong>{sanitizeText(result.pageName)}</strong>
                     <span className={`badge ${result.status === "success" ? "badge-success" : result.status === "failed" ? "badge-warn" : "badge-neutral"}`}>
@@ -1067,8 +1068,9 @@ export function AutoPostPanel() {
                     </span>
                   </div>
                   <div className="muted auto-post-log-meta">
-                    Job {result.jobId}
+                    {result.jobId ? `Job ${result.jobId}` : "Waiting for scheduled slot"}
                     {result.facebookPostId ? ` • Facebook post ${result.facebookPostId}` : ""}
+                    {result.scheduledAt ? ` • Scheduled ${formatDateTime(result.scheduledAt)}` : ""}
                     {result.errorMessage ? ` • ${sanitizeText(result.errorMessage)}` : ""}
                   </div>
                 </article>
