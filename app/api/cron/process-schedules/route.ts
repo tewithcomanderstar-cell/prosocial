@@ -1,7 +1,6 @@
 import { connectDb } from "@/lib/db";
 import { jsonError, jsonOk } from "@/lib/api";
 import { processDueAutoPosts } from "@/lib/services/auto-post";
-import { processDueAutoPostAiConfigs } from "@/lib/services/auto-post-ai";
 import { syncTrackedAutoCommentPosts } from "@/lib/services/comment-automation";
 import { processQueuedJobs } from "@/lib/services/queue";
 import { queueDueSchedules } from "@/lib/services/scheduler";
@@ -40,14 +39,12 @@ export async function GET(request: Request) {
     const cleanup = await runStorageCleanup({ reason: "pre_scheduler_tick" });
     const scheduledQueued = await queueDueSchedules();
     const autoPostsQueued = await processDueAutoPosts();
-    const autoPostAiQueued = await processDueAutoPostAiConfigs();
     const syncedComments = await syncTrackedAutoCommentPosts();
     const processedJobs = inlinePublisherEnabled ? await processQueuedJobs(inlineBatchSize) : [];
     console.info("[SCHEDULER] completed", {
       correlationId,
       scheduledQueued,
       autoPostsQueued,
-      autoPostAiQueued,
       syncedComments,
       processedJobs: processedJobs.length,
       storageCleanupDeleted: cleanup.deletedTotal,
@@ -58,7 +55,6 @@ export async function GET(request: Request) {
       {
         scheduledQueued,
         autoPostsQueued,
-        autoPostAiQueued,
         syncedComments,
         processedJobs,
         storageCleanup: {
