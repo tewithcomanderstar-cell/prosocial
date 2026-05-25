@@ -1280,7 +1280,6 @@ export async function selectShopeeProductsForPages(input: {
   await upsertShopeeProducts(discovered);
 
   const selected: Array<{ pageId: string; product: ShopeeProductRecord; score: ProductScore }> = [];
-  const usedProductIds = new Set<string>();
   const filteredProducts = discovered.filter((product) => {
     const effectivePrice = product.discountPrice || product.productPrice || 0;
     if ((input.minPrice ?? 0) > 0 && effectivePrice < (input.minPrice ?? 0)) return false;
@@ -1297,7 +1296,7 @@ export async function selectShopeeProductsForPages(input: {
       const recentlyPosted = await wasProductRecentlyPosted(input.userId, pageId, product.productId);
       const score = scoreShopeeProduct({
         product,
-        recentlyPosted: recentlyPosted || usedProductIds.has(product.productId),
+        recentlyPosted,
         categoryPriority: input.categoryPriority,
         blockedCategories: input.blockedCategories
       });
@@ -1311,11 +1310,14 @@ export async function selectShopeeProductsForPages(input: {
       .sort((left, right) => right.score.productScore - left.score.productScore)[0];
 
     if (!best) {
-      throw new Error("No eligible Shopee products found for the current filters");
+      continue;
     }
 
-    usedProductIds.add(best.product.productId);
     selected.push({ pageId, product: best.product, score: best.score });
+  }
+
+  if (!selected.length) {
+    throw new Error("No eligible Shopee products found for the current filters");
   }
 
   return selected;

@@ -392,9 +392,8 @@ export function AutoPostPanel() {
     console.info("[auto-post/control-panel] fetch started", { showLoader });
 
     try {
-      const [statusResult, pagesResult, queueResult] = await Promise.allSettled([
+      const [statusResult, queueResult] = await Promise.allSettled([
         fetchWithTimeout("/api/auto-post/status", { cache: "no-store" }, 20000),
-        fetchWithTimeout("/api/facebook/pages", { cache: "no-store" }, 20000),
         fetchWithTimeout("/api/shopee/queue", { cache: "no-store" })
       ]);
 
@@ -402,10 +401,6 @@ export function AutoPostPanel() {
         statusResult.status === "fulfilled"
           ? await readApiResult(statusResult.value)
           : { ok: false, message: statusResult.reason instanceof Error ? statusResult.reason.message : "Unable to load Auto Post status" };
-      const pagesJson =
-        pagesResult.status === "fulfilled"
-          ? await readApiResult(pagesResult.value)
-          : { ok: false, message: pagesResult.reason instanceof Error ? pagesResult.reason.message : "Unable to load Facebook pages right now." };
       const queueJson =
         queueResult.status === "fulfilled"
           ? await readApiResult(queueResult.value)
@@ -423,9 +418,25 @@ export function AutoPostPanel() {
         setError(statusJson.message);
       }
 
-      const parsedPages = pagesJson.ok ? normalizePagesResponse(pagesJson) : [];
       const statusPages = normalizePagesResponse(statusData?.controlPanel?.facebookPages ?? []);
       const existingPages = pagesRef.current;
+      let parsedPages: FacebookPage[] = [];
+      let pagesJson: any = { ok: false, message: "", skipped: true };
+      const shouldRefreshPages = statusPages.length === 0 && (showLoader || existingPages.length === 0);
+
+      if (shouldRefreshPages) {
+        try {
+          const pagesResponse = await fetchWithTimeout("/api/facebook/pages", { cache: "no-store" }, 6000);
+          pagesJson = await readApiResult(pagesResponse);
+          parsedPages = pagesJson.ok ? normalizePagesResponse(pagesJson) : [];
+        } catch (pagesError) {
+          pagesJson = {
+            ok: false,
+            message: pagesError instanceof Error ? pagesError.message : "Unable to load Facebook pages right now."
+          };
+        }
+      }
+
       const fallbackPages = statusPages.length > 0 ? statusPages : existingPages;
       const effectivePageCount =
         parsedPages.length ||
@@ -443,10 +454,10 @@ export function AutoPostPanel() {
       } else if (fallbackPages.length > 0) {
         setPages(fallbackPages);
         pagesRef.current = fallbackPages;
-        if (!pagesJson.ok && pagesJson.message) {
+        if (!pagesJson.ok && pagesJson.message && shouldRefreshPages) {
           setMessage(`Using cached Facebook pages. Live refresh issue: ${pagesJson.message}`);
         }
-      } else if (pagesJson.message && effectivePageCount === 0) {
+      } else if (pagesJson.message && effectivePageCount === 0 && shouldRefreshPages) {
         setError(pagesJson.message);
       }
 
