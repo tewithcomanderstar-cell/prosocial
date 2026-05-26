@@ -89,6 +89,7 @@ type QueueAutoPostsResult = {
 
 const AUTO_POST_BATCH_PAGE_SPACING_MINUTES = Number(process.env.AUTO_POST_PAGE_SPACING_MINUTES ?? "10");
 const AUTO_POST_JOB_TIMEOUT_MS = Number(process.env.AUTO_POST_JOB_TIMEOUT_MS ?? "300000");
+const OPEN_AUTO_POST_JOB_STATUSES = ["queued", "processing", "retrying", "rate_limited"] as const;
 const BANGKOK_UTC_OFFSET_HOURS = 7;
 const AUTO_POST_QUOTE_EXPANSION_PROMPT = `คุณคือผู้เชี่ยวชาญด้านการเขียนคอนเทนต์โซเชียลมีเดีย (Facebook/IG) ที่เน้นเพิ่ม Time Spend, Engagement (Like/Comment/Share) และความรู้สึกของผู้อ่าน
 
@@ -270,6 +271,23 @@ function randomizeOrder<T>(items: T[]) {
   return copy;
 }
 
+function uniquePageIds(pageIds: string[] = []) {
+  return Array.from(new Set(pageIds.map((pageId) => pageId.trim()).filter(Boolean)));
+}
+
+function getBatchCompletionTime(batchStartAt: Date, pageCount: number) {
+  const spacingMs = Math.max(0, AUTO_POST_BATCH_PAGE_SPACING_MINUTES) * 60 * 1000;
+  return new Date(batchStartAt.getTime() + Math.max(0, pageCount - 1) * spacingMs);
+}
+
+function ensureNextRunAfterBatch(nextRunAt: Date, batchStartAt: Date, pageCount: number, windowStart?: string | null, windowEnd?: string | null) {
+  const minimumNextRunAt = new Date(getBatchCompletionTime(batchStartAt, pageCount).getTime() + 60 * 1000);
+  const candidate = nextRunAt > minimumNextRunAt ? nextRunAt : minimumNextRunAt;
+  return isWithinPostingWindow(candidate, windowStart, windowEnd)
+    ? candidate
+    : getNextWindowStart(candidate, windowStart, windowEnd);
+}
+
 function normalizeCycleUsedImageIds(images: DriveImage[], usedImageIds: string[] = []) {
   if (!usedImageIds.length) {
     return [];
@@ -400,6 +418,21 @@ async function countSuccessfulAutoPostsToday(userId: string, configId: string, p
 
   if (pageId) {
     query.targetPageId = pageId;
+  }
+
+  return Job.countDocuments(query);
+}
+
+export async function countOpenShopeePageJobsForConfig(configId: string, userId?: string) {
+  const query: Record<string, unknown> = {
+    type: "post",
+    status: { $in: [...OPEN_AUTO_POST_JOB_STATUSES] },
+    "payload.autoSource": "shopee-affiliate",
+    "payload.autoPostConfigId": configId
+  };
+
+  if (userId) {
+    query.userId = userId;
   }
 
   return Job.countDocuments(query);
@@ -572,7 +605,7 @@ async function queueShopeeAutoPostsForConfig(
     metadata: { source: options.source, immediate: options.immediate }
   });
 
-  let eligiblePageIds = config.targetPageIds;
+  let eligiblePageIds = uniquePageIds(config.targetPageIds);
   if (!eligiblePageIds.length) {
     await logShopeeStep({
       config,
@@ -581,6 +614,42 @@ async function queueShopeeAutoPostsForConfig(
       message: "No selected Facebook page"
     });
     throw new Error("No Facebook pages selected for Shopee Affiliate Auto Post");
+  }
+
+  const openPageJobs = await countOpenShopeePageJobsForConfig(config._id, config.userId);
+  if (openPageJobs > 0) {
+    const delayedNextRunAt = getNextAutoRun(
+      config.intervalMinutes,
+      config.postingWindowStart,
+      config.postingWindowEnd,
+      new Date(Date.now() + AUTO_POST_JOB_TIMEOUT_MS)
+    );
+    await updateAutoPostState(config._id, {
+      autoPostStatus: "posting",
+      jobStatus: "pending",
+      lastStatus: "pending",
+      lastError: null,
+      lastRunAt: triggeredAt,
+      nextRunAt: delayedNextRunAt
+    });
+    await logShopeeStep({
+      config,
+      step: "JOB_SKIPPED_ACTIVE_PAGE_QUEUE",
+      status: "skipped",
+      message: `Skipped creating a new Shopee batch because ${openPageJobs} page job(s) are still pending from the current batch.`,
+      metadata: {
+        openPageJobs,
+        selectedPageCount: eligiblePageIds.length,
+        nextRunAt: delayedNextRunAt.toISOString()
+      }
+    });
+
+    return {
+      queued: 0,
+      workflowId: String(config._id),
+      workflowRunId: String(config._id),
+      contentItemId: String(config._id)
+    };
   }
 
   await logShopeeStep({
@@ -697,6 +766,13 @@ async function queueShopeeAutoPostsForConfig(
   const batchRequestedStartAt = new Date(Date.now() + batchDelayMinutes * 60 * 1000);
   const batchStartAt = fitBatchStartToPostingWindow(
     batchRequestedStartAt,
+    eligiblePageIds.length,
+    config.postingWindowStart,
+    config.postingWindowEnd
+  );
+  const effectiveNextRunAt = ensureNextRunAfterBatch(
+    nextRunAt,
+    batchStartAt,
     eligiblePageIds.length,
     config.postingWindowStart,
     config.postingWindowEnd
@@ -878,7 +954,7 @@ async function queueShopeeAutoPostsForConfig(
         ? `${failedPageCount} selected page(s) failed during Shopee post preparation; remaining pages will continue.`
         : null,
     lastRunAt: triggeredAt,
-    nextRunAt,
+    nextRunAt: effectiveNextRunAt,
     retryCount: 0,
     lastPostId,
     lastSelectedImageId: null,
@@ -900,6 +976,9 @@ async function queueShopeeAutoPostsForConfig(
       source: options.source,
       queued,
       eligiblePageIds,
+      batchStartAt: batchStartAt.toISOString(),
+      batchCompletionAt: getBatchCompletionTime(batchStartAt, eligiblePageIds.length).toISOString(),
+      nextRunAt: effectiveNextRunAt.toISOString(),
       workflowId: records.workflowId,
       workflowRunId: records.workflowRunId,
       contentItemId: records.contentItemId
@@ -917,7 +996,15 @@ async function queueShopeeAutoPostsForConfig(
         : config.approvalMode
           ? "Shopee previews created and waiting approval"
           : "Shopee posts queued for Facebook publishing",
-    metadata: { queued, failedPageCount, selectedPagesCount: eligiblePageIds.length, approvalMode: Boolean(config.approvalMode) }
+    metadata: {
+      queued,
+      failedPageCount,
+      selectedPagesCount: eligiblePageIds.length,
+      approvalMode: Boolean(config.approvalMode),
+      batchStartAt: batchStartAt.toISOString(),
+      batchCompletionAt: getBatchCompletionTime(batchStartAt, eligiblePageIds.length).toISOString(),
+      nextRunAt: effectiveNextRunAt.toISOString()
+    }
   });
 
   return {

@@ -47,6 +47,10 @@ function sanitizeLegacyMessage(value?: string | null) {
   return value;
 }
 
+function uniquePageIds(pageIds: string[] = []) {
+  return Array.from(new Set(pageIds.map((pageId) => pageId.trim()).filter(Boolean)));
+}
+
 const schema = z.object({
   enabled: z.boolean(),
   contentSource: z.enum(["shopee-affiliate", "google-drive"]).default("shopee-affiliate"),
@@ -161,6 +165,7 @@ export async function POST(request: Request) {
     const shopeeKeyword = (payload.shopeeKeyword ?? "").trim();
     const shopeeCategory = (payload.shopeeCategory ?? "").trim();
     const shopeeTrackingId = (payload.shopeeTrackingId ?? "").trim();
+    const targetPageIds = uniquePageIds(payload.targetPageIds);
     const current = (await AutoPostConfig.findOne({ userId }).lean()) as LeanAutoPostConfig | null;
 
     const nextRunAt = payload.enabled
@@ -187,6 +192,7 @@ export async function POST(request: Request) {
         ...payload,
         contentSource: "shopee-affiliate",
         folderId: normalizedFolderId,
+        targetPageIds,
         shopeeKeyword,
         shopeeCategory,
         shopeeTrackingId,
@@ -231,7 +237,8 @@ export async function POST(request: Request) {
         shopeeMinSales: payload.shopeeMinSales,
         shopeeMinDiscountPercent: payload.shopeeMinDiscountPercent,
         approvalMode: payload.approvalMode,
-        targetPageCount: (payload.targetPageIds ?? []).length,
+        targetPageCount: targetPageIds.length,
+        dedupedTargetPageCount: targetPageIds.length,
         intervalMinutes: payload.intervalMinutes,
         captionStrategy: payload.captionStrategy,
         hashtagCount: (payload.hashtags ?? []).length,
