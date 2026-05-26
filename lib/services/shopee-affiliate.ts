@@ -822,13 +822,12 @@ const TH = {
   approxPrice: "\u0e23\u0e32\u0e04\u0e32\u0e2d\u0e22\u0e39\u0e48\u0e1b\u0e23\u0e30\u0e21\u0e32\u0e13 ",
   baht: " \u0e1a\u0e32\u0e17",
   discountAbout: " \u0e15\u0e2d\u0e19\u0e19\u0e35\u0e49\u0e25\u0e14\u0e1b\u0e23\u0e30\u0e21\u0e32\u0e13 ",
-  reviewFeelingStart: "\u0e1f\u0e35\u0e25\u0e43\u0e0a\u0e49\u0e07\u0e32\u0e19\u0e08\u0e23\u0e34\u0e07\u0e14\u0e39\u0e19\u0e48\u0e32\u0e43\u0e0a\u0e49 \u0e40\u0e2b\u0e21\u0e32\u0e30\u0e01\u0e31\u0e1a",
-  reviewFeelingEnd: " \u0e23\u0e32\u0e22\u0e25\u0e30\u0e40\u0e2d\u0e35\u0e22\u0e14\u0e44\u0e21\u0e48\u0e40\u0e22\u0e2d\u0e30\u0e40\u0e01\u0e34\u0e19 \u0e2d\u0e48\u0e32\u0e19\u0e41\u0e25\u0e49\u0e27\u0e15\u0e31\u0e14\u0e2a\u0e34\u0e19\u0e43\u0e08\u0e07\u0e48\u0e32\u0e22 \uD83D\uDC4D",
+  reviewFeelingStart: "\u0e1f\u0e35\u0e25\u0e43\u0e0a\u0e49\u0e07\u0e32\u0e19\u0e14\u0e39\u0e07\u0e48\u0e32\u0e22 \u0e08\u0e31\u0e1a\u0e04\u0e39\u0e48\u0e01\u0e31\u0e1a\u0e0a\u0e35\u0e27\u0e34\u0e15\u0e1b\u0e23\u0e30\u0e08\u0e33\u0e27\u0e31\u0e19\u0e44\u0e14\u0e49\u0e14\u0e35",
+  reviewFeelingEnd: " \u0e14\u0e39\u0e40\u0e1b\u0e47\u0e19\u0e02\u0e2d\u0e07\u0e17\u0e35\u0e48\u0e2b\u0e22\u0e34\u0e1a\u0e21\u0e32\u0e43\u0e0a\u0e49\u0e44\u0e14\u0e49\u0e08\u0e23\u0e34\u0e07 \u0e44\u0e21\u0e48\u0e14\u0e39\u0e40\u0e22\u0e2d\u0e30\u0e40\u0e01\u0e34\u0e19\u0e44\u0e1b \uD83D\uDC4D",
   discountBullet: "- \u0e2a\u0e48\u0e27\u0e19\u0e25\u0e14\u0e1b\u0e23\u0e30\u0e21\u0e32\u0e13 ",
-  ratingBullet: "- \u0e04\u0e30\u0e41\u0e19\u0e19\u0e23\u0e35\u0e27\u0e34\u0e27 ",
-  salesBullet: "- \u0e22\u0e2d\u0e14\u0e02\u0e32\u0e22 ",
-  pieces: " \u0e0a\u0e34\u0e49\u0e19",
   categoryBullet: "- \u0e40\u0e2b\u0e21\u0e32\u0e30\u0e01\u0e31\u0e1a\u0e2b\u0e21\u0e27\u0e14 ",
+  useCaseBullet: "- \u0e43\u0e0a\u0e49\u0e07\u0e32\u0e19\u0e07\u0e48\u0e32\u0e22 \u0e40\u0e2b\u0e21\u0e32\u0e30\u0e01\u0e31\u0e1a\u0e43\u0e0a\u0e49\u0e43\u0e19\u0e0a\u0e35\u0e27\u0e34\u0e15\u0e1b\u0e23\u0e30\u0e08\u0e33\u0e27\u0e31\u0e19",
+  materialBullet: "- \u0e23\u0e32\u0e22\u0e25\u0e30\u0e40\u0e2d\u0e35\u0e22\u0e14\u0e14\u0e39\u0e04\u0e38\u0e49\u0e21\u0e17\u0e35\u0e40\u0e14\u0e35\u0e22\u0e27 \u0e2b\u0e22\u0e34\u0e1a\u0e43\u0e0a\u0e49\u0e44\u0e14\u0e49\u0e2b\u0e25\u0e32\u0e22\u0e42\u0e2d\u0e01\u0e32\u0e2a",
   defaultProductName: "\u0e2a\u0e34\u0e19\u0e04\u0e49\u0e32 Shopee \u0e17\u0e35\u0e48\u0e19\u0e48\u0e32\u0e2a\u0e19\u0e43\u0e08"
 };
 
@@ -871,6 +870,23 @@ const SHOPEE_SOFT_CTAS = [
 
 const SHOPEE_HASHTAG_FALLBACKS = ["#" + TH.affiliateReview, "#Shopee", "#" + TH.usefulItem];
 
+const SHOPEE_MARKETPLACE_METRIC_PATTERNS = [
+  /\u0e04\u0e30\u0e41\u0e19\u0e19\u0e23\u0e49\u0e32\u0e19/iu,
+  /\u0e23\u0e49\u0e32\u0e19\u0e44\u0e14\u0e49\u0e04\u0e30\u0e41\u0e19\u0e19/iu,
+  /\u0e04\u0e30\u0e41\u0e19\u0e19\u0e23\u0e35\u0e27\u0e34\u0e27/iu,
+  /\u0e08\u0e33\u0e19\u0e27\u0e19\u0e23\u0e35\u0e27\u0e34\u0e27/iu,
+  /\u0e22\u0e2d\u0e14\u0e02\u0e32\u0e22/iu,
+  /\u0e02\u0e32\u0e22\u0e41\u0e25\u0e49\u0e27/iu,
+  /\u0e02\u0e32\u0e22\u0e44\u0e1b\u0e41\u0e25\u0e49\u0e27/iu,
+  /\u0e02\u0e32\u0e22\u0e14\u0e35\u0e2d\u0e31\u0e19\u0e14\u0e31\u0e1a/iu,
+  /\u0e2d\u0e31\u0e19\u0e14\u0e31\u0e1a\s*1/iu,
+  /bestseller/iu,
+  /best\s*seller/iu,
+  /review count/iu,
+  /sales count/iu,
+  /rating/iu
+];
+
 function randomText(items: string[]) {
   return items[Math.floor(Math.random() * items.length)] ?? items[0] ?? "";
 }
@@ -897,6 +913,15 @@ function stripForbiddenAffiliateDisclosure(caption: string) {
 function removeHardSellPhrases(caption: string) {
   return SHOPEE_HARD_SELL_PATTERNS.reduce((value, pattern) => value.replace(pattern, ""), caption)
     .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function removeMarketplaceMetricLines(caption: string) {
+  return caption
+    .split(/\r?\n/)
+    .filter((line) => !SHOPEE_MARKETPLACE_METRIC_PATTERNS.some((pattern) => pattern.test(line)))
+    .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
@@ -954,18 +979,23 @@ function buildShopeeReviewFeeling(product: ShopeeProductRecord) {
   const price = product.discountPrice || product.productPrice;
   const priceText = price ? TH.approxPrice + price.toLocaleString("th-TH") + TH.baht : TH.easyDetails;
   const discountText = product.discountPercent ? TH.discountAbout + product.discountPercent + "%" : "";
-  return TH.reviewFeelingStart + category + " " + priceText + discountText + TH.reviewFeelingEnd;
+  return `${TH.reviewFeelingStart} ${category} ${priceText}${discountText}${TH.reviewFeelingEnd}`;
 }
 
 function buildShopeeDetailBullets(product: ShopeeProductRecord) {
+  const descriptionParts = (product.productDescription || "")
+    .split(/[.!?\n]|[\u0e2f\u0e46]/)
+    .map((part) => compactProductText(part, 72))
+    .filter(Boolean);
   const bullets = [
-    product.discountPercent ? TH.discountBullet + product.discountPercent + "%" : "",
-    product.rating ? TH.ratingBullet + product.rating + "/5" : "",
-    product.salesCount ? TH.salesBullet + product.salesCount.toLocaleString("th-TH") + TH.pieces : "",
+    descriptionParts[0] ? "- " + descriptionParts[0] : "",
+    descriptionParts[1] ? "- " + descriptionParts[1] : "",
     product.category ? TH.categoryBullet + product.category : "",
-    product.productDescription ? "- " + compactProductText(product.productDescription, 64) : ""
+    product.discountPercent ? TH.discountBullet + product.discountPercent + "%" : "",
+    TH.useCaseBullet,
+    TH.materialBullet
   ].filter(Boolean);
-  return bullets.slice(0, 3);
+  return Array.from(new Set(bullets)).slice(0, 3);
 }
 
 export function buildShopeeFallbackCaption(product: ShopeeProductRecord, shopeeShortUrl: string) {
@@ -989,7 +1019,7 @@ export function buildShopeeFallbackCaption(product: ShopeeProductRecord, shopeeS
 }
 
 export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string, product?: ShopeeProductRecord) {
-  const withoutForbidden = removeHardSellPhrases(stripForbiddenAffiliateDisclosure(caption))
+  const withoutForbidden = removeMarketplaceMetricLines(removeHardSellPhrases(stripForbiddenAffiliateDisclosure(caption)))
     .replace(/https?:\/\/prosocial-app-theta\.vercel\.app\/\S+/gi, "")
     .replace(/https?:\/\/[^ \n]*\/api\/s\/\S+/gi, "")
     .replace(/\n{3,}/g, "\n\n")
@@ -1348,17 +1378,18 @@ export async function generateShopeeCaption(input: {
   const fallback = buildShopeeFallbackCaption(product, input.affiliateLink);
 
   const customPrompt = [
-    "\u0e40\u0e02\u0e35\u0e22\u0e19\u0e42\u0e1e\u0e2a\u0e15\u0e4c\u0e23\u0e35\u0e27\u0e34\u0e27\u0e2a\u0e34\u0e19\u0e04\u0e49\u0e32 Shopee Affiliate \u0e41\u0e1a\u0e1a\u0e18\u0e23\u0e23\u0e21\u0e0a\u0e32\u0e15\u0e34\u0e2a\u0e33\u0e2b\u0e23\u0e31\u0e1a Facebook",
+    "\u0e40\u0e02\u0e35\u0e22\u0e19\u0e42\u0e1e\u0e2a\u0e15\u0e4c\u0e23\u0e35\u0e27\u0e34\u0e27\u0e2a\u0e34\u0e19\u0e04\u0e49\u0e32 Shopee \u0e41\u0e1a\u0e1a\u0e18\u0e23\u0e23\u0e21\u0e0a\u0e32\u0e15\u0e34 \u0e40\u0e2b\u0e21\u0e37\u0e2d\u0e19\u0e04\u0e19\u0e43\u0e0a\u0e49\u0e08\u0e23\u0e34\u0e07\u0e21\u0e32\u0e40\u0e25\u0e48\u0e32",
     "",
     "Required format:",
     `1. \u0e1a\u0e23\u0e23\u0e17\u0e31\u0e14\u0e41\u0e23\u0e01\u0e15\u0e49\u0e2d\u0e07\u0e40\u0e1b\u0e47\u0e19\u0e0a\u0e37\u0e48\u0e2d\u0e2a\u0e34\u0e19\u0e04\u0e49\u0e32\u0e40\u0e17\u0e48\u0e32\u0e19\u0e31\u0e49\u0e19: ${product.productName}`,
-    "2. \u0e22\u0e48\u0e2d\u0e2b\u0e19\u0e49\u0e32\u0e16\u0e31\u0e14\u0e44\u0e1b\u0e40\u0e1b\u0e47\u0e19\u0e1f\u0e34\u0e25\u0e25\u0e34\u0e48\u0e07/\u0e23\u0e35\u0e27\u0e34\u0e27\u0e41\u0e1a\u0e1a\u0e18\u0e23\u0e23\u0e21\u0e0a\u0e32\u0e15\u0e34 1-2 \u0e1a\u0e23\u0e23\u0e17\u0e31\u0e14",
-    "3. \u0e43\u0e2a\u0e48 bullet \u0e23\u0e32\u0e22\u0e25\u0e30\u0e40\u0e2d\u0e35\u0e22\u0e14/\u0e08\u0e38\u0e14\u0e40\u0e14\u0e48\u0e19 1-3 \u0e02\u0e49\u0e2d \u0e42\u0e14\u0e22\u0e02\u0e36\u0e49\u0e19\u0e15\u0e49\u0e19\u0e14\u0e49\u0e27\u0e22 -",
-    "4. \u0e43\u0e2a\u0e48 CTA \u0e41\u0e1a\u0e1a\u0e18\u0e23\u0e23\u0e21\u0e0a\u0e32\u0e15\u0e34 1 \u0e1a\u0e23\u0e23\u0e17\u0e31\u0e14",
-    `5. \u0e43\u0e2a\u0e48 Shopee short link \u0e1a\u0e23\u0e23\u0e17\u0e31\u0e14\u0e16\u0e31\u0e14\u0e44\u0e1b: ${input.affiliateLink}`,
-    "6. hashtags 3-5 \u0e2d\u0e31\u0e19\u0e15\u0e49\u0e2d\u0e07\u0e2d\u0e22\u0e39\u0e48\u0e1a\u0e23\u0e23\u0e17\u0e31\u0e14\u0e2a\u0e38\u0e14\u0e17\u0e49\u0e32\u0e22\u0e40\u0e17\u0e48\u0e32\u0e19\u0e31\u0e49\u0e19",
+    "2. \u0e1a\u0e23\u0e23\u0e17\u0e31\u0e14\u0e16\u0e31\u0e14\u0e44\u0e1b\u0e40\u0e1b\u0e47\u0e19\u0e1f\u0e34\u0e25\u0e25\u0e34\u0e48\u0e07\u0e2a\u0e31\u0e49\u0e19 \u0e46 \u0e41\u0e1a\u0e1a\u0e43\u0e0a\u0e49\u0e41\u0e25\u0e49\u0e27\u0e42\u0e2d\u0e40\u0e04\u0e08\u0e23\u0e34\u0e07",
+    "3. \u0e15\u0e32\u0e21\u0e14\u0e49\u0e27\u0e22\u0e23\u0e32\u0e22\u0e25\u0e30\u0e40\u0e2d\u0e35\u0e22\u0e14\u0e2a\u0e34\u0e19\u0e04\u0e49\u0e32 2-3 \u0e1a\u0e23\u0e23\u0e17\u0e31\u0e14 \u0e40\u0e0a\u0e48\u0e19 \u0e27\u0e31\u0e2a\u0e14\u0e38 \u0e02\u0e19\u0e32\u0e14 \u0e01\u0e32\u0e23\u0e43\u0e0a\u0e49\u0e07\u0e32\u0e19 \u0e08\u0e38\u0e14\u0e40\u0e14\u0e48\u0e19 \u0e40\u0e2b\u0e21\u0e32\u0e30\u0e01\u0e31\u0e1a\u0e43\u0e04\u0e23",
+    "4. \u0e08\u0e30\u0e43\u0e0a\u0e49 bullet \u0e44\u0e14\u0e49\u0e44\u0e21\u0e48\u0e40\u0e01\u0e34\u0e19 3 \u0e02\u0e49\u0e2d \u0e42\u0e14\u0e22\u0e02\u0e36\u0e49\u0e19\u0e15\u0e49\u0e19\u0e14\u0e49\u0e27\u0e22 -",
+    "5. \u0e43\u0e2a\u0e48 CTA \u0e41\u0e1a\u0e1a soft sell \u0e2a\u0e31\u0e49\u0e19 \u0e46 1 \u0e1a\u0e23\u0e23\u0e17\u0e31\u0e14",
+    `6. \u0e43\u0e2a\u0e48 Shopee short link \u0e1a\u0e23\u0e23\u0e17\u0e31\u0e14\u0e16\u0e31\u0e14\u0e44\u0e1b: ${input.affiliateLink}`,
+    "7. hashtags 3-5 \u0e2d\u0e31\u0e19\u0e15\u0e49\u0e2d\u0e07\u0e2d\u0e22\u0e39\u0e48\u0e1a\u0e23\u0e23\u0e17\u0e31\u0e14\u0e2a\u0e38\u0e14\u0e17\u0e49\u0e32\u0e22\u0e40\u0e17\u0e48\u0e32\u0e19\u0e31\u0e49\u0e19",
     "",
-    "Style: Facebook organic review, TikTok Shop review, UGC review, casual Thai, human-written feeling.",
+    "Style: Facebook organic review, TikTok Shop review, UGC review, casual Thai, lifestyle soft sell, human-written feeling.",
     "",
     "Forbidden opening lines:",
     "- \u0e40\u0e02\u0e49\u0e32\u0e43\u0e08\u0e41\u0e25\u0e49\u0e27\u0e27\u0e48\u0e32\u0e17\u0e33\u0e44\u0e21",
@@ -1372,20 +1403,17 @@ export async function generateShopeeCaption(input: {
     "- Stop scrolling",
     "- Here are Shopee finds",
     "",
-    "Forbidden words/phrases: affiliate, \u0e2b\u0e21\u0e32\u0e22\u0e40\u0e2b\u0e15\u0e38, internal redirect URL, hard-sell CTA.",
+    "Forbidden words/phrases: affiliate, \u0e2b\u0e21\u0e32\u0e22\u0e40\u0e2b\u0e15\u0e38, internal redirect URL, hard-sell CTA, \u0e04\u0e30\u0e41\u0e19\u0e19\u0e23\u0e49\u0e32\u0e19, \u0e22\u0e2d\u0e14\u0e02\u0e32\u0e22, \u0e08\u0e33\u0e19\u0e27\u0e19\u0e23\u0e35\u0e27\u0e34\u0e27, bestseller, \u0e02\u0e32\u0e22\u0e14\u0e35\u0e2d\u0e31\u0e19\u0e14\u0e31\u0e1a 1.",
     "",
     "Product facts:",
     `Product name: ${product.productName}`,
     `Category: ${product.category || "-"}`,
     `Description/features: ${product.productDescription || "-"}`,
-    `Price: ${priceLine}`,
-    `Sales count: ${product.salesCount ?? "-"}`,
-    `Review count: ${product.reviewCount ?? "-"}`,
-    `Rating: ${product.rating ?? "-"}`,
+    `Price cue, only if it reads natural: ${priceLine}`,
     `Audience: ${audience}`,
     `Shopee short link: ${input.affiliateLink}`,
     "",
-    "Rules: max 700 characters, max 10 non-empty lines, Shopee link must be exact, hashtags bottom-most only. Return caption only inside JSON variants[].caption. Hashtags can be empty."
+    "Rules: 5-9 lines, max 700 characters, Shopee link must be exact, hashtags bottom-most only. Do not mention shop score, sales count, review count, bestseller, or ranking. Return caption only inside JSON variants[].caption. Hashtags can be empty."
   ].join("\n");
 
   try {
@@ -1397,9 +1425,6 @@ export async function generateShopeeCaption(input: {
         `Product name: ${product.productName}`,
         `Description: ${product.productDescription}`,
         priceLine,
-        `Sales count: ${product.salesCount ?? "-"}`,
-        `Review count: ${product.reviewCount ?? "-"}`,
-        `Rating: ${product.rating ?? "-"}`,
         `Shopee short link: ${input.affiliateLink}`
       ].join("\n")
     });
