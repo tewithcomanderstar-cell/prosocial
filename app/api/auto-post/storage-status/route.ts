@@ -4,7 +4,7 @@ import { getStorageStatus } from "@/lib/services/storage-cleanup";
 export async function GET() {
   try {
     await requireAuth();
-    const status = await getStorageStatus();
+    const status = await getStorageStatus({ includeCollections: true });
     return jsonOk({ storage: status });
   } catch (error) {
     if (isUnauthorizedError(error)) {

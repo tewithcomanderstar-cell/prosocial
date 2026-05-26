@@ -259,24 +259,29 @@ export async function ensureStorageIndexes() {
   ]);
 }
 
-export async function getStorageStatus() {
+export async function getStorageStatus(options: { includeCollections?: boolean } = {}) {
   await connectDb();
   const db = mongoose.connection.db;
   const config = getStorageCleanupConfig();
   const usage = await getDatabaseUsageBytes();
   const percent = config.limitBytes > 0 ? Math.round((usage.usedBytes / config.limitBytes) * 1000) / 10 : 0;
 
-  const collectionNames = db
-    ? Array.from(
-        new Set([
-          ...SUMMARY_COLLECTIONS,
-          ...(await db.listCollections().toArray()).map((collection) => collection.name)
-        ])
-      )
-    : [...SUMMARY_COLLECTIONS];
-  const collectionStats = (await Promise.all(collectionNames.map((name) => safeCollectionStats(name))))
-    .filter((item): item is CollectionStat => Boolean(item))
-    .sort((a, b) => b.storageBytes + b.indexBytes - (a.storageBytes + a.indexBytes));
+  const includeCollections = options.includeCollections === true;
+  const collectionStats = includeCollections
+    ? (await Promise.all(
+        (db
+          ? Array.from(
+              new Set([
+                ...SUMMARY_COLLECTIONS,
+                ...(await db.listCollections().toArray()).map((collection) => collection.name)
+              ])
+            )
+          : [...SUMMARY_COLLECTIONS]
+        ).map((name) => safeCollectionStats(name))
+      ))
+        .filter((item): item is CollectionStat => Boolean(item))
+        .sort((a, b) => b.storageBytes + b.indexBytes - (a.storageBytes + a.indexBytes))
+    : [];
 
   return {
     enabled: config.enabled,

@@ -15,6 +15,11 @@ const cached = global.mongooseCache ?? {
 
 global.mongooseCache = cached;
 
+function envMs(name: string, fallback: number) {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
 export async function connectDb() {
   const uri = process.env.MONGODB_URI;
 
@@ -29,10 +34,10 @@ export async function connectDb() {
   if (!cached.promise) {
     cached.promise = mongoose.connect(uri, {
       dbName: "facebook-auto-posting",
-      serverSelectionTimeoutMS: 10000,
-      connectTimeoutMS: 10000,
-      socketTimeoutMS: 20000,
-      maxPoolSize: 10
+      serverSelectionTimeoutMS: envMs("MONGODB_SERVER_SELECTION_TIMEOUT_MS", 4000),
+      connectTimeoutMS: envMs("MONGODB_CONNECT_TIMEOUT_MS", 4000),
+      socketTimeoutMS: envMs("MONGODB_SOCKET_TIMEOUT_MS", 15000),
+      maxPoolSize: Number(process.env.MONGODB_MAX_POOL_SIZE ?? 8)
     });
   }
 

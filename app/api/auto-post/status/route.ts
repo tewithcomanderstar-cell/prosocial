@@ -8,6 +8,9 @@ import { ShopeeProduct } from "@/models/ShopeeProduct";
 import { getShopeeAffiliateConfigStatus, getShopeeEnvStatus, getShopeeProductProvider } from "@/lib/services/shopee-affiliate";
 import { getStorageStatus, mapStorageQuotaMessage } from "@/lib/services/storage-cleanup";
 
+export const dynamic = "force-dynamic";
+export const maxDuration = 10;
+
 type AutoPostConfigStatusDoc = {
   _id: unknown;
   autoPostStatus?: string | null;
@@ -32,6 +35,10 @@ type LeanJobStatus = {
   result?: unknown;
   payload?: Record<string, unknown>;
 };
+
+const STATUS_FAST_TIMEOUT_MS = Number(process.env.AUTO_POST_STATUS_FAST_TIMEOUT_MS ?? 1200);
+const STATUS_OPTIONAL_TIMEOUT_MS = Number(process.env.AUTO_POST_STATUS_OPTIONAL_TIMEOUT_MS ?? 1500);
+const STATUS_JOB_TIMEOUT_MS = Number(process.env.AUTO_POST_STATUS_JOB_TIMEOUT_MS ?? 1800);
 
 function sanitizeLegacyMessage(value?: string | null) {
   if (!value) return value ?? null;
@@ -163,7 +170,15 @@ export async function GET() {
     // This status endpoint is polled by the UI, so it must stay read-only.
     // MongoDB Atlas blocks all writes when storage quota is exceeded; even an
     // upsert/log write here would make the control panel fail to render.
-    const configResult = await AutoPostConfig.findOne({ userId }).lean();
+    const configResult = await withSoftTimeout(
+      AutoPostConfig.findOne({ userId })
+        .maxTimeMS(STATUS_FAST_TIMEOUT_MS)
+        .lean()
+        .exec(),
+      STATUS_FAST_TIMEOUT_MS + 400,
+      null,
+      "auto-post-config"
+    );
 
     const config = (configResult as AutoPostConfigStatusDoc | null) ?? null;
     const defaultConfig = {
@@ -206,11 +221,12 @@ export async function GET() {
         "metadata.autoPost": true
       })
         .sort({ createdAt: -1 })
-        .limit(30)
+        .limit(20)
         .select("level message createdAt metadata")
+        .maxTimeMS(STATUS_OPTIONAL_TIMEOUT_MS)
         .lean()
         .exec(),
-      3000,
+      STATUS_OPTIONAL_TIMEOUT_MS,
       [],
       "activity-logs"
     );
@@ -220,16 +236,17 @@ export async function GET() {
     const facebookConnectionPromise = withSoftTimeout(
       FacebookConnection.findOne({ userId })
         .select("pages.pageId pages.id pages.externalPageId pages.name pages.pageName pages.pageAccessToken tokenStatus")
+        .maxTimeMS(STATUS_OPTIONAL_TIMEOUT_MS)
         .lean()
         .exec(),
-      3500,
+      STATUS_OPTIONAL_TIMEOUT_MS,
       null,
       "facebook-connection"
     );
-    const storagePromise = withSoftTimeout(getStorageStatus(), 2500, storageStatusFallback(), "storage-status");
+    const storagePromise = withSoftTimeout(getStorageStatus(), STATUS_OPTIONAL_TIMEOUT_MS, storageStatusFallback(), "storage-status");
     const lastProductPromise = withSoftTimeout(
-      ShopeeProduct.findOne({}).sort({ fetchedAt: -1 }).select("fetchedAt").lean().exec(),
-      2500,
+      ShopeeProduct.findOne({}).sort({ fetchedAt: -1 }).select("fetchedAt").maxTimeMS(STATUS_FAST_TIMEOUT_MS).lean().exec(),
+      STATUS_FAST_TIMEOUT_MS,
       null,
       "last-product"
     );
@@ -237,9 +254,10 @@ export async function GET() {
       FacebookPostQueue.findOne({ userId, status: "published" })
         .sort({ updatedAt: -1 })
         .select("updatedAt")
+        .maxTimeMS(STATUS_FAST_TIMEOUT_MS)
         .lean()
         .exec(),
-      2500,
+      STATUS_FAST_TIMEOUT_MS,
       null,
       "last-published"
     );
@@ -279,11 +297,12 @@ export async function GET() {
     const runJobs = (await withSoftTimeout(
       Job.find(jobQuery)
         .sort({ createdAt: -1 })
-        .limit(Math.max(100, targetPageIds.length || 30))
+        .limit(Math.max(40, targetPageIds.length * 3 || 20))
         .select("_id targetPageId status createdAt nextRunAt completedAt processingStartedAt lastError failureReason errorCode result payload")
+        .maxTimeMS(STATUS_JOB_TIMEOUT_MS)
         .lean()
         .exec(),
-      4000,
+      STATUS_JOB_TIMEOUT_MS,
       [],
       "publish-jobs"
     )) as LeanJobStatus[];
