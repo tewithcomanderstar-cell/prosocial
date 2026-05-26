@@ -8,6 +8,9 @@ import { runStorageCleanup } from "@/lib/services/storage-cleanup";
 import { runPlatformScheduler } from "@/src/jobs/schedulers/run-platform-scheduler";
 import { randomUUID } from "crypto";
 
+export const dynamic = "force-dynamic";
+export const maxDuration = 300;
+
 export async function GET(request: Request) {
   const authHeader = request.headers.get("authorization");
   const expected = `Bearer ${process.env.CRON_SECRET}`;

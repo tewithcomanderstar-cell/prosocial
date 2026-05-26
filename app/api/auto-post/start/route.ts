@@ -1,11 +1,12 @@
 import { jsonError, jsonOk } from "@/lib/api";
-import { processAutoPostConfigNow } from "@/lib/services/auto-post";
 import { logAction, logAndNotifyError } from "@/lib/services/logging";
 import { handleRoleError, requireRole } from "@/lib/services/permissions";
-import { processQueuedJobs } from "@/lib/services/queue";
 import { ensureStorageBeforeAutoPost, mapStorageQuotaMessage } from "@/lib/services/storage-cleanup";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
 import { after } from "next/server";
+
+export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 type LeanAutoPostConfig = {
   _id: string;
@@ -55,7 +56,15 @@ function normalizeFolderId(value: string) {
   return trimmed === BROKEN_FOLDER_ID ? FIXED_FOLDER_ID : trimmed;
 }
 
-export async function POST() {
+function getAppUrl(request: Request) {
+  return process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin;
+}
+
+function getInternalWorkerSecret() {
+  return process.env.CRON_SECRET || process.env.AUTO_POST_WORKER_SECRET || "";
+}
+
+export async function POST(request: Request) {
   try {
     const { userId } = await requireRole(["admin", "editor"]);
     await ensureStorageBeforeAutoPost(userId);
@@ -128,21 +137,77 @@ export async function POST() {
       lastRunAt: new Date()
     });
 
-    const result = await processAutoPostConfigNow(userId, config._id, { processInline: false });
+    after(() => {
+      const workerSecret = getInternalWorkerSecret();
+      if (!workerSecret) {
+        void AutoPostConfig.findByIdAndUpdate(config._id, {
+          autoPostStatus: "failed",
+          jobStatus: "failed",
+          lastStatus: "failed",
+          lastError: "Missing CRON_SECRET or AUTO_POST_WORKER_SECRET for Auto Post worker dispatch"
+        }).then(() =>
+          logAndNotifyError({
+            userId,
+            message: "Missing CRON_SECRET or AUTO_POST_WORKER_SECRET for Auto Post worker dispatch",
+            metadata: {
+              autoPost: true,
+              autoPostConfigId: config._id,
+              source: "manual-start-after-response",
+              action: "dispatch-process-step"
+            }
+          })
+        );
+        return;
+      }
 
-    after(async () => {
-      try {
-        const processedJobs = await processQueuedJobs(Math.max(config.targetPageIds.length, 1), "post");
-        await logAction({
+      const workerUrl = `${getAppUrl(request)}/api/auto-post/process-step`;
+      void fetch(workerUrl, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${workerSecret}`
+        },
+        body: JSON.stringify({
           userId,
-          type: "queue",
-          level: "info",
-          message: "Auto Post background publisher completed",
+          configId: config._id,
+          mode: "both",
+          limit: Math.max(config.targetPageIds.length, 1)
+        })
+      }).catch(async (error) => {
+        await AutoPostConfig.findByIdAndUpdate(config._id, {
+          autoPostStatus: "failed",
+          jobStatus: "failed",
+          lastStatus: "failed",
+          lastError: error instanceof Error ? error.message : "Unable to dispatch Auto Post worker"
+        });
+        await logAndNotifyError({
+          userId,
+          message: error instanceof Error ? error.message : "Unable to dispatch Auto Post worker",
           metadata: {
             autoPost: true,
             autoPostConfigId: config._id,
             source: "manual-start-after-response",
-            processedJobs: processedJobs.length
+            action: "dispatch-process-step",
+            failedStep: "DISPATCH_WORKER"
+          },
+          error
+        });
+      });
+    });
+
+    after(async () => {
+      try {
+        await logAction({
+          userId,
+          type: "queue",
+          level: "info",
+          message: "Auto Post worker dispatch queued",
+          metadata: {
+            autoPost: true,
+            autoPostConfigId: config._id,
+            source: "manual-start-after-response",
+            workerEndpoint: "/api/auto-post/process-step",
+            processingMode: "separate-worker-invocation"
           }
         });
       } catch (error) {
@@ -169,8 +234,8 @@ export async function POST() {
     await logAction({
       userId,
       type: "queue",
-      level: "success",
-      message: "Auto Post triggered in-app",
+      level: "info",
+      message: "Auto Post trigger accepted",
       metadata: {
         autoPost: true,
         autoPostConfigId: config._id,
@@ -182,28 +247,22 @@ export async function POST() {
         intervalMinutes: config.intervalMinutes,
         source: "manual-start",
         destination: "in-app-automation-engine",
-        queued: result.queued,
+        queued: 0,
         processedJobs: 0,
-        processingMode: "queued-background",
-        workflowId: result.workflowId,
-        workflowRunId: result.workflowRunId,
-        contentItemId: result.contentItemId
+        processingMode: "accepted-background"
       }
     });
 
     return jsonOk(
       {
         started: true,
-        jobId: String(result.workflowRunId),
+        jobId: String(config._id),
         selectedPagesCount: config.targetPageIds.length,
-        queued: result.queued,
+        queued: 0,
         processedJobs: [],
-        processingMode: "queued-background",
-        workflowId: result.workflowId,
-        workflowRunId: result.workflowRunId,
-        contentItemId: result.contentItemId
+        processingMode: "accepted-background"
       },
-      "Auto Post queued successfully. The publisher will run in the background."
+      "Auto Post accepted. The publisher will run in the background."
     );
   } catch (error) {
     if (error instanceof Error && error.message === "FORBIDDEN") {

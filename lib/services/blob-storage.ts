@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { del, list, put } from "@vercel/blob";
 import { AiGeneratedImage } from "@/models/AiGeneratedImage";
 import { AiGeneratedPost } from "@/models/AiGeneratedPost";
@@ -52,21 +53,57 @@ function contentExtension(mimeType: string) {
   return "png";
 }
 
+function uniqueBlobToken() {
+  return `${Date.now()}-${randomUUID()}`;
+}
+
 function buildImagePath(input: UploadAutoPostImageInput) {
   const jobId = sanitizeBlobSegment(input.jobId, "job");
   const productId = sanitizeBlobSegment(input.productId, "product");
   const mimeType = input.mimeType || "image/png";
   const extension = contentExtension(mimeType);
   const kind = input.kind ?? "image";
+  const unique = uniqueBlobToken();
 
   if (kind === "temp") {
-    const filename = sanitizeBlobSegment(input.filename, `${productId}-${Date.now()}.${extension}`);
-    return `auto-post/temp/${jobId}/${filename}`;
+    const filenameBase = sanitizeBlobSegment(input.filename?.replace(/\.[^.]+$/, ""), productId);
+    return `auto-post/temp/${jobId}/${filenameBase}-${unique}.${extension}`;
   }
 
   const index = Number.isFinite(input.index) ? input.index : 0;
   const prefix = kind === "preview" ? "auto-post/previews" : "auto-post/images";
-  return `${prefix}/${jobId}/${productId}-${index}.${extension}`;
+  return `${prefix}/${jobId}/${productId}-${index}-${unique}.${extension}`;
+}
+
+function isBlobAlreadyExistsError(error: unknown) {
+  return error instanceof Error && /already exists|allowOverwrite|addRandomSuffix/i.test(error.message);
+}
+
+async function putUniqueBlob(
+  pathname: string,
+  body: Buffer,
+  options: {
+    contentType: string;
+    fallbackPathname: () => string;
+  }
+) {
+  try {
+    return await put(pathname, body, {
+      access: "public",
+      contentType: options.contentType,
+      addRandomSuffix: true
+    });
+  } catch (error) {
+    if (!isBlobAlreadyExistsError(error)) {
+      throw error;
+    }
+
+    return put(options.fallbackPathname(), body, {
+      access: "public",
+      contentType: options.contentType,
+      addRandomSuffix: true
+    });
+  }
 }
 
 export async function uploadAutoPostImage(input: UploadAutoPostImageInput) {
@@ -74,10 +111,9 @@ export async function uploadAutoPostImage(input: UploadAutoPostImageInput) {
 
   const mimeType = input.mimeType || "image/png";
   const pathname = buildImagePath(input);
-  const result = await put(pathname, input.buffer, {
-    access: "public",
+  const result = await putUniqueBlob(pathname, input.buffer, {
     contentType: mimeType,
-    addRandomSuffix: false
+    fallbackPathname: () => buildImagePath(input)
   });
 
   return {
@@ -97,12 +133,12 @@ export async function uploadAutoPostRawOpenAiResponse(input: {
   assertBlobConfigured();
 
   const jobId = sanitizeBlobSegment(input.jobId, "job");
-  const pathname = `auto-post/raw-openai/${jobId}.json`;
+  const buildPathname = () => `auto-post/raw-openai/${jobId}-${uniqueBlobToken()}.json`;
+  const pathname = buildPathname();
   const body = Buffer.from(JSON.stringify(input.value, null, 2), "utf8");
-  const result = await put(pathname, body, {
-    access: "public",
+  const result = await putUniqueBlob(pathname, body, {
     contentType: "application/json",
-    addRandomSuffix: false
+    fallbackPathname: buildPathname
   });
 
   return {

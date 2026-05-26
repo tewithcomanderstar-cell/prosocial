@@ -89,6 +89,7 @@ type QueueAutoPostsResult = {
 
 const AUTO_POST_BATCH_PAGE_SPACING_MINUTES = Number(process.env.AUTO_POST_PAGE_SPACING_MINUTES ?? "10");
 const AUTO_POST_JOB_TIMEOUT_MS = Number(process.env.AUTO_POST_JOB_TIMEOUT_MS ?? "300000");
+const SHOPEE_BATCH_PRODUCT_MODE = process.env.SHOPEE_BATCH_PRODUCT_MODE === "per_page" ? "per_page" : "single";
 const OPEN_AUTO_POST_JOB_STATUSES = ["queued", "processing", "retrying", "rate_limited"] as const;
 const BANGKOK_UTC_OFFSET_HOURS = 7;
 const AUTO_POST_QUOTE_EXPANSION_PROMPT = `คุณคือผู้เชี่ยวชาญด้านการเขียนคอนเทนต์โซเชียลมีเดีย (Facebook/IG) ที่เน้นเพิ่ม Time Spend, Engagement (Like/Comment/Share) และความรู้สึกของผู้อ่าน
@@ -778,7 +779,11 @@ async function queueShopeeAutoPostsForConfig(
     config.postingWindowEnd
   );
 
-  const selectedProductPageIds = new Set(selectedProducts.map((selected) => selected.pageId));
+  const selectedProductsForQueue =
+    SHOPEE_BATCH_PRODUCT_MODE === "single" && selectedProducts.length > 0
+      ? eligiblePageIds.map((pageId) => ({ ...selectedProducts[0], pageId }))
+      : selectedProducts;
+  const selectedProductPageIds = new Set(selectedProductsForQueue.map((selected) => selected.pageId));
   for (let index = 0; index < eligiblePageIds.length; index += 1) {
     const pageId = eligiblePageIds[index];
     if (selectedProductPageIds.has(pageId)) continue;
@@ -800,8 +805,9 @@ async function queueShopeeAutoPostsForConfig(
     });
   }
 
-  for (let index = 0; index < selectedProducts.length; index += 1) {
-    const selected = selectedProducts[index];
+  const packageCache = new Map<string, Awaited<ReturnType<typeof buildShopeePostPackage>>>();
+  for (let index = 0; index < selectedProductsForQueue.length; index += 1) {
+    const selected = selectedProductsForQueue[index];
     const pageIndex = Math.max(0, eligiblePageIds.indexOf(selected.pageId));
     const startAt = new Date(batchStartAt.getTime() + Math.max(pageIndex, index) * pageSpacingMinutes * 60 * 1000);
     const trackingId = config.shopeeTrackingId?.trim() || `page-${selected.pageId}`;
@@ -816,15 +822,23 @@ async function queueShopeeAutoPostsForConfig(
         productId: selected.product.productId,
         metadata: { score: selected.score.productScore, reason: selected.score.reason }
       });
-      const packageResult = await buildShopeePostPackage({
-        userId: config.userId,
-        pageId: selected.pageId,
-        product: selected.product,
-        scheduledAt: startAt,
-        captionStyle: config.shopeeCaptionStyle ?? "soft_sell",
-        trackingId,
-        jobId: records.workflowRunId
-      });
+      const packageCacheKey =
+        SHOPEE_BATCH_PRODUCT_MODE === "single"
+          ? `${selected.product.productId}:${config.shopeeCaptionStyle ?? "soft_sell"}:${config.shopeeTrackingId?.trim() || "default"}`
+          : `${selected.pageId}:${selected.product.productId}:${trackingId}`;
+      let packageResult = packageCache.get(packageCacheKey);
+      if (!packageResult) {
+        packageResult = await buildShopeePostPackage({
+          userId: config.userId,
+          pageId: selected.pageId,
+          product: selected.product,
+          scheduledAt: startAt,
+          captionStyle: config.shopeeCaptionStyle ?? "soft_sell",
+          trackingId,
+          jobId: records.workflowRunId
+        });
+        packageCache.set(packageCacheKey, packageResult);
+      }
       await logShopeeStep({
         config,
         step: "VALIDATE_POST_PAYLOAD",
