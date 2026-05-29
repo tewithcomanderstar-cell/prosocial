@@ -87,8 +87,14 @@ type QueueAutoPostsResult = {
   contentItemId: string;
 };
 
+type ShopeeSelectedProduct = Awaited<ReturnType<typeof selectShopeeProductsForPages>>[number];
+type ShopeePostPackageResult = Awaited<ReturnType<typeof buildShopeePostPackage>>;
+type AutoPostErrorClassification = "retry_with_next_product" | "retry_same_product" | "job_failed";
+
 const AUTO_POST_BATCH_PAGE_SPACING_MINUTES = Number(process.env.AUTO_POST_PAGE_SPACING_MINUTES ?? "10");
 const AUTO_POST_JOB_TIMEOUT_MS = Number(process.env.AUTO_POST_JOB_TIMEOUT_MS ?? "300000");
+const AUTO_POST_MAX_PRODUCT_ATTEMPTS = Math.max(1, Number(process.env.AUTO_POST_MAX_PRODUCT_ATTEMPTS ?? "5"));
+const AUTO_POST_SAME_PRODUCT_RETRIES = Math.max(1, Number(process.env.AUTO_POST_SAME_PRODUCT_RETRIES ?? "2"));
 const SHOPEE_BATCH_PRODUCT_MODE = process.env.SHOPEE_BATCH_PRODUCT_MODE === "per_page" ? "per_page" : "single";
 const OPEN_AUTO_POST_JOB_STATUSES = ["queued", "processing", "retrying", "rate_limited"] as const;
 const BANGKOK_UTC_OFFSET_HOURS = 7;
@@ -479,6 +485,65 @@ function normalizeAutoPostError(error: unknown, fallback = "Auto Post failed") {
   return message || fallback;
 }
 
+function getAutoPostErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : typeof error === "string" ? error : String(error ?? "");
+}
+
+export function classifyAutoPostError(error: unknown): AutoPostErrorClassification {
+  const message = getAutoPostErrorMessage(error).toLowerCase();
+
+  if (
+    message.includes("missing env") ||
+    message.includes("no selected facebook") ||
+    message.includes("no facebook pages") ||
+    message.includes("facebook connection") ||
+    message.includes("invalid facebook token") ||
+    message.includes("database unavailable") ||
+    message.includes("storage quota") ||
+    message.includes("affiliate setup") ||
+    message.includes("affiliate config")
+  ) {
+    return "job_failed";
+  }
+
+  if (
+    message.includes("timeout") ||
+    message.includes("timed out") ||
+    message.includes("rate limit") ||
+    message.includes("429") ||
+    message.includes("temporar") ||
+    message.includes("network") ||
+    message.includes("fetch failed") ||
+    message.includes("econn") ||
+    message.includes("blob")
+  ) {
+    return "retry_same_product";
+  }
+
+  if (
+    message.includes("safety system") ||
+    message.includes("content policy") ||
+    message.includes("moderation rejected") ||
+    message.includes("request was rejected") ||
+    message.includes("safety rejected") ||
+    message.includes("image generation rejected") ||
+    message.includes("product image invalid") ||
+    message.includes("unsafe image") ||
+    message.includes("blocked content") ||
+    message.includes("product image is missing") ||
+    message.includes("reference_image_unavailable") ||
+    message.includes("reference image") ||
+    message.includes("generated image validation failed") ||
+    message.includes("returned the original shopee product image") ||
+    message.includes("returned duplicate ugc images") ||
+    message.includes("shopee ugc image generation failed")
+  ) {
+    return "retry_with_next_product";
+  }
+
+  return "job_failed";
+}
+
 async function logShopeeStep(input: {
   config: LeanAutoPostConfig;
   step: string;
@@ -590,6 +655,246 @@ async function createFailedShopeePageJob(input: {
       workflowRunId: input.workflowRunId
     }
   });
+}
+
+async function prepareSingleShopeePackageWithProductAttempts(input: {
+  config: LeanAutoPostConfig;
+  eligiblePageIds: string[];
+  initialSelectedProducts: ShopeeSelectedProduct[];
+  records: {
+    workflowId: string;
+    workflowRunId: string;
+    contentItemId: string;
+  };
+  batchStartAt: Date;
+  pageSpacingMinutes: number;
+}) {
+  const skippedProductIds = new Set<string>();
+  const skippedProducts: Array<{
+    productId: string;
+    shopId?: string;
+    productName: string;
+    reason: string;
+    classification: AutoPostErrorClassification;
+  }> = [];
+
+  for (let attempt = 1; attempt <= AUTO_POST_MAX_PRODUCT_ATTEMPTS; attempt += 1) {
+    const selectedProducts =
+      attempt === 1 && input.initialSelectedProducts.length
+        ? input.initialSelectedProducts
+        : await selectShopeeProductsForPages({
+            userId: input.config.userId,
+            pageIds: input.eligiblePageIds,
+            sourceTag: input.config.shopeeSourceTag ?? "trending",
+            keyword: input.config.shopeeKeyword,
+            category: input.config.shopeeCategory,
+            categoryPriority: input.config.shopeeCategoryPriority ?? [],
+            blockedCategories: input.config.shopeeBlockedCategories ?? [],
+            minPrice: input.config.shopeeMinPrice ?? 0,
+            maxPrice: input.config.shopeeMaxPrice ?? 0,
+            minRating: input.config.shopeeMinRating ?? 0,
+            minSales: input.config.shopeeMinSales ?? 0,
+            minDiscountPercent: input.config.shopeeMinDiscountPercent ?? 0,
+            excludedProductIds: Array.from(skippedProductIds)
+          });
+
+    const selected = selectedProducts[0];
+    if (!selected) break;
+
+    const productId = String(selected.product.productId);
+    const pageIndex = Math.max(0, input.eligiblePageIds.indexOf(selected.pageId));
+    const startAt = new Date(input.batchStartAt.getTime() + Math.max(pageIndex, 0) * input.pageSpacingMinutes * 60 * 1000);
+    const trackingId = input.config.shopeeTrackingId?.trim() || `page-${selected.pageId}`;
+
+    await logShopeeStep({
+      config: input.config,
+      step: "PRODUCT_ATTEMPT_STARTED",
+      status: "started",
+      message: `Trying Shopee product attempt ${attempt}/${AUTO_POST_MAX_PRODUCT_ATTEMPTS}`,
+      pageId: selected.pageId,
+      productId,
+      metadata: {
+        attempt,
+        maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
+        skippedProductsCount: skippedProducts.length,
+        productName: selected.product.productName,
+        score: selected.score.productScore,
+        reason: selected.score.reason,
+        workflowRunId: input.records.workflowRunId
+      }
+    });
+
+    await updateAutoPostState(input.config._id, {
+      autoPostStatus: attempt > 1 ? "retrying" : "running",
+      jobStatus: "pending",
+      lastStatus: "pending",
+      lastError: attempt > 1 ? `Trying next Shopee product (${attempt}/${AUTO_POST_MAX_PRODUCT_ATTEMPTS})` : null
+    });
+
+    let lastError: unknown = null;
+    for (let sameProductAttempt = 1; sameProductAttempt <= AUTO_POST_SAME_PRODUCT_RETRIES; sameProductAttempt += 1) {
+      try {
+        const packageResult = await buildShopeePostPackage({
+          userId: input.config.userId,
+          pageId: selected.pageId,
+          product: selected.product,
+          scheduledAt: startAt,
+          captionStyle: input.config.shopeeCaptionStyle ?? "soft_sell",
+          trackingId,
+          jobId: input.records.workflowRunId
+        });
+
+        await logShopeeStep({
+          config: input.config,
+          step: "PRODUCT_ATTEMPT_SUCCESS",
+          status: "success",
+          message: `Shopee product attempt ${attempt}/${AUTO_POST_MAX_PRODUCT_ATTEMPTS} is ready for all selected pages`,
+          pageId: selected.pageId,
+          productId,
+          metadata: {
+            attempt,
+            maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
+            sameProductAttempt,
+            skippedProductsCount: skippedProducts.length,
+            imageCount: packageResult.generatedImageUrls.length,
+            hasShortLink: Boolean(packageResult.shortAffiliateLink),
+            workflowRunId: input.records.workflowRunId
+          }
+        });
+
+        return {
+          selectedProductsForQueue: input.eligiblePageIds.map((pageId) => ({ ...selected, pageId })),
+          packageResult,
+          skippedProducts
+        };
+      } catch (error) {
+        lastError = error;
+        const classification = classifyAutoPostError(error);
+
+        await logShopeeStep({
+          config: input.config,
+          step: "PRODUCT_ATTEMPT_FAILED",
+          status: "failed",
+          message: `Shopee product attempt ${attempt}/${AUTO_POST_MAX_PRODUCT_ATTEMPTS} failed as ${classification}`,
+          pageId: selected.pageId,
+          productId,
+          error,
+          metadata: {
+            attempt,
+            maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
+            sameProductAttempt,
+            sameProductRetries: AUTO_POST_SAME_PRODUCT_RETRIES,
+            classification,
+            productName: selected.product.productName,
+            workflowRunId: input.records.workflowRunId
+          }
+        });
+
+        if (classification === "retry_same_product" && sameProductAttempt < AUTO_POST_SAME_PRODUCT_RETRIES) {
+          continue;
+        }
+
+        if (classification === "retry_with_next_product") {
+          skippedProductIds.add(productId);
+          skippedProducts.push({
+            productId,
+            shopId: selected.product.shopId,
+            productName: selected.product.productName,
+            reason: normalizeAutoPostError(error, "Product skipped"),
+            classification
+          });
+
+          await logShopeeStep({
+            config: input.config,
+            step: "PRODUCT_SKIPPED_SAFETY_REJECTED",
+            status: "skipped",
+            message: "Skipped this Shopee product and will try the next product",
+            pageId: selected.pageId,
+            productId,
+            error,
+            metadata: {
+              attempt,
+              maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
+              reason: "safety_rejected_or_image_failed",
+              skippedProductsCount: skippedProducts.length,
+              productName: selected.product.productName,
+              workflowRunId: input.records.workflowRunId
+            }
+          });
+
+          await logShopeeStep({
+            config: input.config,
+            step: "RETRYING_WITH_NEXT_PRODUCT",
+            status: "started",
+            message: `Trying next Shopee product after ${selected.product.productName} failed`,
+            metadata: {
+              attempt,
+              nextAttempt: attempt + 1,
+              maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
+              skippedProductsCount: skippedProducts.length,
+              workflowRunId: input.records.workflowRunId
+            }
+          });
+
+          await updateAutoPostState(input.config._id, {
+            autoPostStatus: "retrying",
+            jobStatus: "pending",
+            lastStatus: "pending",
+            lastError: `Product skipped: ${normalizeAutoPostError(error, "safety rejected")}`
+          });
+
+          break;
+        }
+
+        throw error;
+      }
+    }
+
+    if (lastError && classifyAutoPostError(lastError) !== "retry_with_next_product") {
+      throw lastError;
+    }
+  }
+
+  const message = `No eligible product could be posted after ${AUTO_POST_MAX_PRODUCT_ATTEMPTS} attempts`;
+  await logShopeeStep({
+    config: input.config,
+    step: "MAX_PRODUCT_ATTEMPTS_REACHED",
+    status: "failed",
+    message,
+    error: new Error(message),
+    metadata: {
+      maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
+      skippedProducts,
+      workflowRunId: input.records.workflowRunId
+    }
+  });
+
+  for (let index = 0; index < input.eligiblePageIds.length; index += 1) {
+    const pageId = input.eligiblePageIds[index];
+    const startAt = new Date(input.batchStartAt.getTime() + index * input.pageSpacingMinutes * 60 * 1000);
+    await createFailedShopeePageJob({
+      config: input.config,
+      pageId,
+      pageIndex: index + 1,
+      selectedPagesCount: input.eligiblePageIds.length,
+      workflowId: input.records.workflowId,
+      workflowRunId: input.records.workflowRunId,
+      contentItemId: input.records.contentItemId,
+      scheduledAt: startAt,
+      error: new Error(message),
+      errorCode: "max_product_attempts_reached",
+      failedStep: "MAX_PRODUCT_ATTEMPTS_REACHED"
+    });
+  }
+
+  await updateAutoPostState(input.config._id, {
+    autoPostStatus: "failed",
+    jobStatus: "failed",
+    lastStatus: "failed",
+    lastError: message
+  });
+
+  throw new Error(message);
 }
 
 async function queueShopeeAutoPostsForConfig(
@@ -779,10 +1084,25 @@ async function queueShopeeAutoPostsForConfig(
     config.postingWindowEnd
   );
 
-  const selectedProductsForQueue =
+  let selectedProductsForQueue =
     SHOPEE_BATCH_PRODUCT_MODE === "single" && selectedProducts.length > 0
       ? eligiblePageIds.map((pageId) => ({ ...selectedProducts[0], pageId }))
       : selectedProducts;
+  let sharedSingleProductPackage: ShopeePostPackageResult | null = null;
+
+  if (SHOPEE_BATCH_PRODUCT_MODE === "single" && selectedProducts.length > 0) {
+    const prepared = await prepareSingleShopeePackageWithProductAttempts({
+      config,
+      eligiblePageIds,
+      initialSelectedProducts: selectedProducts,
+      records,
+      batchStartAt,
+      pageSpacingMinutes
+    });
+    selectedProductsForQueue = prepared.selectedProductsForQueue;
+    sharedSingleProductPackage = prepared.packageResult;
+  }
+
   const selectedProductPageIds = new Set(selectedProductsForQueue.map((selected) => selected.pageId));
   for (let index = 0; index < eligiblePageIds.length; index += 1) {
     const pageId = eligiblePageIds[index];
@@ -826,7 +1146,7 @@ async function queueShopeeAutoPostsForConfig(
         SHOPEE_BATCH_PRODUCT_MODE === "single"
           ? `${selected.product.productId}:${config.shopeeCaptionStyle ?? "soft_sell"}:${config.shopeeTrackingId?.trim() || "default"}`
           : `${selected.pageId}:${selected.product.productId}:${trackingId}`;
-      let packageResult = packageCache.get(packageCacheKey);
+      let packageResult = sharedSingleProductPackage ?? packageCache.get(packageCacheKey);
       if (!packageResult) {
         packageResult = await buildShopeePostPackage({
           userId: config.userId,

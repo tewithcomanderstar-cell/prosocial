@@ -57,6 +57,11 @@ type ControlPanelStatus = {
   facebookPages?: FacebookPage[];
   currentJobId?: string | null;
   currentStep?: string | null;
+  currentAttempt?: number | null;
+  maxProductAttempts?: number | null;
+  skippedProductsCount?: number;
+  currentProduct?: string | null;
+  lastSkippedReason?: string | null;
   selectedPagesCount?: number;
   publishedPagesCount?: number;
   failedPagesCount?: number;
@@ -1058,6 +1063,10 @@ export function AutoPostPanel() {
         <div className="grid cols-2 auto-post-metrics auto-post-metrics-minimal">
           <div className="auto-post-metric-card"><span className="muted">Current job id</span><strong>{controlPanel?.currentJobId ?? "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Current step</span><strong>{controlPanel?.currentStep ?? statusLabel(displayStatus)}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Product attempt</span><strong>{controlPanel?.currentAttempt ? `${controlPanel.currentAttempt} / ${controlPanel.maxProductAttempts ?? 5}` : "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Skipped products</span><strong>{controlPanel?.skippedProductsCount ?? 0}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Current product</span><strong>{controlPanel?.currentProduct ? sanitizeText(controlPanel.currentProduct) : "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Last skipped reason</span><strong>{controlPanel?.lastSkippedReason ? sanitizeText(controlPanel.lastSkippedReason) : "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Selected pages</span><strong>{controlPanel?.selectedPagesCount ?? config.targetPageIds.length}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Current page</span><strong>{controlPanel?.currentPublishingPage?.pageName ?? "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Published</span><strong>{controlPanel?.publishedPagesCount ?? 0}</strong></div>

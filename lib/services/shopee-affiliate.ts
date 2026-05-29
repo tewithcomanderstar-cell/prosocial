@@ -1299,18 +1299,21 @@ export async function selectShopeeProductsForPages(input: {
   minRating?: number;
   minSales?: number;
   minDiscountPercent?: number;
+  excludedProductIds?: string[];
 }) {
   const provider = getShopeeProductProvider();
+  const excludedProductIds = new Set((input.excludedProductIds ?? []).map((productId) => String(productId)).filter(Boolean));
   const discovered = await provider.fetchProducts({
     sourceTag: input.sourceTag ?? "trending",
     keyword: input.keyword,
     category: input.category,
-    limit: Math.max(20, input.pageIds.length * 5)
+    limit: Math.max(20, input.pageIds.length * Math.max(5, excludedProductIds.size + 5))
   });
   await upsertShopeeProducts(discovered);
 
   const selected: Array<{ pageId: string; product: ShopeeProductRecord; score: ProductScore }> = [];
   const filteredProducts = discovered.filter((product) => {
+    if (excludedProductIds.has(String(product.productId))) return false;
     const effectivePrice = product.discountPrice || product.productPrice || 0;
     if ((input.minPrice ?? 0) > 0 && effectivePrice < (input.minPrice ?? 0)) return false;
     if ((input.maxPrice ?? 0) > 0 && effectivePrice > (input.maxPrice ?? 0)) return false;

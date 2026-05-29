@@ -380,6 +380,28 @@ export async function GET() {
     const mappedLastError = pageFailureMessage
       ? { source: "facebook_api", status: null, message: pageFailureMessage }
       : mapShopeeLastError(sanitizedLastError);
+    const latestAttemptLog = logs.find((log) => {
+      const metadata = (log.metadata ?? {}) as Record<string, unknown>;
+      return metadata.step === "PRODUCT_ATTEMPT_STARTED" || metadata.step === "PRODUCT_ATTEMPT_FAILED" || metadata.step === "PRODUCT_ATTEMPT_SUCCESS";
+    });
+    const latestSkippedProductLog = logs.find((log) => {
+      const metadata = (log.metadata ?? {}) as Record<string, unknown>;
+      return metadata.step === "PRODUCT_SKIPPED_SAFETY_REJECTED";
+    });
+    const latestAttemptMetadata = (latestAttemptLog?.metadata ?? {}) as Record<string, unknown>;
+    const latestSkippedMetadata = (latestSkippedProductLog?.metadata ?? {}) as Record<string, unknown>;
+    const currentAttempt =
+      typeof latestAttemptMetadata.attempt === "number" ? latestAttemptMetadata.attempt : latestAttemptMetadata.attempt ? Number(latestAttemptMetadata.attempt) : null;
+    const maxProductAttempts =
+      typeof latestAttemptMetadata.maxAttempts === "number"
+        ? latestAttemptMetadata.maxAttempts
+        : Number(process.env.AUTO_POST_MAX_PRODUCT_ATTEMPTS ?? 5);
+    const skippedProductsCount =
+      typeof latestAttemptMetadata.skippedProductsCount === "number"
+        ? latestAttemptMetadata.skippedProductsCount
+        : typeof latestSkippedMetadata.skippedProductsCount === "number"
+          ? latestSkippedMetadata.skippedProductsCount
+          : logs.filter((log) => ((log.metadata ?? {}) as Record<string, unknown>).step === "PRODUCT_SKIPPED_SAFETY_REJECTED").length;
     const affiliateMissingMessage = affiliateStatus.missing.length
       ? `Shopee Affiliate setup required. Missing: ${affiliateStatus.missing.join(", ")}`
       : null;
@@ -417,6 +439,13 @@ export async function GET() {
       })).filter((page: { pageId: string; name: string }) => page.pageId.length > 0),
       currentJobId: latestProcessingJob ? String(latestProcessingJob._id) : runJobs[0]?._id ? String(runJobs[0]._id) : null,
       currentStep,
+      currentAttempt,
+      maxProductAttempts,
+      skippedProductsCount,
+      currentProduct: latestAttemptMetadata.productName ? String(latestAttemptMetadata.productName) : null,
+      lastSkippedReason: latestSkippedProductLog
+        ? sanitizeLegacyMessage(String(latestSkippedMetadata.reason ?? latestSkippedProductLog.message ?? "Product skipped"))
+        : null,
       selectedPagesCount,
       publishedPagesCount,
       failedPagesCount,
