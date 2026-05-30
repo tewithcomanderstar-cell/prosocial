@@ -16,6 +16,8 @@ import { ShopeeProduct } from "@/models/ShopeeProduct";
 export type ShopeeSourceTag = "trending" | "best_selling" | "top_search" | "best_roi" | "manual";
 export type ShopeeCaptionStyle = "soft_sell" | "urgency" | "problem_solution" | "review_style" | "deal_alert" | "lifestyle";
 
+const SHOPEE_MAX_HASHTAGS = 5;
+
 export type ShopeeProductRecord = {
   productId: string;
   shopId: string;
@@ -948,7 +950,7 @@ function buildRelevantShopeeHashtags(product: ShopeeProductRecord) {
   const tags = candidates
     .map((item) => normalizeHashtagToken(String(item ?? "")))
     .filter(Boolean);
-  return Array.from(new Set(tags)).slice(0, 5);
+  return Array.from(new Set(tags)).slice(0, SHOPEE_MAX_HASHTAGS);
 }
 
 function extractHashtags(lines: string[], product?: ShopeeProductRecord) {
@@ -963,7 +965,7 @@ function extractHashtags(lines: string[], product?: ShopeeProductRecord) {
   const fallback = product ? buildRelevantShopeeHashtags(product) : SHOPEE_HASHTAG_FALLBACKS;
   return {
     contentLines,
-    hashtags: Array.from(new Set([...tags, ...fallback])).slice(0, 6)
+    hashtags: Array.from(new Set([...tags, ...fallback])).slice(0, SHOPEE_MAX_HASHTAGS)
   };
 }
 
@@ -1104,6 +1106,7 @@ export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string, p
 
   const noOldHooks = removeOldShopeeHookLines(rawLines);
   const { contentLines, hashtags } = extractHashtags(noOldHooks, product);
+  const safeHashtags = hashtags.slice(0, SHOPEE_MAX_HASHTAGS);
   const productName = compactProductText(product?.productName?.trim() || contentLines[0] || TH.defaultProductName, 120);
   const bodyLines = contentLines.filter((line) => line !== productName).slice(0, 10);
   const isBullet = (line: string) => /^[*\-•✅]\s*/.test(line);
@@ -1128,7 +1131,7 @@ export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string, p
     "",
     formatShopeeShortLinkLine(shopeeShortUrl),
     "",
-    hashtags.join(" ")
+    safeHashtags.join(" ")
   ];
 
   const normalizedCaption = finalLines
@@ -1151,7 +1154,7 @@ export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string, p
     "",
     formatShopeeShortLinkLine(shopeeShortUrl),
     "",
-    hashtags.slice(0, 4).join(" ")
+    safeHashtags.join(" ")
   ]
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
@@ -1472,7 +1475,7 @@ export async function generateShopeeCaption(input: {
     "",
     `📍 พิกัด ${input.affiliateLink}`,
     "",
-    "{hashtags 3-6 อัน อยู่ล่างสุดเท่านั้น}",
+    "{hashtags 3-5 อัน อยู่ล่างสุดเท่านั้น}",
     "",
     "Emoji rules: ใช้ emoji แบบธรรมชาติ ไม่เกิน 1-2 emoji ต่อบรรทัด ห้ามใส่รัว ๆ เช่น 🔥🔥🔥🔥",
     "Writing style: ภาษาพูด อ่านง่าย ไม่เป็นทางการ soft sell เหมือนรีวิวจริง ไม่ใช่ SEO article",

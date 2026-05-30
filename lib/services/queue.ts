@@ -640,11 +640,34 @@ async function updateBoundShopeeAutoPostRunState(job: JobExecution) {
   return true;
 }
 
+const SHOPEE_PUBLISH_MAX_HASHTAGS = 5;
+
 function normalizeHashtags(hashtags?: string[]) {
   return (hashtags ?? [])
     .map((hashtag) => hashtag.trim())
     .filter(Boolean)
     .map((hashtag) => (hashtag.startsWith("#") ? hashtag : `#${hashtag}`));
+}
+
+function normalizeShopeePublishHashtags(message: string) {
+  const hashtags: string[] = [];
+  const contentLines = message
+    .split(/\r?\n/)
+    .map((line) => {
+      const matches = line.match(/#[^\s#]+/g) ?? [];
+      hashtags.push(...matches.map((tag) => tag.trim()).filter(Boolean));
+      return line.replace(/#[^\s#]+/g, "").trimEnd();
+    })
+    .filter((line) => line.trim().length > 0);
+
+  const uniqueHashtags = Array.from(new Set(hashtags.map((tag) => (tag.startsWith("#") ? tag : `#${tag}`)))).slice(
+    0,
+    SHOPEE_PUBLISH_MAX_HASHTAGS
+  );
+
+  const body = contentLines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  if (!uniqueHashtags.length) return body;
+  return `${body}\n\n${uniqueHashtags.join(" ")}`.trim();
 }
 
 function escapeRegExp(value: string) {
@@ -1568,7 +1591,8 @@ async function executePostJob(job: JobExecution) {
 
   const variants = post.variants?.length ? post.variants : [{ caption: post.content, hashtags: post.hashtags }];
   const chosenVariant = post.randomizeCaption ? randomItem(variants) : variants[0];
-  const message = buildPublishMessage(chosenVariant.caption, chosenVariant.hashtags);
+  const rawMessage = buildPublishMessage(chosenVariant.caption, chosenVariant.hashtags);
+  const message = isShopeeAffiliateJob(job) ? normalizeShopeePublishHashtags(rawMessage) : rawMessage;
   const repairedImageRefs = await ensureShopeeAffiliateImageRefs(job, post);
   const imageRefs = post.randomizeImages && repairedImageRefs.length > 0 ? [randomItem(repairedImageRefs)] : repairedImageRefs;
   await logAction({
