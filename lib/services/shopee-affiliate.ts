@@ -865,6 +865,11 @@ const SHOPEE_FORBIDDEN_OPENERS = [
 ];
 
 const SHOPEE_SOFT_CTAS = [
+  "🛒 กดดูรายละเอียดเพิ่มเติม",
+  "📌 ดูราคาและโปรล่าสุด",
+  "✨ เข้าไปดูรีวิวเพิ่มเติมได้เลย",
+  "🎯 เผื่อกำลังมองหาสินค้าแนวนี้อยู่",
+  "💥 ลองกดเข้าไปดูรายละเอียดก่อนตัดสินใจ",
   "🛒 กดดูรายละเอียดเพิ่มเติมได้ที่",
   "📌 ดูราคาและโปรล่าสุดที่ลิงก์ด้านล่าง",
   "✨ ลองเข้าไปดูรายละเอียดก่อนตัดสินใจได้เลย",
@@ -877,6 +882,17 @@ const SHOPEE_SOFT_CTAS = [
 ];
 
 const SHOPEE_HASHTAG_FALLBACKS = ["#" + TH.affiliateReview, "#Shopee", "#" + TH.usefulItem];
+
+const SHOPEE_REVIEW_HOOKS = [
+  "🔥 ใส่ครั้งแรกก็รู้สึกต่างเลย",
+  "✨ ใช้ทุกวันจนกลายเป็นของประจำตัว",
+  "💯 คุณภาพเกินราคาจริง",
+  "😍 ลองแล้วชอบกว่าที่คิด",
+  "🎯 เหมาะกับคนที่กำลังมองหาแบบนี้",
+  "📌 เข้าใจแล้วว่าทำไมคนถึงเลือกใช้"
+];
+
+const SHOPEE_CAPTION_SEPARATOR = "━━━━━━━━━━━━━━";
 
 const SHOPEE_MARKETPLACE_METRIC_PATTERNS = [
   /\u0e04\u0e30\u0e41\u0e19\u0e19\u0e23\u0e49\u0e32\u0e19/iu,
@@ -982,6 +998,12 @@ function withNaturalEmoji(line: string) {
   return `${randomText(["✨", "🔥", "👍", "💯"])} ${line}`;
 }
 
+function formatShopeePrice(product?: ShopeeProductRecord) {
+  const price = product?.discountPrice || product?.productPrice;
+  if (!price || !Number.isFinite(price)) return "";
+  return `💰 ราคาโปร ${new Intl.NumberFormat("th-TH", { maximumFractionDigits: 0 }).format(price)} บาท`;
+}
+
 function normalizeShopeeBullet(value: string, max = 86) {
   const cleaned = compactProductText(
     value
@@ -992,7 +1014,7 @@ function normalizeShopeeBullet(value: string, max = 86) {
   );
   if (!cleaned) return "";
   if (SHOPEE_MARKETPLACE_METRIC_PATTERNS.some((pattern) => pattern.test(cleaned))) return "";
-  return `* ${cleaned}`;
+  return `✅ ${cleaned}`;
 }
 
 function stringifyShopeeMetadataValue(value: unknown): string[] {
@@ -1039,7 +1061,7 @@ function collectShopeeProductFacts(product: ShopeeProductRecord) {
 }
 
 function formatShopeeShortLinkLine(shopeeShortUrl: string) {
-  return `📍 พิกัด ${shopeeShortUrl}`;
+  return "\uD83D\uDCCD \u0E1E\u0E34\u0E01\u0E31\u0E14\n\n" + shopeeShortUrl;
 }
 
 function removeOldShopeeHookLines(lines: string[]) {
@@ -1087,13 +1109,16 @@ export function buildShopeeFallbackCaption(product: ShopeeProductRecord, shopeeS
 }
 
 export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string, product?: ShopeeProductRecord) {
-  const withoutForbidden = removeMarketplaceMetricLines(removeHardSellPhrases(stripForbiddenAffiliateDisclosure(caption)))
+  const cleanedCaption = removeMarketplaceMetricLines(removeHardSellPhrases(stripForbiddenAffiliateDisclosure(caption)))
     .replace(/https?:\/\/prosocial-app-theta\.vercel\.app\/\S+/gi, "")
     .replace(/https?:\/\/[^ \n]*\/api\/s\/\S+/gi, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
-  const rawLines = withoutForbidden
+  const rawLines = cleanedCaption
+    .replace(/https?:\/\/[^\s]+/gi, (match) => (isShopeeShortLink(match) ? shopeeShortUrl : ""))
+    .replace(/หมายเหตุ[^\n]*/gi, "")
+    .replace(/affiliate/gi, "")
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(
@@ -1101,7 +1126,7 @@ export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string, p
         line &&
         !line.includes(shopeeShortUrl) &&
         !/^Shopee\s*Link\s*:/i.test(line) &&
-        !/^📍\s*พิกัด/i.test(line)
+        !/^(?:\uD83D\uDCCD\s*)?\u0E1E\u0E34\u0E01\u0E31\u0E14/i.test(line)
     );
 
   const noOldHooks = removeOldShopeeHookLines(rawLines);
@@ -1109,7 +1134,7 @@ export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string, p
   const safeHashtags = hashtags.slice(0, SHOPEE_MAX_HASHTAGS);
   const productName = compactProductText(product?.productName?.trim() || contentLines[0] || TH.defaultProductName, 120);
   const bodyLines = contentLines.filter((line) => line !== productName).slice(0, 10);
-  const isBullet = (line: string) => /^[*\-•✅]\s*/.test(line);
+  const isBullet = (line: string) => /^[*\-•✅â€¢âœ…]\s*/.test(line);
 
   const aiReviewLine = bodyLines.find((line) => !isBullet(line) && !hasSoftCta(line));
   const reviewLine = withNaturalEmoji(
@@ -1119,17 +1144,31 @@ export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string, p
   const fallbackBullets = product ? buildShopeeDetailBullets(product) : [];
   const details = Array.from(new Set([...aiBullets, ...fallbackBullets])).slice(0, 4);
   const ctaLine = compactProductText(bodyLines.find((line) => hasSoftCta(line)) || randomText(SHOPEE_SOFT_CTAS), 95);
+  const hookLine = randomText(SHOPEE_REVIEW_HOOKS);
+  const priceLine = formatShopeePrice(product);
+  const spacedDetails = details.flatMap((line) => [line, ""]).slice(0, -1);
 
   const finalLines = [
     productName,
     "",
+    hookLine,
+    "",
+    "✨ ความรู้สึกหลังใช้งาน",
+    "",
     reviewLine,
     "",
-    ...details,
+    "📌 จุดเด่นที่ชอบ",
+    "",
+    ...spacedDetails,
+    ...(priceLine ? ["", priceLine] : []),
+    "",
+    SHOPEE_CAPTION_SEPARATOR,
     "",
     ctaLine,
     "",
     formatShopeeShortLinkLine(shopeeShortUrl),
+    "",
+    SHOPEE_CAPTION_SEPARATOR,
     "",
     safeHashtags.join(" ")
   ];
@@ -1143,16 +1182,30 @@ export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string, p
     return normalizedCaption;
   }
 
+  const compactDetails = details.slice(0, 3).map((line) => normalizeShopeeBullet(line, 72)).filter(Boolean);
+  const compactSpacedDetails = compactDetails.flatMap((line) => [line, ""]).slice(0, -1);
+
   return [
     productName,
     "",
+    hookLine,
+    "",
+    "✨ ความรู้สึกหลังใช้งาน",
+    "",
     compactProductText(reviewLine, 135),
     "",
-    ...details.slice(0, 3).map((line) => normalizeShopeeBullet(line, 72)).filter(Boolean),
+    "📌 จุดเด่นที่ชอบ",
+    "",
+    ...compactSpacedDetails,
+    ...(priceLine ? ["", priceLine] : []),
+    "",
+    SHOPEE_CAPTION_SEPARATOR,
     "",
     ctaLine,
     "",
     formatShopeeShortLinkLine(shopeeShortUrl),
+    "",
+    SHOPEE_CAPTION_SEPARATOR,
     "",
     safeHashtags.join(" ")
   ]
@@ -1457,29 +1510,48 @@ export async function generateShopeeCaption(input: {
   const productFactLines = collectShopeeProductFacts(product).map((line) => line.replace(/^\*\s*/, ""));
 
   const customPrompt = [
-    "เขียนโพสต์รีวิวสินค้า Shopee Affiliate แบบธรรมชาติสำหรับ Facebook Page",
+    "เขียนโพสต์รีวิวสินค้า Shopee Affiliate สำหรับ Facebook Page ตาม layout นี้เท่านั้น",
     "",
-    "เป้าหมาย: ให้เหมือนคนใช้งานจริงรีวิวเอง อ่านง่าย มีอิโมจิพอดี ไม่ดูเป็น AI และไม่ขายแข็ง",
+    "เป้าหมาย: อ่านง่ายบนมือถือ เห็นจุดเด่นทันที เพิ่ม CTR ดูเหมือนคนรีวิวจริง และไม่เป็นกำแพงข้อความ",
     "",
-    "OUTPUT FORMAT ที่ต้องใช้เท่านั้น:",
+    "LAYOUT FORMAT:",
     `${product.productName}`,
     "",
-    "{ความรู้สึกหลังใช้งานจริง / จุดเด่นที่ทำให้คนสนใจ 1 บรรทัด ใส่ emoji ได้ 1 ตัว}",
+    "{hook_line จากตัวอย่างเท่านั้นหรือใกล้เคียง: 🔥 ใส่ครั้งแรกก็รู้สึกต่างเลย / ✨ ใช้ทุกวันจนกลายเป็นของประจำตัว / 💯 คุณภาพเกินราคาจริง / 😍 ลองแล้วชอบกว่าที่คิด / 🎯 เหมาะกับคนที่กำลังมองหาแบบนี้ / 📌 เข้าใจแล้วว่าทำไมคนถึงเลือกใช้}",
     "",
-    "* {รายละเอียดสินค้าจริง 1}",
-    "* {รายละเอียดสินค้าจริง 2}",
-    "* {รายละเอียดสินค้าจริง 3}",
-    "* {รายละเอียดสินค้าจริง 4 ถ้ามี}",
+    "✨ ความรู้สึกหลังใช้งาน",
     "",
-    "{CTA สุภาพ ธรรมชาติ ไม่ hard sell}",
+    "{feeling_line ภาษาคนจริง 1-2 บรรทัด อิงรายละเอียดสินค้าเท่านั้น}",
     "",
-    `📍 พิกัด ${input.affiliateLink}`,
+    "📌 จุดเด่นที่ชอบ",
+    "",
+    "✅ {feature_1}",
+    "",
+    "✅ {feature_2}",
+    "",
+    "✅ {feature_3}",
+    "",
+    "✅ {feature_4 ถ้ามี}",
+    "",
+    `{price_line ถ้ามี ให้ใช้: ${formatShopeePrice(product) || priceLine}}`,
+    "",
+    "━━━━━━━━━━━━━━",
+    "",
+    "{CTA สุ่มแบบ soft เช่น 🛒 กดดูรายละเอียดเพิ่มเติม / 📌 ดูราคาและโปรล่าสุด / ✨ เข้าไปดูรีวิวเพิ่มเติมได้เลย / 🎯 เผื่อกำลังมองหาสินค้าแนวนี้อยู่ / 💥 ลองกดเข้าไปดูรายละเอียดก่อนตัดสินใจ}",
+    "",
+    "📍 พิกัด",
+    "",
+    `${input.affiliateLink}`,
+    "",
+    "━━━━━━━━━━━━━━",
     "",
     "{hashtags 3-5 อัน อยู่ล่างสุดเท่านั้น}",
     "",
-    "Emoji rules: ใช้ emoji แบบธรรมชาติ ไม่เกิน 1-2 emoji ต่อบรรทัด ห้ามใส่รัว ๆ เช่น 🔥🔥🔥🔥",
-    "Writing style: ภาษาพูด อ่านง่าย ไม่เป็นทางการ soft sell เหมือนรีวิวจริง ไม่ใช่ SEO article",
-    "CTA examples: 🛒 กดดูรายละเอียดเพิ่มเติมได้ที่, 📌 ดูราคาและโปรล่าสุดที่ลิงก์ด้านล่าง, ✨ ลองเข้าไปดูรายละเอียดก่อนตัดสินใจได้เลย",
+    "SPACING RULE: ทุก section ต้องเว้นบรรทัด ห้ามรวม CTA กับลิงก์ ห้ามรวมลิงก์กับ hashtag",
+    "FEATURE RULE: ใช้ ✅ เท่านั้น ห้ามใช้ * หรือ -",
+    "LINK RULE: ลิงก์ต้องอยู่เดี่ยว ๆ และต้องเป็น Shopee short link เท่านั้น",
+    "HASHTAG RULE: 3-5 hashtags ห้ามเกิน 5 และต้องอยู่ล่างสุด",
+    "Emoji rule: ใช้พอดี ไม่เกิน 1-2 emoji ต่อบรรทัด ห้าม emoji รัว ๆ",
     "",
     "ห้ามใช้ข้อมูล/คำต่อไปนี้เด็ดขาด:",
     "- คะแนนร้าน",
@@ -1502,7 +1574,7 @@ export async function generateShopeeCaption(input: {
     `จุดเด่นที่สกัดได้: ${productFactLines.join(" | ") || "-"}`,
     `ลิงก์ Shopee Short Link: ${input.affiliateLink}`,
     "",
-    "Rules: ไม่เกิน 700 ตัวอักษร, 5-9 บรรทัดโดยประมาณ, link ต้องเป็นบรรทัด 📍 พิกัด เท่านั้น, hashtags อยู่ท้ายสุด, Return caption only inside JSON variants[].caption."
+    "Rules: ไม่เกิน 700 ตัวอักษร, Return caption only inside JSON variants[].caption."
   ].join("\n");
 
   try {

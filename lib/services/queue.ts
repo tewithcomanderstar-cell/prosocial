@@ -657,15 +657,14 @@ function normalizeShopeePublishHashtags(message: string) {
       const matches = line.match(/#[^\s#]+/g) ?? [];
       hashtags.push(...matches.map((tag) => tag.trim()).filter(Boolean));
       return line.replace(/#[^\s#]+/g, "").trimEnd();
-    })
-    .filter((line) => line.trim().length > 0);
+    });
 
   const uniqueHashtags = Array.from(new Set(hashtags.map((tag) => (tag.startsWith("#") ? tag : `#${tag}`)))).slice(
     0,
     SHOPEE_PUBLISH_MAX_HASHTAGS
   );
 
-  const body = contentLines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  const body = contentLines.join("\n").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
   if (!uniqueHashtags.length) return body;
   return `${body}\n\n${uniqueHashtags.join(" ")}`.trim();
 }
