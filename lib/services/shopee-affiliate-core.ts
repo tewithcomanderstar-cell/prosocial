@@ -1,4 +1,4 @@
-import crypto from "crypto";
+﻿import crypto from "crypto";
 import { buildUgcShopeeImagePromptSet } from "./ugc-image-prompt.ts";
 
 export type ShopeeSourceTag = "trending" | "best_selling" | "top_search" | "best_roi" | "manual";
@@ -58,46 +58,9 @@ export type ShopeeImagePromptSet = {
   negativePrompt: string;
 };
 
-export type ShopeeSubIdFields = {
-  subId?: string | null;
-  subId1?: string | null;
-  subId2?: string | null;
-  subId3?: string | null;
-  subId4?: string | null;
-  subId5?: string | null;
-};
-
-export const SHOPEE_SUB_ID_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
-export const SHOPEE_SUB_ID_ERROR_MESSAGE = "Sub ID ใช้ได้เฉพาะ a-z, A-Z, 0-9, _ และ - เท่านั้น";
-
 export interface ShopeeProductProvider {
   name: string;
   fetchProducts(query: ProductDiscoveryQuery): Promise<ShopeeProductRecord[]>;
-}
-
-function normalizeShopeeSubIds(subIds?: ShopeeSubIdFields): Required<Record<keyof ShopeeSubIdFields, string>> {
-  return {
-    subId: subIds?.subId?.trim() ?? "",
-    subId1: subIds?.subId1?.trim() ?? "",
-    subId2: subIds?.subId2?.trim() ?? "",
-    subId3: subIds?.subId3?.trim() ?? "",
-    subId4: subIds?.subId4?.trim() ?? "",
-    subId5: subIds?.subId5?.trim() ?? ""
-  };
-}
-
-function validateShopeeSubIds(subIds?: ShopeeSubIdFields) {
-  const normalized = normalizeShopeeSubIds(subIds);
-  for (const value of Object.values(normalized)) {
-    if (value && !SHOPEE_SUB_ID_PATTERN.test(value)) {
-      throw new Error(SHOPEE_SUB_ID_ERROR_MESSAGE);
-    }
-  }
-  return normalized;
-}
-
-function hasAnyShopeeSubId(subIds?: ShopeeSubIdFields) {
-  return Object.values(normalizeShopeeSubIds(subIds)).some(Boolean);
 }
 
 function comparableTokens(value: string) {
@@ -174,23 +137,6 @@ export function countShopeeProductNameOccurrences(caption: string, productName: 
     .filter(Boolean);
 
   return lines.reduce((count, line) => count + (isShopeeProductNameDuplicateText(line, productName) ? 1 : 0), 0);
-}
-
-function applyShopeeSubIds(url: URL, subIds?: ShopeeSubIdFields) {
-  const normalized = validateShopeeSubIds(subIds);
-  const paramMap: Array<[keyof ShopeeSubIdFields, string]> = [
-    ["subId", "sub_id"],
-    ["subId1", "sub_id1"],
-    ["subId2", "sub_id2"],
-    ["subId3", "sub_id3"],
-    ["subId4", "sub_id4"],
-    ["subId5", "sub_id5"]
-  ];
-
-  for (const [field, param] of paramMap) {
-    const value = normalized[field];
-    if (value) url.searchParams.set(param, value);
-  }
 }
 
 export class MockShopeeProvider implements ShopeeProductProvider {
@@ -319,11 +265,8 @@ export function buildAffiliateLinkCore(input: {
   product: ShopeeProductRecord;
   trackingId?: string;
   affiliateBaseUrl?: string;
-  subIds?: ShopeeSubIdFields;
 }) {
-  validateShopeeSubIds(input.subIds);
-
-  if (input.product.affiliateUrl && !hasAnyShopeeSubId(input.subIds)) {
+  if (input.product.affiliateUrl) {
     return input.product.affiliateUrl;
   }
 
@@ -334,14 +277,12 @@ export function buildAffiliateLinkCore(input: {
     if (input.trackingId) url.searchParams.set("utm_content", input.trackingId);
     url.searchParams.set("utm_source", "prosocial");
     url.searchParams.set("utm_medium", "affiliate_auto_post");
-    applyShopeeSubIds(url, input.subIds);
     return url.toString();
   }
 
   const url = new URL(input.affiliateBaseUrl);
   url.searchParams.set("url", sourceUrl);
   if (input.trackingId) url.searchParams.set("tracking_id", input.trackingId);
-  applyShopeeSubIds(url, input.subIds);
   return url.toString();
 }
 
@@ -439,14 +380,14 @@ function extractFeatureHints(product: ShopeeProductRecord) {
   const text = `${product.productName} ${product.productDescription} ${product.category}`.toLowerCase();
   const hints: string[] = [];
 
-  if (/stainless|steel|à¸ªà¹à¸•à¸™à¹€à¸¥à¸ª|à¹€à¸«à¸¥à¹‡à¸/.test(text)) hints.push("stainless or metallic finish");
-  if (/led|light|à¹„à¸Ÿ/.test(text)) hints.push("visible lighting feature");
-  if (/mini|compact|portable|à¸¡à¸´à¸™à¸´|à¸žà¸à¸žà¸²/.test(text)) hints.push("compact portable size");
-  if (/clear|transparent|à¹ƒà¸ª/.test(text)) hints.push("transparent or clear material");
-  if (/cup|bottle|à¹à¸à¹‰à¸§/.test(text)) hints.push("cylindrical drinkware silhouette");
-  if (/vacuum|à¸”à¸¹à¸”à¸à¸¸à¹ˆà¸™/.test(text)) hints.push("handheld appliance body");
-  if (/mirror|à¸à¸£à¸°à¸ˆà¸/.test(text)) hints.push("reflective mirror surface");
-  if (/organizer|box|storage|à¸à¸¥à¹ˆà¸­à¸‡|à¸ˆà¸±à¸”à¸£à¸°à¹€à¸šà¸µà¸¢à¸š/.test(text)) hints.push("storage organizer form");
+  if (/stainless|steel|สแตนเลส|เหล็ก/.test(text)) hints.push("stainless or metallic finish");
+  if (/led|light|ไฟ/.test(text)) hints.push("visible lighting feature");
+  if (/mini|compact|portable|มินิ|พกพา/.test(text)) hints.push("compact portable size");
+  if (/clear|transparent|ใส/.test(text)) hints.push("transparent or clear material");
+  if (/cup|bottle|แก้ว/.test(text)) hints.push("cylindrical drinkware silhouette");
+  if (/vacuum|ดูดฝุ่น/.test(text)) hints.push("handheld appliance body");
+  if (/mirror|กระจก/.test(text)) hints.push("reflective mirror surface");
+  if (/organizer|box|storage|กล่อง|จัดระเบียบ/.test(text)) hints.push("storage organizer form");
 
   return hints.length ? hints : ["exact visible product silhouette from the reference image"];
 }

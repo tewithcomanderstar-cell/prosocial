@@ -26,12 +26,6 @@ const autoPostConfigSchema = new Schema(
       default: "soft_sell"
     },
     shopeeTrackingId: { type: String, default: "" },
-    shopeeSubId: { type: String, default: "" },
-    shopeeSubId1: { type: String, default: "" },
-    shopeeSubId2: { type: String, default: "" },
-    shopeeSubId3: { type: String, default: "" },
-    shopeeSubId4: { type: String, default: "" },
-    shopeeSubId5: { type: String, default: "" },
     shopeeBlockedCategories: { type: [String], default: [] },
     shopeeCategoryPriority: { type: [String], default: [] },
     shopeeMinPrice: { type: Number, default: 0 },

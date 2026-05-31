@@ -102,97 +102,15 @@ export class ShopeeProviderError extends Error {
   }
 }
 
-export type ShopeeSubIdFields = {
-  subId?: string | null;
-  subId1?: string | null;
-  subId2?: string | null;
-  subId3?: string | null;
-  subId4?: string | null;
-  subId5?: string | null;
-};
-
-export const SHOPEE_SUB_ID_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
-export const SHOPEE_SUB_ID_ERROR_MESSAGE = "Sub ID à¹ƒà¸Šà¹‰à¹„à¸”à¹‰à¹€à¸‰à¸žà¸²à¸° a-z, A-Z, 0-9, _ à¹à¸¥à¸° - à¹€à¸—à¹ˆà¸²à¸™à¸±à¹‰à¸™";
-
-const SHOPEE_SUB_ID_KEYS = ["subId", "subId1", "subId2", "subId3", "subId4", "subId5"] as const;
-
-function normalizeShopeeSubId(value?: string | null) {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-export function normalizeShopeeSubIds(input: ShopeeSubIdFields = {}): Required<ShopeeSubIdFields> {
-  return {
-    subId: normalizeShopeeSubId(input.subId),
-    subId1: normalizeShopeeSubId(input.subId1),
-    subId2: normalizeShopeeSubId(input.subId2),
-    subId3: normalizeShopeeSubId(input.subId3),
-    subId4: normalizeShopeeSubId(input.subId4),
-    subId5: normalizeShopeeSubId(input.subId5)
-  };
-}
-
-export function validateShopeeSubIds(input: ShopeeSubIdFields = {}) {
-  const normalized = normalizeShopeeSubIds(input);
-  for (const key of SHOPEE_SUB_ID_KEYS) {
-    const value = normalized[key];
-    if (value && !SHOPEE_SUB_ID_PATTERN.test(value)) {
-      throw new ShopeeProviderError(SHOPEE_SUB_ID_ERROR_MESSAGE, 400, "shopee_sub_id_invalid", "config");
-    }
-  }
-  return normalized;
-}
-
-function hasAnyShopeeSubId(input: ShopeeSubIdFields = {}) {
-  const normalized = normalizeShopeeSubIds(input);
-  return SHOPEE_SUB_ID_KEYS.some((key) => Boolean(normalized[key]));
-}
-
-export function getShopeeSubIdCacheKey(input: ShopeeSubIdFields = {}) {
-  const normalized = normalizeShopeeSubIds(input);
-  return SHOPEE_SUB_ID_KEYS.map((key) => `${key}:${normalized[key] || "-"}`).join("|");
-}
-
-export function resolveShopeeSubIds(input: {
-  pageSubIds?: ShopeeSubIdFields | null;
-  configSubIds?: ShopeeSubIdFields | null;
-} = {}) {
-  const envSubIds = normalizeShopeeSubIds({
-    subId: process.env.SHOPEE_DEFAULT_SUB_ID,
-    subId1: process.env.SHOPEE_DEFAULT_SUB_ID1,
-    subId2: process.env.SHOPEE_DEFAULT_SUB_ID2,
-    subId3: process.env.SHOPEE_DEFAULT_SUB_ID3,
-    subId4: process.env.SHOPEE_DEFAULT_SUB_ID4,
-    subId5: process.env.SHOPEE_DEFAULT_SUB_ID5
-  });
-  const configSubIds = normalizeShopeeSubIds(input.configSubIds ?? {});
-  const pageSubIds = normalizeShopeeSubIds(input.pageSubIds ?? {});
-  const resolved: ShopeeSubIdFields = {};
-
-  for (const key of SHOPEE_SUB_ID_KEYS) {
-    resolved[key] = pageSubIds[key] || configSubIds[key] || envSubIds[key] || "";
-  }
-
-  return validateShopeeSubIds(resolved);
-}
-
 export function buildShopeeAffiliatePayload(input: {
   productUrl: string;
   trackingId?: string | null;
-  subId?: string | null;
-  subIds?: ShopeeSubIdFields | null;
 }) {
-  const subIds = validateShopeeSubIds({ ...(input.subIds ?? {}), subId: input.subId ?? input.subIds?.subId });
   const payload: Record<string, string> = {
     url: input.productUrl
   };
   const trackingId = input.trackingId?.trim();
   if (trackingId) payload.tracking_id = trackingId;
-  if (subIds.subId) payload.sub_id = subIds.subId;
-  if (subIds.subId1) payload.sub_id1 = subIds.subId1;
-  if (subIds.subId2) payload.sub_id2 = subIds.subId2;
-  if (subIds.subId3) payload.sub_id3 = subIds.subId3;
-  if (subIds.subId4) payload.sub_id4 = subIds.subId4;
-  if (subIds.subId5) payload.sub_id5 = subIds.subId5;
   return payload;
 }
 
@@ -851,9 +769,8 @@ export function getShopeeProductProvider(): ShopeeProductProvider {
   return new MockShopeeProvider();
 }
 
-export function buildAffiliateLink(product: ShopeeProductRecord, trackingId?: string, subIds?: ShopeeSubIdFields) {
-  const normalizedSubIds = validateShopeeSubIds(subIds ?? {});
-  if (product.affiliateUrl && !hasAnyShopeeSubId(normalizedSubIds)) {
+export function buildAffiliateLink(product: ShopeeProductRecord, trackingId?: string) {
+  if (product.affiliateUrl) {
     return product.affiliateUrl;
   }
 
@@ -862,8 +779,7 @@ export function buildAffiliateLink(product: ShopeeProductRecord, trackingId?: st
   const sourceUrl = product.productUrl || `https://shopee.co.th/product/${product.shopId}/${product.itemId}`;
   const payload = buildShopeeAffiliatePayload({
     productUrl: sourceUrl,
-    trackingId: resolvedTrackingId,
-    subIds: normalizedSubIds
+    trackingId: resolvedTrackingId
   });
 
   if (!base) {
@@ -1499,13 +1415,11 @@ export async function createOrReuseAffiliateShortLink(input: {
   userId: string;
   product: ShopeeProductRecord;
   trackingId?: string;
-  subIds?: ShopeeSubIdFields;
   pageId?: string;
 }) {
   const trackingId = input.trackingId?.trim() || process.env.SHOPEE_TRACKING_ID?.trim() || "default";
-  const subIds = validateShopeeSubIds(input.subIds ?? {});
   const originalUrl = input.product.productUrl || `https://shopee.co.th/product/${input.product.shopId}/${input.product.itemId}`;
-  const affiliateUrl = buildAffiliateLink(input.product, trackingId, subIds);
+  const affiliateUrl = buildAffiliateLink(input.product, trackingId);
 
   if (!affiliateUrl) {
     throw new ShopeeProviderError("Affiliate link generation failed", 500, "shopee_affiliate_link_failed", "config");
@@ -1543,13 +1457,7 @@ export async function createOrReuseAffiliateShortLink(input: {
         shortLink: affiliateUrl,
         apiResponse,
         errorReason: validationReason,
-        trackingId,
-        subId: subIds.subId,
-        subId1: subIds.subId1,
-        subId2: subIds.subId2,
-        subId3: subIds.subId3,
-        subId4: subIds.subId4,
-        subId5: subIds.subId5
+        trackingId
       }
     });
 
@@ -1566,13 +1474,7 @@ export async function createOrReuseAffiliateShortLink(input: {
     {
       userId: input.userId,
       productId: input.product.productId,
-      trackingId,
-      subId: subIds.subId,
-      subId1: subIds.subId1,
-      subId2: subIds.subId2,
-      subId3: subIds.subId3,
-      subId4: subIds.subId4,
-      subId5: subIds.subId5
+      trackingId
     },
     {
       userId: input.userId,
@@ -1584,12 +1486,6 @@ export async function createOrReuseAffiliateShortLink(input: {
       affiliateUrl,
       shortUrl: affiliateUrl,
       trackingId,
-      subId: subIds.subId,
-      subId1: subIds.subId1,
-      subId2: subIds.subId2,
-      subId3: subIds.subId3,
-      subId4: subIds.subId4,
-      subId5: subIds.subId5,
       status: "active",
       lastError: null,
       metadataJson: {
@@ -1598,7 +1494,6 @@ export async function createOrReuseAffiliateShortLink(input: {
         category: input.product.category,
         pageId: input.pageId ?? "",
         trackingId,
-        subIds,
         shortUrl: affiliateUrl
       }
     },
@@ -1623,19 +1518,12 @@ export async function createOrReuseAffiliateShortLink(input: {
         expectedPrefix: "https://s.shopee.co.th/"
       },
       trackingId,
-      subId: subIds.subId,
-      subId1: subIds.subId1,
-      subId2: subIds.subId2,
-      subId3: subIds.subId3,
-      subId4: subIds.subId4,
-      subId5: subIds.subId5,
       shortUrl: affiliateUrl
     }
   });
 
   return {
     trackingId,
-    subIds,
     originalUrl,
     affiliateUrl,
     shortUrl: affiliateUrl
@@ -2109,14 +1997,12 @@ export async function buildShopeePostPackage(input: {
   scheduledAt: Date;
   captionStyle?: ShopeeCaptionStyle;
   trackingId?: string;
-  subIds?: ShopeeSubIdFields;
   jobId?: string;
 }) {
   const linkResult = await createOrReuseAffiliateShortLink({
     userId: input.userId,
     product: input.product,
     trackingId: input.trackingId,
-    subIds: input.subIds,
     pageId: input.pageId
   });
   const affiliateLink = linkResult.affiliateUrl;
@@ -2177,7 +2063,6 @@ export async function buildShopeePostPackage(input: {
       affiliateUrl: linkResult.affiliateUrl,
       shortAffiliateLink,
       trackingId: linkResult.trackingId,
-      subIds: linkResult.subIds,
       promptCount: imagePrompts.length
     }
   });

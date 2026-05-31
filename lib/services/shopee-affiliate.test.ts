@@ -9,8 +9,7 @@ import {
   isShopeeProductNameDuplicateText,
   MockShopeeProvider,
   removeDuplicateShopeeProductNameLines,
-  scoreShopeeProduct,
-  SHOPEE_SUB_ID_ERROR_MESSAGE
+  scoreShopeeProduct
 } from "./shopee-affiliate-core.ts";
 // @ts-ignore Node strip-types runner resolves the .ts module directly in tests.
 import type { ShopeeProductRecord } from "./shopee-affiliate-core.ts";
@@ -71,58 +70,18 @@ function testAffiliateLinkBuilderAddsTracking() {
   console.log("PASS Shopee affiliate link builder adds tracking");
 }
 
-function testAffiliateLinkBuilderAddsSubIds() {
+function testAffiliateLinkBuilderOmitsSubIds() {
   const link = buildAffiliateLinkCore({
     product: sampleProduct,
     trackingId: "track-main",
-    affiliateBaseUrl: "https://s.shopee.co.th/example",
-    subIds: {
-      subId: "fb_page_test",
-      subId1: "campaign_may"
-    }
+    affiliateBaseUrl: "https://s.shopee.co.th/example"
   });
   const url = new URL(link);
 
   assert.equal(url.searchParams.get("tracking_id"), "track-main");
-  assert.equal(url.searchParams.get("sub_id"), "fb_page_test");
-  assert.equal(url.searchParams.get("sub_id1"), "campaign_may");
-  console.log("PASS Shopee affiliate link builder adds Sub ID fields");
-}
-
-function testAffiliateLinkBuilderCreatesUniqueLinksForPageSubIds() {
-  const pageSubIds = ["page_a", "page_b", "page_c", "page_d"];
-  const links = pageSubIds.map((subId) =>
-    buildAffiliateLinkCore({
-      product: sampleProduct,
-      affiliateBaseUrl: "https://s.shopee.co.th/example",
-      subIds: { subId }
-    })
-  );
-
-  assert.equal(new Set(links).size, 4);
-  for (const [index, link] of links.entries()) {
-    assert.equal(new URL(link).searchParams.get("sub_id"), pageSubIds[index]);
-  }
-  console.log("PASS Shopee affiliate link builder creates one short-link payload per page Sub ID");
-}
-
-function testAffiliateLinkBuilderRejectsInvalidSubId() {
-  assert.throws(
-    () => buildAffiliateLinkCore({ product: sampleProduct, subIds: { subId: "bad value" } }),
-    new RegExp(SHOPEE_SUB_ID_ERROR_MESSAGE)
-  );
-  console.log("PASS Shopee affiliate link builder rejects invalid Sub ID");
-}
-
-function testAffiliateLinkBuilderAllowsBlankSubId() {
-  const link = buildAffiliateLinkCore({
-    product: sampleProduct,
-    affiliateBaseUrl: "https://s.shopee.co.th/example",
-    subIds: { subId: "" }
-  });
-
   assert.equal(new URL(link).searchParams.has("sub_id"), false);
-  console.log("PASS Shopee affiliate link builder allows blank Sub ID");
+  assert.equal(new URL(link).searchParams.has("sub_id1"), false);
+  console.log("PASS Shopee affiliate link builder omits Sub ID fields");
 }
 
 function testProductNameDuplicateDetection() {
@@ -192,10 +151,7 @@ await testMockProviderReturnsProducts();
 testScoringRewardsStrongProducts();
 testScoringBlocksRecentDuplicates();
 testAffiliateLinkBuilderAddsTracking();
-testAffiliateLinkBuilderAddsSubIds();
-testAffiliateLinkBuilderCreatesUniqueLinksForPageSubIds();
-testAffiliateLinkBuilderRejectsInvalidSubId();
-testAffiliateLinkBuilderAllowsBlankSubId();
+testAffiliateLinkBuilderOmitsSubIds();
 testProductNameDuplicateDetection();
 testDuplicateProductNameLineRemoval();
 testProductNameOccurrenceCounting();

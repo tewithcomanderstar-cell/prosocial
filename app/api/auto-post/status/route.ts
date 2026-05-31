@@ -261,7 +261,7 @@ export async function GET() {
     const sanitizedLastError = sanitizeLegacyMessage(legacyLastError);
     const facebookConnectionPromise = withSoftTimeout(
       FacebookConnection.findOne({ userId })
-        .select("pages.pageId pages.id pages.externalPageId pages.name pages.pageName pages.pageAccessToken pages.subId pages.subId1 pages.subId2 pages.subId3 pages.subId4 pages.subId5 tokenStatus")
+        .select("pages.pageId pages.id pages.externalPageId pages.name pages.pageName pages.pageAccessToken tokenStatus")
         .maxTimeMS(STATUS_OPTIONAL_TIMEOUT_MS)
         .lean()
         .exec(),
@@ -298,12 +298,6 @@ export async function GET() {
     const connectedPageCount = facebookPages.length;
     const pageNameById = new Map<string, string>(
       facebookPages.map((page: any) => [String(page.pageId ?? ""), String(page.name ?? page.pageName ?? "Facebook Page")])
-    );
-    const pageSubIdById = new Map<string, string>(
-      facebookPages.map((page: any) => [
-        String(page.pageId ?? page.id ?? page.externalPageId ?? ""),
-        String(page.subId ?? "")
-      ])
     );
     const shopeeProvider = getShopeeProductProvider();
     const shopeeEnvStatus = getShopeeEnvStatus();
@@ -359,7 +353,6 @@ export async function GET() {
           jobId: null,
           pageId,
           pageName: pageNameById.get(pageId) ?? "Facebook Page",
-          subId: pageSubIdById.get(pageId) ?? null,
           shortAffiliateLink: null,
           status: "pending",
           rawStatus: "scheduled",
@@ -377,7 +370,6 @@ export async function GET() {
         jobId: String(job._id),
         pageId,
         pageName: pageNameById.get(pageId) ?? "Facebook Page",
-        subId: typeof payload.subId === "string" ? payload.subId : pageSubIdById.get(pageId) ?? null,
         shortAffiliateLink:
           typeof payload.affiliateLink === "string"
             ? payload.affiliateLink
@@ -477,8 +469,7 @@ export async function GET() {
       connectedPageCount,
       facebookPages: facebookPages.map((page: any) => ({
         pageId: String(page.pageId ?? page.id ?? page.externalPageId ?? ""),
-        name: String(page.name ?? page.pageName ?? "Facebook Page"),
-        subId: String(page.subId ?? "")
+        name: String(page.name ?? page.pageName ?? "Facebook Page")
       })).filter((page: { pageId: string; name: string }) => page.pageId.length > 0),
       currentJobId: latestProcessingJob ? String(latestProcessingJob._id) : runJobs[0]?._id ? String(runJobs[0]._id) : null,
       currentStep,
