@@ -58,9 +58,139 @@ export type ShopeeImagePromptSet = {
   negativePrompt: string;
 };
 
+export type ShopeeSubIdFields = {
+  subId?: string | null;
+  subId1?: string | null;
+  subId2?: string | null;
+  subId3?: string | null;
+  subId4?: string | null;
+  subId5?: string | null;
+};
+
+export const SHOPEE_SUB_ID_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
+export const SHOPEE_SUB_ID_ERROR_MESSAGE = "Sub ID ใช้ได้เฉพาะ a-z, A-Z, 0-9, _ และ - เท่านั้น";
+
 export interface ShopeeProductProvider {
   name: string;
   fetchProducts(query: ProductDiscoveryQuery): Promise<ShopeeProductRecord[]>;
+}
+
+function normalizeShopeeSubIds(subIds?: ShopeeSubIdFields): Required<Record<keyof ShopeeSubIdFields, string>> {
+  return {
+    subId: subIds?.subId?.trim() ?? "",
+    subId1: subIds?.subId1?.trim() ?? "",
+    subId2: subIds?.subId2?.trim() ?? "",
+    subId3: subIds?.subId3?.trim() ?? "",
+    subId4: subIds?.subId4?.trim() ?? "",
+    subId5: subIds?.subId5?.trim() ?? ""
+  };
+}
+
+function validateShopeeSubIds(subIds?: ShopeeSubIdFields) {
+  const normalized = normalizeShopeeSubIds(subIds);
+  for (const value of Object.values(normalized)) {
+    if (value && !SHOPEE_SUB_ID_PATTERN.test(value)) {
+      throw new Error(SHOPEE_SUB_ID_ERROR_MESSAGE);
+    }
+  }
+  return normalized;
+}
+
+function hasAnyShopeeSubId(subIds?: ShopeeSubIdFields) {
+  return Object.values(normalizeShopeeSubIds(subIds)).some(Boolean);
+}
+
+function comparableTokens(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/gi, " ")
+    .split(/[^\p{L}\p{N}]+/u)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2);
+}
+
+export function normalizeShopeeComparableText(value: string) {
+  return comparableTokens(value).join("");
+}
+
+export function getShopeeProductNameSimilarity(text: string, productName: string) {
+  const normalizedText = normalizeShopeeComparableText(text);
+  const normalizedName = normalizeShopeeComparableText(productName);
+
+  if (!normalizedText || !normalizedName) return 0;
+  if (normalizedText === normalizedName) return 1;
+  if (normalizedText.includes(normalizedName)) return 1;
+  if (normalizedName.includes(normalizedText) && normalizedText.length >= Math.max(8, normalizedName.length * 0.5)) {
+    return normalizedText.length / normalizedName.length;
+  }
+
+  const textTokens = new Set(comparableTokens(text));
+  const nameTokens = comparableTokens(productName);
+  if (nameTokens.length === 0) return 0;
+
+  const matched = nameTokens.filter((token) => textTokens.has(token)).length;
+  return matched / nameTokens.length;
+}
+
+export function isShopeeProductNameDuplicateText(text: string, productName: string, threshold = 0.7) {
+  return getShopeeProductNameSimilarity(text, productName) >= threshold;
+}
+
+export function stripShopeeProductNameFromText(text: string, productName: string) {
+  let output = text.trim();
+  if (!output || !productName.trim()) return output;
+
+  const escapedName = productName.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  output = output.replace(new RegExp(escapedName, "gi"), "").replace(/\s{2,}/g, " ").trim();
+
+  return isShopeeProductNameDuplicateText(output, productName) ? "" : output;
+}
+
+export function removeDuplicateShopeeProductNameLines(lines: string[], productName: string) {
+  let keptProductName = false;
+
+  return lines.flatMap((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return [];
+
+    if (!keptProductName && isShopeeProductNameDuplicateText(trimmed, productName)) {
+      keptProductName = true;
+      return [productName.trim()];
+    }
+
+    if (isShopeeProductNameDuplicateText(trimmed, productName)) {
+      const stripped = stripShopeeProductNameFromText(trimmed, productName);
+      return stripped && /[\p{L}\p{N}]/u.test(stripped) ? [stripped] : [];
+    }
+
+    return [trimmed];
+  });
+}
+
+export function countShopeeProductNameOccurrences(caption: string, productName: string) {
+  const lines = caption
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  return lines.reduce((count, line) => count + (isShopeeProductNameDuplicateText(line, productName) ? 1 : 0), 0);
+}
+
+function applyShopeeSubIds(url: URL, subIds?: ShopeeSubIdFields) {
+  const normalized = validateShopeeSubIds(subIds);
+  const paramMap: Array<[keyof ShopeeSubIdFields, string]> = [
+    ["subId", "sub_id"],
+    ["subId1", "sub_id1"],
+    ["subId2", "sub_id2"],
+    ["subId3", "sub_id3"],
+    ["subId4", "sub_id4"],
+    ["subId5", "sub_id5"]
+  ];
+
+  for (const [field, param] of paramMap) {
+    const value = normalized[field];
+    if (value) url.searchParams.set(param, value);
+  }
 }
 
 export class MockShopeeProvider implements ShopeeProductProvider {
@@ -189,8 +319,11 @@ export function buildAffiliateLinkCore(input: {
   product: ShopeeProductRecord;
   trackingId?: string;
   affiliateBaseUrl?: string;
+  subIds?: ShopeeSubIdFields;
 }) {
-  if (input.product.affiliateUrl) {
+  validateShopeeSubIds(input.subIds);
+
+  if (input.product.affiliateUrl && !hasAnyShopeeSubId(input.subIds)) {
     return input.product.affiliateUrl;
   }
 
@@ -201,12 +334,14 @@ export function buildAffiliateLinkCore(input: {
     if (input.trackingId) url.searchParams.set("utm_content", input.trackingId);
     url.searchParams.set("utm_source", "prosocial");
     url.searchParams.set("utm_medium", "affiliate_auto_post");
+    applyShopeeSubIds(url, input.subIds);
     return url.toString();
   }
 
   const url = new URL(input.affiliateBaseUrl);
   url.searchParams.set("url", sourceUrl);
   if (input.trackingId) url.searchParams.set("tracking_id", input.trackingId);
+  applyShopeeSubIds(url, input.subIds);
   return url.toString();
 }
 

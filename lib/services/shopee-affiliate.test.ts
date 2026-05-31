@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
 
 // @ts-ignore Node strip-types runner resolves the .ts module directly in tests.
-import { buildAffiliateLinkCore, buildShopeeImagePrompt, buildShopeeImagePromptSet, MockShopeeProvider, scoreShopeeProduct } from "./shopee-affiliate-core.ts";
+import {
+  buildAffiliateLinkCore,
+  buildShopeeImagePrompt,
+  buildShopeeImagePromptSet,
+  countShopeeProductNameOccurrences,
+  isShopeeProductNameDuplicateText,
+  MockShopeeProvider,
+  removeDuplicateShopeeProductNameLines,
+  scoreShopeeProduct,
+  SHOPEE_SUB_ID_ERROR_MESSAGE
+} from "./shopee-affiliate-core.ts";
 // @ts-ignore Node strip-types runner resolves the .ts module directly in tests.
 import type { ShopeeProductRecord } from "./shopee-affiliate-core.ts";
 
@@ -61,6 +71,93 @@ function testAffiliateLinkBuilderAddsTracking() {
   console.log("PASS Shopee affiliate link builder adds tracking");
 }
 
+function testAffiliateLinkBuilderAddsSubIds() {
+  const link = buildAffiliateLinkCore({
+    product: sampleProduct,
+    trackingId: "track-main",
+    affiliateBaseUrl: "https://s.shopee.co.th/example",
+    subIds: {
+      subId: "fb_page_test",
+      subId1: "campaign_may"
+    }
+  });
+  const url = new URL(link);
+
+  assert.equal(url.searchParams.get("tracking_id"), "track-main");
+  assert.equal(url.searchParams.get("sub_id"), "fb_page_test");
+  assert.equal(url.searchParams.get("sub_id1"), "campaign_may");
+  console.log("PASS Shopee affiliate link builder adds Sub ID fields");
+}
+
+function testAffiliateLinkBuilderCreatesUniqueLinksForPageSubIds() {
+  const pageSubIds = ["page_a", "page_b", "page_c", "page_d"];
+  const links = pageSubIds.map((subId) =>
+    buildAffiliateLinkCore({
+      product: sampleProduct,
+      affiliateBaseUrl: "https://s.shopee.co.th/example",
+      subIds: { subId }
+    })
+  );
+
+  assert.equal(new Set(links).size, 4);
+  for (const [index, link] of links.entries()) {
+    assert.equal(new URL(link).searchParams.get("sub_id"), pageSubIds[index]);
+  }
+  console.log("PASS Shopee affiliate link builder creates one short-link payload per page Sub ID");
+}
+
+function testAffiliateLinkBuilderRejectsInvalidSubId() {
+  assert.throws(
+    () => buildAffiliateLinkCore({ product: sampleProduct, subIds: { subId: "bad value" } }),
+    new RegExp(SHOPEE_SUB_ID_ERROR_MESSAGE)
+  );
+  console.log("PASS Shopee affiliate link builder rejects invalid Sub ID");
+}
+
+function testAffiliateLinkBuilderAllowsBlankSubId() {
+  const link = buildAffiliateLinkCore({
+    product: sampleProduct,
+    affiliateBaseUrl: "https://s.shopee.co.th/example",
+    subIds: { subId: "" }
+  });
+
+  assert.equal(new URL(link).searchParams.has("sub_id"), false);
+  console.log("PASS Shopee affiliate link builder allows blank Sub ID");
+}
+
+function testProductNameDuplicateDetection() {
+  const productName = "ขนมเปี๊ยะไส้ไก่หยอง และ ขนมเปี๊ยะหมูหยอง M&D";
+
+  assert.equal(isShopeeProductNameDuplicateText(productName, productName), true);
+  assert.equal(isShopeeProductNameDuplicateText(`✅ ${productName}`, productName), true);
+  assert.equal(isShopeeProductNameDuplicateText("✅ มี 2 รสในกล่องเดียว", productName), false);
+  console.log("PASS Shopee caption detects duplicate product name text");
+}
+
+function testDuplicateProductNameLineRemoval() {
+  const productName = "ขนมเปี๊ยะไส้ไก่หยอง และ ขนมเปี๊ยะหมูหยอง M&D";
+  const cleaned = removeDuplicateShopeeProductNameLines(
+    [
+      productName,
+      `✅ ${productName}`,
+      "✅ มี 2 รสในกล่องเดียว",
+      "📍 พิกัด https://s.shopee.co.th/example"
+    ],
+    productName
+  );
+
+  assert.deepEqual(cleaned, [productName, "✅ มี 2 รสในกล่องเดียว", "📍 พิกัด https://s.shopee.co.th/example"]);
+  console.log("PASS Shopee caption removes duplicate product-name lines");
+}
+
+function testProductNameOccurrenceCounting() {
+  const productName = "ขนมเปี๊ยะไส้ไก่หยอง และ ขนมเปี๊ยะหมูหยอง M&D";
+  const caption = `${productName}\n\n✅ ${productName}\n\nhttps://s.shopee.co.th/example`;
+
+  assert.equal(countShopeeProductNameOccurrences(caption, productName), 2);
+  console.log("PASS Shopee caption counts product name occurrences");
+}
+
 function testImagePromptIncludesSafetyRules() {
   const prompt = buildShopeeImagePrompt(sampleProduct, "deal_alert");
 
@@ -95,5 +192,12 @@ await testMockProviderReturnsProducts();
 testScoringRewardsStrongProducts();
 testScoringBlocksRecentDuplicates();
 testAffiliateLinkBuilderAddsTracking();
+testAffiliateLinkBuilderAddsSubIds();
+testAffiliateLinkBuilderCreatesUniqueLinksForPageSubIds();
+testAffiliateLinkBuilderRejectsInvalidSubId();
+testAffiliateLinkBuilderAllowsBlankSubId();
+testProductNameDuplicateDetection();
+testDuplicateProductNameLineRemoval();
+testProductNameOccurrenceCounting();
 testImagePromptIncludesSafetyRules();
 testImagePromptSetCreatesFourConsistentPrompts();

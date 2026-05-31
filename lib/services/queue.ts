@@ -30,6 +30,7 @@ import { logAction, logAndNotifyError, serializeError } from "@/lib/services/log
 import { getPageLogoForFacebookPage } from "@/lib/services/page-logo";
 import { checkRateLimits } from "@/lib/services/rate-limit";
 import { getUserSettings, randomDelayMs } from "@/lib/services/settings";
+import { countShopeeProductNameOccurrences } from "@/lib/services/shopee-affiliate-core";
 import { isShopeeShortLink } from "@/lib/services/shopee-affiliate";
 import { computeNextRunAt, randomItem } from "@/lib/utils";
 
@@ -977,6 +978,9 @@ async function validateShopeeAffiliatePublishPayload(input: {
   }
   if (payloadProductName && nonEmptyLines[0] !== payloadProductName) {
     reasons.push("Caption first line must be the Shopee product name");
+  }
+  if (payloadProductName && countShopeeProductNameOccurrences(input.message, payloadProductName) > 1) {
+    reasons.push("Caption repeats the Shopee product name after the first line");
   }
   if (forbiddenOpeners.some((pattern) => pattern.test(nonEmptyLines[0] ?? ""))) {
     reasons.push("Caption starts with a forbidden old hook style");
