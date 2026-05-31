@@ -70,8 +70,9 @@ const autoPostConfigSchema = new Schema(
       default: "bottom-right"
     },
     watermarkSizePercent: { type: Number, default: 17 },
-    postingWindowStart: { type: String, default: "06:00" },
-    postingWindowEnd: { type: String, default: "00:00" },
+    postingWindowStart: { type: String, default: "00:00" },
+    postingWindowEnd: { type: String, default: "23:59" },
+    postingWindowCustomized: { type: Boolean, default: false },
     language: {
       type: String,
       enum: ["th", "en"],

@@ -170,6 +170,8 @@ const MAX_TARGET_PAGES = 100;
 const SHOPEE_SUB_ID_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
 const SHOPEE_SUB_ID_ERROR_MESSAGE = "Sub ID ใช้ได้เฉพาะ a-z, A-Z, 0-9, _ และ - เท่านั้น";
 const SHOPEE_SUB_ID_FIELDS = ["shopeeSubId", "shopeeSubId1", "shopeeSubId2", "shopeeSubId3", "shopeeSubId4", "shopeeSubId5"] as const;
+const DEFAULT_POSTING_WINDOW_START = "00:00";
+const DEFAULT_POSTING_WINDOW_END = "23:59";
 const INTERVAL_OPTIONS = [
   { value: 15, label: "15 minutes" },
   { value: 30, label: "30 minutes" },
@@ -207,8 +209,8 @@ const defaults: AutoPostConfig = {
   captions: [],
   hashtags: [],
   aiPrompt: "",
-  postingWindowStart: "06:00",
-  postingWindowEnd: "00:00",
+  postingWindowStart: DEFAULT_POSTING_WINDOW_START,
+  postingWindowEnd: DEFAULT_POSTING_WINDOW_END,
   language: "th",
   autoPostStatus: "paused",
   jobStatus: "pending",

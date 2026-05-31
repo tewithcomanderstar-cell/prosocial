@@ -18,6 +18,9 @@ type AutoPostConfigStatusDoc = {
   lastError?: string | null;
   targetPageIds?: string[];
   lastWorkflowRunId?: unknown;
+  postingWindowStart?: string | null;
+  postingWindowEnd?: string | null;
+  postingWindowCustomized?: boolean | null;
   [key: string]: unknown;
 };
 
@@ -161,6 +164,28 @@ async function withSoftTimeout<T>(task: Promise<T>, timeoutMs: number, fallback:
   });
 }
 
+const DEFAULT_POSTING_WINDOW_START = "00:00";
+const DEFAULT_POSTING_WINDOW_END = "23:59";
+const LEGACY_POSTING_WINDOW_START = "06:00";
+const LEGACY_POSTING_WINDOW_END = "00:00";
+
+function normalizePostingWindowForDisplay<T extends { postingWindowStart?: string | null; postingWindowEnd?: string | null; postingWindowCustomized?: boolean | null }>(config: T): T {
+  if (
+    config.postingWindowCustomized !== true &&
+    config.postingWindowStart === LEGACY_POSTING_WINDOW_START &&
+    config.postingWindowEnd === LEGACY_POSTING_WINDOW_END
+  ) {
+    return {
+      ...config,
+      postingWindowStart: DEFAULT_POSTING_WINDOW_START,
+      postingWindowEnd: DEFAULT_POSTING_WINDOW_END,
+      postingWindowCustomized: false
+    };
+  }
+
+  return config;
+}
+
 export async function GET() {
   try {
     const { requireAuth } = await import("@/lib/api");
@@ -200,15 +225,16 @@ export async function GET() {
       captions: [],
       hashtags: [],
       aiPrompt: "",
-      postingWindowStart: "06:00",
-      postingWindowEnd: "00:00",
+      postingWindowStart: DEFAULT_POSTING_WINDOW_START,
+      postingWindowEnd: DEFAULT_POSTING_WINDOW_END,
+      postingWindowCustomized: false,
       language: "th",
       autoPostStatus: "paused",
       jobStatus: "pending",
       retryCount: 0,
       lastError: null
     };
-    const effectiveConfig = config ?? defaultConfig;
+    const effectiveConfig = normalizePostingWindowForDisplay(config ?? defaultConfig);
     const effectiveConfigDoc = effectiveConfig as AutoPostConfigStatusDoc & {
       targetPageIds?: string[];
       lastWorkflowRunId?: unknown;

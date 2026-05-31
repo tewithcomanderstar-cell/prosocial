@@ -13,6 +13,9 @@ type LeanAutoPostConfig = {
   lastError?: string | null;
   retryCount?: number;
   folderId?: string;
+  postingWindowStart?: string | null;
+  postingWindowEnd?: string | null;
+  postingWindowCustomized?: boolean | null;
   maxPostsPerDay?: number;
   maxPostsPerPagePerDay?: number;
   shopeeSubId?: string;
@@ -100,10 +103,23 @@ const schema = z.object({
   watermarkSource: z.enum(["page_profile", "custom_logo", "none"]).default("page_profile"),
   watermarkPosition: z.enum(["top-left", "top-right", "bottom-left", "bottom-right"]).default("bottom-right"),
   watermarkSizePercent: z.number().min(8).max(30).default(17),
-  postingWindowStart: z.string().regex(/^\d{2}:\d{2}$/).default("06:00"),
-  postingWindowEnd: z.string().regex(/^\d{2}:\d{2}$/).default("00:00"),
+  postingWindowStart: z.string().regex(/^\d{2}:\d{2}$/).default("00:00"),
+  postingWindowEnd: z.string().regex(/^\d{2}:\d{2}$/).default("23:59"),
   language: z.enum(["th", "en"]).default("th")
 });
+
+const DEFAULT_POSTING_WINDOW_START = "00:00";
+const DEFAULT_POSTING_WINDOW_END = "23:59";
+const LEGACY_POSTING_WINDOW_START = "06:00";
+const LEGACY_POSTING_WINDOW_END = "00:00";
+
+function shouldMigrateLegacyPostingWindow(config: { postingWindowStart?: string | null; postingWindowEnd?: string | null; postingWindowCustomized?: boolean | null }) {
+  return (
+    config.postingWindowCustomized !== true &&
+    config.postingWindowStart === LEGACY_POSTING_WINDOW_START &&
+    config.postingWindowEnd === LEGACY_POSTING_WINDOW_END
+  );
+}
 
 export async function GET() {
   try {
@@ -133,6 +149,9 @@ export async function GET() {
           watermarkSource: "page_profile",
           watermarkPosition: "bottom-right",
           watermarkSizePercent: 17,
+          postingWindowStart: DEFAULT_POSTING_WINDOW_START,
+          postingWindowEnd: DEFAULT_POSTING_WINDOW_END,
+          postingWindowCustomized: false,
           maxPostsPerDay: 0,
           maxPostsPerPagePerDay: 0
         }
@@ -147,6 +166,20 @@ export async function GET() {
     if (config.folderId === BROKEN_FOLDER_ID) {
       await AutoPostConfig.findOneAndUpdate({ userId }, { folderId: FIXED_FOLDER_ID });
       config.folderId = FIXED_FOLDER_ID;
+    }
+
+    if (shouldMigrateLegacyPostingWindow(config)) {
+      await AutoPostConfig.findOneAndUpdate(
+        { userId },
+        {
+          postingWindowStart: DEFAULT_POSTING_WINDOW_START,
+          postingWindowEnd: DEFAULT_POSTING_WINDOW_END,
+          postingWindowCustomized: false
+        }
+      );
+      config.postingWindowStart = DEFAULT_POSTING_WINDOW_START;
+      config.postingWindowEnd = DEFAULT_POSTING_WINDOW_END;
+      config.postingWindowCustomized = false;
     }
 
     if (config.lastError) {
@@ -250,7 +283,8 @@ export async function POST(request: Request) {
         lastError: null,
         retryCount: payload.enabled ? current?.retryCount ?? 0 : 0,
         postingWindowStart: payload.postingWindowStart,
-        postingWindowEnd: payload.postingWindowEnd
+        postingWindowEnd: payload.postingWindowEnd,
+        postingWindowCustomized: true
       },
       { upsert: true, new: true }
     ).lean();
