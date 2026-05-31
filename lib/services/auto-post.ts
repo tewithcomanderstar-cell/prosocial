@@ -555,7 +555,32 @@ function getAutoPostErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : typeof error === "string" ? error : String(error ?? "");
 }
 
+function getAutoPostErrorCode(error: unknown) {
+  if (!error || typeof error !== "object") return "";
+  return String((error as { code?: unknown }).code ?? "").toLowerCase();
+}
+
+function getAutoPostResponseSummary(error: unknown) {
+  if (!error || typeof error !== "object") return "";
+  return String((error as { responseSummary?: unknown }).responseSummary ?? "");
+}
+
+function isShopeeShortLinkFailure(error: unknown) {
+  const code = getAutoPostErrorCode(error);
+  const message = getAutoPostErrorMessage(error).toLowerCase();
+  return (
+    code === "shopee_short_link_invalid" ||
+    message.includes("shopee short link validation failed") ||
+    message.includes("short link validation failed") ||
+    message.includes("short link invalid")
+  );
+}
+
 export function classifyAutoPostError(error: unknown): AutoPostErrorClassification {
+  if (isShopeeShortLinkFailure(error)) {
+    return "retry_with_next_product";
+  }
+
   const message = getAutoPostErrorMessage(error).toLowerCase();
 
   if (
@@ -845,6 +870,21 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
           }
         });
 
+        await logShopeeStep({
+          config: input.config,
+          step: "CONTINUE_POSTING_WORKFLOW",
+          status: "started",
+          message: "Continue posting workflow",
+          pageId: selected.pageId,
+          productId,
+          metadata: {
+            attempt,
+            maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
+            shortLink: packageResult.shortAffiliateLink,
+            workflowRunId: input.records.workflowRunId
+          }
+        });
+
         return {
           selectedProductsForQueue: input.eligiblePageIds.map((pageId) => ({ ...selected, pageId })),
           packageResult,
@@ -879,6 +919,35 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
         }
 
         if (classification === "retry_with_next_product") {
+          const shortLinkFailure = isShopeeShortLinkFailure(error);
+          const skippedReason = shortLinkFailure ? "short_link_invalid" : "safety_rejected_or_image_failed";
+          const skippedStep = shortLinkFailure ? "PRODUCT_SKIPPED_SHORT_LINK_INVALID" : "PRODUCT_SKIPPED_SAFETY_REJECTED";
+
+          if (shortLinkFailure) {
+            await logShopeeStep({
+              config: input.config,
+              step: "SHORT_LINK_GENERATION_FAILED",
+              status: "failed",
+              message: "Short link generation failed",
+              pageId: selected.pageId,
+              productId,
+              error,
+              metadata: {
+                attempt,
+                maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
+                productName: selected.product.productName,
+                productId,
+                shopId: selected.product.shopId,
+                itemId: selected.product.itemId,
+                affiliateLink: selected.product.affiliateUrl ?? "",
+                shortLink: selected.product.affiliateUrl ?? "",
+                apiResponse: getAutoPostResponseSummary(error),
+                errorReason: "short_link_invalid",
+                workflowRunId: input.records.workflowRunId
+              }
+            });
+          }
+
           skippedProductIds.add(productId);
           skippedProducts.push({
             productId,
@@ -890,18 +959,22 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
 
           await logShopeeStep({
             config: input.config,
-            step: "PRODUCT_SKIPPED_SAFETY_REJECTED",
+            step: skippedStep,
             status: "skipped",
-            message: "Skipped this Shopee product and will try the next product",
+            message: shortLinkFailure ? `Skipping product ${productId}` : "Skipped this Shopee product and will try the next product",
             pageId: selected.pageId,
             productId,
             error,
             metadata: {
               attempt,
               maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
-              reason: "safety_rejected_or_image_failed",
+              reason: skippedReason,
               skippedProductsCount: skippedProducts.length,
               productName: selected.product.productName,
+              productId,
+              shopId: selected.product.shopId,
+              itemId: selected.product.itemId,
+              apiResponse: getAutoPostResponseSummary(error),
               workflowRunId: input.records.workflowRunId
             }
           });
@@ -910,12 +983,14 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
             config: input.config,
             step: "RETRYING_WITH_NEXT_PRODUCT",
             status: "started",
-            message: `Trying next Shopee product after ${selected.product.productName} failed`,
+            message: shortLinkFailure ? "Loading next product" : `Trying next Shopee product after ${selected.product.productName} failed`,
             metadata: {
               attempt,
               nextAttempt: attempt + 1,
               maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
               skippedProductsCount: skippedProducts.length,
+              previousProductId: productId,
+              previousFailureReason: skippedReason,
               workflowRunId: input.records.workflowRunId
             }
           });

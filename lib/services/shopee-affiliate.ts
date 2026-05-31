@@ -919,6 +919,20 @@ function getSafeHostname(value: string) {
   }
 }
 
+function getShopeeShortLinkValidationReason(value?: string | null) {
+  const trimmed = value?.trim();
+  if (!trimmed) return "missing_short_link";
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "https:") return "short_link_must_use_https";
+    if (url.hostname !== "s.shopee.co.th") return "short_link_domain_invalid";
+    if (url.pathname.length <= 1) return "short_code_missing";
+    return "unknown_invalid_short_link";
+  } catch {
+    return "short_link_url_invalid";
+  }
+}
+
 const TH = {
   note: "\u0e2b\u0e21\u0e32\u0e22\u0e40\u0e2b\u0e15\u0e38",
   affiliateReview: "\u0e23\u0e35\u0e27\u0e34\u0e27\u0e2a\u0e34\u0e19\u0e04\u0e49\u0e32",
@@ -1497,11 +1511,54 @@ export async function createOrReuseAffiliateShortLink(input: {
     throw new ShopeeProviderError("Affiliate link generation failed", 500, "shopee_affiliate_link_failed", "config");
   }
   if (!isShopeeShortLink(affiliateUrl)) {
+    const validationReason = getShopeeShortLinkValidationReason(affiliateUrl);
+    const apiResponse = {
+      source: "buildAffiliateLink",
+      productId: input.product.productId,
+      shopId: input.product.shopId,
+      itemId: input.product.itemId,
+      originalUrl,
+      affiliateLink: affiliateUrl,
+      shortLink: affiliateUrl,
+      validation: {
+        expectedPrefix: "https://s.shopee.co.th/",
+        reason: validationReason,
+        hasShortCode: false
+      }
+    };
+    const responseSummary = JSON.stringify(apiResponse);
+
+    await logShopeeAutomationEvent({
+      userId: input.userId,
+      level: "error",
+      message: "Short link generation failed",
+      pageId: input.pageId,
+      productId: input.product.productId,
+      metadata: {
+        productId: input.product.productId,
+        shopId: input.product.shopId,
+        itemId: input.product.itemId,
+        productName: input.product.productName,
+        affiliateLink: affiliateUrl,
+        shortLink: affiliateUrl,
+        apiResponse,
+        errorReason: validationReason,
+        trackingId,
+        subId: subIds.subId,
+        subId1: subIds.subId1,
+        subId2: subIds.subId2,
+        subId3: subIds.subId3,
+        subId4: subIds.subId4,
+        subId5: subIds.subId5
+      }
+    });
+
     throw new ShopeeProviderError(
       `Shopee short link validation failed. Expected https://s.shopee.co.th/{shortCode}, got ${getSafeHostname(affiliateUrl)}`,
       422,
       "shopee_short_link_invalid",
-      "config"
+      "config",
+      responseSummary
     );
   }
 
@@ -1551,10 +1608,20 @@ export async function createOrReuseAffiliateShortLink(input: {
   await logShopeeAutomationEvent({
     userId: input.userId,
     level: "info",
-    message: "Shopee affiliate short link generated",
+    message: "Short link generated successfully",
     pageId: input.pageId,
     productId: input.product.productId,
     metadata: {
+      productId: input.product.productId,
+      shopId: input.product.shopId,
+      itemId: input.product.itemId,
+      affiliateLink: affiliateUrl,
+      shortLink: affiliateUrl,
+      apiResponse: {
+        source: "buildAffiliateLink",
+        status: "valid_short_link",
+        expectedPrefix: "https://s.shopee.co.th/"
+      },
       trackingId,
       subId: subIds.subId,
       subId1: subIds.subId1,
