@@ -2,6 +2,7 @@
 import { jsonError, jsonOk, parseBody } from "@/lib/api";
 import { handleRoleError, requireRole } from "@/lib/services/permissions";
 import { logAction } from "@/lib/services/logging";
+import { SHOPEE_SUB_ID_ERROR_MESSAGE, SHOPEE_SUB_ID_PATTERN } from "@/lib/services/shopee-affiliate";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
 
 type LeanAutoPostConfig = {
@@ -14,6 +15,12 @@ type LeanAutoPostConfig = {
   folderId?: string;
   maxPostsPerDay?: number;
   maxPostsPerPagePerDay?: number;
+  shopeeSubId?: string;
+  shopeeSubId1?: string;
+  shopeeSubId2?: string;
+  shopeeSubId3?: string;
+  shopeeSubId4?: string;
+  shopeeSubId5?: string;
 };
 
 const intervalSchema = z.union([
@@ -51,6 +58,12 @@ function uniquePageIds(pageIds: string[] = []) {
   return Array.from(new Set(pageIds.map((pageId) => pageId.trim()).filter(Boolean)));
 }
 
+const optionalSubIdSchema = z
+  .string()
+  .default("")
+  .transform((value) => value.trim())
+  .refine((value) => !value || SHOPEE_SUB_ID_PATTERN.test(value), SHOPEE_SUB_ID_ERROR_MESSAGE);
+
 const schema = z.object({
   enabled: z.boolean(),
   contentSource: z.enum(["shopee-affiliate", "google-drive"]).default("shopee-affiliate"),
@@ -63,6 +76,12 @@ const schema = z.object({
     .enum(["soft_sell", "urgency", "problem_solution", "review_style", "deal_alert", "lifestyle"])
     .default("soft_sell"),
   shopeeTrackingId: z.string().default(""),
+  shopeeSubId: optionalSubIdSchema,
+  shopeeSubId1: optionalSubIdSchema,
+  shopeeSubId2: optionalSubIdSchema,
+  shopeeSubId3: optionalSubIdSchema,
+  shopeeSubId4: optionalSubIdSchema,
+  shopeeSubId5: optionalSubIdSchema,
   shopeeBlockedCategories: z.array(z.string()).default([]),
   shopeeCategoryPriority: z.array(z.string()).default([]),
   shopeeMinPrice: z.number().min(0).default(0),
@@ -103,6 +122,12 @@ export async function GET() {
           contentSource: "shopee-affiliate",
         shopeeSourceTag: "trending",
         shopeeCaptionStyle: "soft_sell",
+        shopeeSubId: "",
+        shopeeSubId1: "",
+        shopeeSubId2: "",
+        shopeeSubId3: "",
+        shopeeSubId4: "",
+        shopeeSubId5: "",
         approvalMode: false,
         watermarkEnabled: true,
           watermarkSource: "page_profile",
@@ -165,6 +190,12 @@ export async function POST(request: Request) {
     const shopeeKeyword = (payload.shopeeKeyword ?? "").trim();
     const shopeeCategory = (payload.shopeeCategory ?? "").trim();
     const shopeeTrackingId = (payload.shopeeTrackingId ?? "").trim();
+    const shopeeSubId = payload.shopeeSubId;
+    const shopeeSubId1 = payload.shopeeSubId1;
+    const shopeeSubId2 = payload.shopeeSubId2;
+    const shopeeSubId3 = payload.shopeeSubId3;
+    const shopeeSubId4 = payload.shopeeSubId4;
+    const shopeeSubId5 = payload.shopeeSubId5;
     const targetPageIds = uniquePageIds(payload.targetPageIds);
     const current = (await AutoPostConfig.findOne({ userId }).lean()) as LeanAutoPostConfig | null;
 
@@ -196,6 +227,12 @@ export async function POST(request: Request) {
         shopeeKeyword,
         shopeeCategory,
         shopeeTrackingId,
+        shopeeSubId,
+        shopeeSubId1,
+        shopeeSubId2,
+        shopeeSubId3,
+        shopeeSubId4,
+        shopeeSubId5,
         shopeeBlockedCategories: (payload.shopeeBlockedCategories ?? []).map((item) => item.trim()).filter(Boolean),
         shopeeCategoryPriority: (payload.shopeeCategoryPriority ?? []).map((item) => item.trim()).filter(Boolean),
         maxPostsPerDay: 0,

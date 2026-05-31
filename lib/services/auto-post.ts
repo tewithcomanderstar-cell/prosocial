@@ -8,10 +8,13 @@ import { enqueuePostJobsForPost, processQueuedJobs } from "@/lib/services/queue"
 import {
   buildShopeePostPackage,
   ensureShopeeAffiliateConfigured,
+  getShopeeSubIdCacheKey,
   logShopeeAutomationEvent,
   recordShopeeQueueItem,
+  resolveShopeeSubIds,
   selectShopeeProductsForPages,
   ShopeeCaptionStyle,
+  ShopeeSubIdFields,
   ShopeeSourceTag
 } from "@/lib/services/shopee-affiliate";
 import { randomItem } from "@/lib/utils";
@@ -35,6 +38,12 @@ type LeanAutoPostConfig = {
   shopeeCategory?: string;
   shopeeCaptionStyle?: ShopeeCaptionStyle;
   shopeeTrackingId?: string;
+  shopeeSubId?: string;
+  shopeeSubId1?: string;
+  shopeeSubId2?: string;
+  shopeeSubId3?: string;
+  shopeeSubId4?: string;
+  shopeeSubId5?: string;
   shopeeBlockedCategories?: string[];
   shopeeCategoryPriority?: string[];
   shopeeMinPrice?: number;
@@ -90,6 +99,7 @@ type QueueAutoPostsResult = {
 type ShopeeSelectedProduct = Awaited<ReturnType<typeof selectShopeeProductsForPages>>[number];
 type ShopeePostPackageResult = Awaited<ReturnType<typeof buildShopeePostPackage>>;
 type AutoPostErrorClassification = "retry_with_next_product" | "retry_same_product" | "job_failed";
+type FacebookPageSubIds = ShopeeSubIdFields & { pageId: string };
 
 const AUTO_POST_BATCH_PAGE_SPACING_MINUTES = Number(process.env.AUTO_POST_PAGE_SPACING_MINUTES ?? "10");
 const AUTO_POST_JOB_TIMEOUT_MS = Number(process.env.AUTO_POST_JOB_TIMEOUT_MS ?? "300000");
@@ -98,6 +108,62 @@ const AUTO_POST_SAME_PRODUCT_RETRIES = Math.max(1, Number(process.env.AUTO_POST_
 const SHOPEE_BATCH_PRODUCT_MODE = process.env.SHOPEE_BATCH_PRODUCT_MODE === "per_page" ? "per_page" : "single";
 const OPEN_AUTO_POST_JOB_STATUSES = ["queued", "processing", "retrying", "rate_limited"] as const;
 const BANGKOK_UTC_OFFSET_HOURS = 7;
+
+function getConfigShopeeSubIds(config: LeanAutoPostConfig): ShopeeSubIdFields {
+  return {
+    subId: config.shopeeSubId,
+    subId1: config.shopeeSubId1,
+    subId2: config.shopeeSubId2,
+    subId3: config.shopeeSubId3,
+    subId4: config.shopeeSubId4,
+    subId5: config.shopeeSubId5
+  };
+}
+
+function getPageSubIdsByPageId(connection: unknown) {
+  const map = new Map<string, ShopeeSubIdFields>();
+  const pages = Array.isArray((connection as { pages?: unknown[] } | null)?.pages)
+    ? ((connection as { pages?: unknown[] }).pages ?? [])
+    : [];
+
+  for (const page of pages) {
+    const pageRecord = page as Partial<FacebookPageSubIds> & { id?: string; externalPageId?: string };
+    const pageId = String(pageRecord.pageId ?? pageRecord.id ?? pageRecord.externalPageId ?? "").trim();
+    if (!pageId) continue;
+    map.set(pageId, {
+      subId: pageRecord.subId,
+      subId1: pageRecord.subId1,
+      subId2: pageRecord.subId2,
+      subId3: pageRecord.subId3,
+      subId4: pageRecord.subId4,
+      subId5: pageRecord.subId5
+    });
+  }
+
+  return map;
+}
+
+function resolveSubIdsForPage(config: LeanAutoPostConfig, pageSubIdsByPageId: Map<string, ShopeeSubIdFields>, pageId: string) {
+  return resolveShopeeSubIds({
+    pageSubIds: pageSubIdsByPageId.get(pageId),
+    configSubIds: getConfigShopeeSubIds(config)
+  });
+}
+
+function getShopeePackageCacheKey(input: {
+  productId: string;
+  captionStyle: ShopeeCaptionStyle;
+  trackingId: string;
+  subIds: ShopeeSubIdFields;
+}) {
+  return [
+    input.productId,
+    input.captionStyle,
+    input.trackingId || "default",
+    getShopeeSubIdCacheKey(input.subIds)
+  ].join(":");
+}
+
 const AUTO_POST_QUOTE_EXPANSION_PROMPT = `คุณคือผู้เชี่ยวชาญด้านการเขียนคอนเทนต์โซเชียลมีเดีย (Facebook/IG) ที่เน้นเพิ่ม Time Spend, Engagement (Like/Comment/Share) และความรู้สึกของผู้อ่าน
 
 หน้าที่ของคุณคือ:
@@ -660,6 +726,7 @@ async function createFailedShopeePageJob(input: {
 async function prepareSingleShopeePackageWithProductAttempts(input: {
   config: LeanAutoPostConfig;
   eligiblePageIds: string[];
+  pageSubIdsByPageId: Map<string, ShopeeSubIdFields>;
   initialSelectedProducts: ShopeeSelectedProduct[];
   records: {
     workflowId: string;
@@ -705,6 +772,13 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
     const pageIndex = Math.max(0, input.eligiblePageIds.indexOf(selected.pageId));
     const startAt = new Date(input.batchStartAt.getTime() + Math.max(pageIndex, 0) * input.pageSpacingMinutes * 60 * 1000);
     const trackingId = input.config.shopeeTrackingId?.trim() || `page-${selected.pageId}`;
+    const subIds = resolveSubIdsForPage(input.config, input.pageSubIdsByPageId, selected.pageId);
+    const packageCacheKey = getShopeePackageCacheKey({
+      productId,
+      captionStyle: input.config.shopeeCaptionStyle ?? "soft_sell",
+      trackingId,
+      subIds
+    });
 
     await logShopeeStep({
       config: input.config,
@@ -720,6 +794,12 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
         productName: selected.product.productName,
         score: selected.score.productScore,
         reason: selected.score.reason,
+        subId: subIds.subId,
+        subId1: subIds.subId1,
+        subId2: subIds.subId2,
+        subId3: subIds.subId3,
+        subId4: subIds.subId4,
+        subId5: subIds.subId5,
         workflowRunId: input.records.workflowRunId
       }
     });
@@ -741,6 +821,7 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
           scheduledAt: startAt,
           captionStyle: input.config.shopeeCaptionStyle ?? "soft_sell",
           trackingId,
+          subIds,
           jobId: input.records.workflowRunId
         });
 
@@ -758,6 +839,8 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
             skippedProductsCount: skippedProducts.length,
             imageCount: packageResult.generatedImageUrls.length,
             hasShortLink: Boolean(packageResult.shortAffiliateLink),
+            trackingId,
+            subId: subIds.subId,
             workflowRunId: input.records.workflowRunId
           }
         });
@@ -765,6 +848,7 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
         return {
           selectedProductsForQueue: input.eligiblePageIds.map((pageId) => ({ ...selected, pageId })),
           packageResult,
+          packageCacheKey,
           skippedProducts
         };
       } catch (error) {
@@ -972,7 +1056,8 @@ async function queueShopeeAutoPostsForConfig(
     message: "Checking Facebook connection and selected pages",
     metadata: { selectedPageCount: eligiblePageIds.length }
   });
-  await ensureValidFacebookConnection(config.userId);
+  const facebookConnection = await ensureValidFacebookConnection(config.userId);
+  const pageSubIdsByPageId = getPageSubIdsByPageId(facebookConnection);
 
   const maxPostsPerPage = Math.max(0, config.maxPostsPerPagePerDay ?? 0);
   if ((config.contentSource ?? "shopee-affiliate") !== "shopee-affiliate" && maxPostsPerPage > 0) {
@@ -1089,11 +1174,13 @@ async function queueShopeeAutoPostsForConfig(
       ? eligiblePageIds.map((pageId) => ({ ...selectedProducts[0], pageId }))
       : selectedProducts;
   let sharedSingleProductPackage: ShopeePostPackageResult | null = null;
+  let sharedSingleProductPackageKey: string | null = null;
 
   if (SHOPEE_BATCH_PRODUCT_MODE === "single" && selectedProducts.length > 0) {
     const prepared = await prepareSingleShopeePackageWithProductAttempts({
       config,
       eligiblePageIds,
+      pageSubIdsByPageId,
       initialSelectedProducts: selectedProducts,
       records,
       batchStartAt,
@@ -1101,6 +1188,7 @@ async function queueShopeeAutoPostsForConfig(
     });
     selectedProductsForQueue = prepared.selectedProductsForQueue;
     sharedSingleProductPackage = prepared.packageResult;
+    sharedSingleProductPackageKey = prepared.packageCacheKey;
   }
 
   const selectedProductPageIds = new Set(selectedProductsForQueue.map((selected) => selected.pageId));
@@ -1131,6 +1219,7 @@ async function queueShopeeAutoPostsForConfig(
     const pageIndex = Math.max(0, eligiblePageIds.indexOf(selected.pageId));
     const startAt = new Date(batchStartAt.getTime() + Math.max(pageIndex, index) * pageSpacingMinutes * 60 * 1000);
     const trackingId = config.shopeeTrackingId?.trim() || `page-${selected.pageId}`;
+    const subIds = resolveSubIdsForPage(config, pageSubIdsByPageId, selected.pageId);
     const stepStartedAt = Date.now();
     try {
       await logShopeeStep({
@@ -1140,13 +1229,28 @@ async function queueShopeeAutoPostsForConfig(
         message: "Generating affiliate link, caption, and 4 UGC images",
         pageId: selected.pageId,
         productId: selected.product.productId,
-        metadata: { score: selected.score.productScore, reason: selected.score.reason }
+        metadata: {
+          score: selected.score.productScore,
+          reason: selected.score.reason,
+          trackingId,
+          subId: subIds.subId,
+          subId1: subIds.subId1,
+          subId2: subIds.subId2,
+          subId3: subIds.subId3,
+          subId4: subIds.subId4,
+          subId5: subIds.subId5
+        }
       });
-      const packageCacheKey =
-        SHOPEE_BATCH_PRODUCT_MODE === "single"
-          ? `${selected.product.productId}:${config.shopeeCaptionStyle ?? "soft_sell"}:${config.shopeeTrackingId?.trim() || "default"}`
-          : `${selected.pageId}:${selected.product.productId}:${trackingId}`;
-      let packageResult = sharedSingleProductPackage ?? packageCache.get(packageCacheKey);
+      const packageCacheKey = getShopeePackageCacheKey({
+        productId: selected.product.productId,
+        captionStyle: config.shopeeCaptionStyle ?? "soft_sell",
+        trackingId,
+        subIds
+      });
+      let packageResult =
+        sharedSingleProductPackageKey === packageCacheKey
+          ? sharedSingleProductPackage
+          : packageCache.get(packageCacheKey);
       if (!packageResult) {
         packageResult = await buildShopeePostPackage({
           userId: config.userId,
@@ -1155,6 +1259,7 @@ async function queueShopeeAutoPostsForConfig(
           scheduledAt: startAt,
           captionStyle: config.shopeeCaptionStyle ?? "soft_sell",
           trackingId,
+          subIds,
           jobId: records.workflowRunId
         });
         packageCache.set(packageCacheKey, packageResult);
@@ -1169,6 +1274,9 @@ async function queueShopeeAutoPostsForConfig(
         metadata: {
           imageCount: packageResult.generatedImageUrls.length,
           hasShortLink: Boolean(packageResult.shortAffiliateLink),
+          trackingId,
+          subId: subIds.subId,
+          shortAffiliateLink: packageResult.shortAffiliateLink,
           durationMs: Date.now() - stepStartedAt
         }
       });

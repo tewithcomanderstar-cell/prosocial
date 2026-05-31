@@ -235,7 +235,7 @@ export async function GET() {
     const sanitizedLastError = sanitizeLegacyMessage(legacyLastError);
     const facebookConnectionPromise = withSoftTimeout(
       FacebookConnection.findOne({ userId })
-        .select("pages.pageId pages.id pages.externalPageId pages.name pages.pageName pages.pageAccessToken tokenStatus")
+        .select("pages.pageId pages.id pages.externalPageId pages.name pages.pageName pages.pageAccessToken pages.subId pages.subId1 pages.subId2 pages.subId3 pages.subId4 pages.subId5 tokenStatus")
         .maxTimeMS(STATUS_OPTIONAL_TIMEOUT_MS)
         .lean()
         .exec(),
@@ -272,6 +272,12 @@ export async function GET() {
     const connectedPageCount = facebookPages.length;
     const pageNameById = new Map<string, string>(
       facebookPages.map((page: any) => [String(page.pageId ?? ""), String(page.name ?? page.pageName ?? "Facebook Page")])
+    );
+    const pageSubIdById = new Map<string, string>(
+      facebookPages.map((page: any) => [
+        String(page.pageId ?? page.id ?? page.externalPageId ?? ""),
+        String(page.subId ?? "")
+      ])
     );
     const shopeeProvider = getShopeeProductProvider();
     const shopeeEnvStatus = getShopeeEnvStatus();
@@ -327,6 +333,8 @@ export async function GET() {
           jobId: null,
           pageId,
           pageName: pageNameById.get(pageId) ?? "Facebook Page",
+          subId: pageSubIdById.get(pageId) ?? null,
+          shortAffiliateLink: null,
           status: "pending",
           rawStatus: "scheduled",
           facebookPostId: null,
@@ -337,11 +345,19 @@ export async function GET() {
           finishedAt: null
         };
       }
+      const payload = (job.payload ?? {}) as Record<string, unknown>;
 
       return {
         jobId: String(job._id),
         pageId,
         pageName: pageNameById.get(pageId) ?? "Facebook Page",
+        subId: typeof payload.subId === "string" ? payload.subId : pageSubIdById.get(pageId) ?? null,
+        shortAffiliateLink:
+          typeof payload.affiliateLink === "string"
+            ? payload.affiliateLink
+            : typeof payload.shortAffiliateLink === "string"
+              ? payload.shortAffiliateLink
+              : null,
         status: normalizePageJobStatus(job.status),
         rawStatus: job.status ?? "queued",
         facebookPostId: typeof (job.result as any)?.id === "string" ? (job.result as any).id : null,
@@ -435,7 +451,8 @@ export async function GET() {
       connectedPageCount,
       facebookPages: facebookPages.map((page: any) => ({
         pageId: String(page.pageId ?? page.id ?? page.externalPageId ?? ""),
-        name: String(page.name ?? page.pageName ?? "Facebook Page")
+        name: String(page.name ?? page.pageName ?? "Facebook Page"),
+        subId: String(page.subId ?? "")
       })).filter((page: { pageId: string; name: string }) => page.pageId.length > 0),
       currentJobId: latestProcessingJob ? String(latestProcessingJob._id) : runJobs[0]?._id ? String(runJobs[0]._id) : null,
       currentStep,

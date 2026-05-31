@@ -15,6 +15,12 @@ type AutoPostConfig = {
   shopeeCategory: string;
   shopeeCaptionStyle: "soft_sell" | "urgency" | "problem_solution" | "review_style" | "deal_alert" | "lifestyle";
   shopeeTrackingId: string;
+  shopeeSubId: string;
+  shopeeSubId1: string;
+  shopeeSubId2: string;
+  shopeeSubId3: string;
+  shopeeSubId4: string;
+  shopeeSubId5: string;
   shopeeBlockedCategories: string[];
   shopeeCategoryPriority: string[];
   shopeeMinPrice: number;
@@ -41,7 +47,16 @@ type AutoPostConfig = {
 };
 
 type Folder = { id: string; name: string };
-type FacebookPage = { pageId: string; name: string };
+type FacebookPage = {
+  pageId: string;
+  name: string;
+  subId?: string;
+  subId1?: string;
+  subId2?: string;
+  subId3?: string;
+  subId4?: string;
+  subId5?: string;
+};
 type PanelState = "loading" | "setup_required" | "facebook_required" | "ready" | "unauthorized" | "mock_mode" | "error";
 
 type ControlPanelStatus = {
@@ -76,6 +91,8 @@ type ControlPanelStatus = {
     facebookPostId?: string | null;
     errorCode?: string | null;
     errorMessage?: string | null;
+    subId?: string | null;
+    shortAffiliateLink?: string | null;
     startedAt?: string | null;
     scheduledAt?: string | null;
     finishedAt?: string | null;
@@ -150,6 +167,9 @@ type ShopeeQueuePreviewItem = {
 };
 
 const MAX_TARGET_PAGES = 100;
+const SHOPEE_SUB_ID_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
+const SHOPEE_SUB_ID_ERROR_MESSAGE = "Sub ID ใช้ได้เฉพาะ a-z, A-Z, 0-9, _ และ - เท่านั้น";
+const SHOPEE_SUB_ID_FIELDS = ["shopeeSubId", "shopeeSubId1", "shopeeSubId2", "shopeeSubId3", "shopeeSubId4", "shopeeSubId5"] as const;
 const INTERVAL_OPTIONS = [
   { value: 15, label: "15 minutes" },
   { value: 30, label: "30 minutes" },
@@ -167,6 +187,12 @@ const defaults: AutoPostConfig = {
   shopeeCategory: "",
   shopeeCaptionStyle: "soft_sell",
   shopeeTrackingId: "",
+  shopeeSubId: "",
+  shopeeSubId1: "",
+  shopeeSubId2: "",
+  shopeeSubId3: "",
+  shopeeSubId4: "",
+  shopeeSubId5: "",
   shopeeBlockedCategories: [],
   shopeeCategoryPriority: [],
   shopeeMinPrice: 0,
@@ -288,9 +314,36 @@ function normalizePagesResponse(payload: any): FacebookPage[] {
   return rawPages
     .map((page: any) => ({
       pageId: String(page.pageId ?? page.id ?? page.externalPageId ?? ""),
-      name: String(page.name ?? page.pageName ?? page.label ?? "Facebook Page")
+      name: String(page.name ?? page.pageName ?? page.label ?? "Facebook Page"),
+      subId: String(page.subId ?? page.metadataJson?.subId ?? ""),
+      subId1: String(page.subId1 ?? page.metadataJson?.subId1 ?? ""),
+      subId2: String(page.subId2 ?? page.metadataJson?.subId2 ?? ""),
+      subId3: String(page.subId3 ?? page.metadataJson?.subId3 ?? ""),
+      subId4: String(page.subId4 ?? page.metadataJson?.subId4 ?? ""),
+      subId5: String(page.subId5 ?? page.metadataJson?.subId5 ?? "")
     }))
     .filter((page: FacebookPage) => page.pageId.length > 0);
+}
+
+function validateConfigSubIds(config: AutoPostConfig) {
+  for (const field of SHOPEE_SUB_ID_FIELDS) {
+    const value = config[field]?.trim();
+    if (value && !SHOPEE_SUB_ID_PATTERN.test(value)) {
+      throw new Error(SHOPEE_SUB_ID_ERROR_MESSAGE);
+    }
+  }
+}
+
+function trimConfigSubIds(config: AutoPostConfig): AutoPostConfig {
+  return {
+    ...config,
+    shopeeSubId: config.shopeeSubId.trim(),
+    shopeeSubId1: config.shopeeSubId1.trim(),
+    shopeeSubId2: config.shopeeSubId2.trim(),
+    shopeeSubId3: config.shopeeSubId3.trim(),
+    shopeeSubId4: config.shopeeSubId4.trim(),
+    shopeeSubId5: config.shopeeSubId5.trim()
+  };
 }
 
 function statusLabel(status?: AutoPostStatus) {
@@ -560,10 +613,12 @@ export function AutoPostPanel() {
   }
 
   async function saveConfig(enabledOverride?: boolean) {
+    validateConfigSubIds(config);
+    const configToSave = trimConfigSubIds(config);
     const response = await fetch("/api/auto-post", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...config, enabled: enabledOverride ?? config.enabled })
+      body: JSON.stringify({ ...configToSave, enabled: enabledOverride ?? config.enabled })
     });
     const result = await readApiResult(response);
     if (!result.ok) throw new Error(result.message || "Unable to save Auto Post settings");
@@ -837,6 +892,38 @@ export function AutoPostPanel() {
               placeholder="Optional affiliate tracking id"
             />
           </label>
+
+          <label className="label">
+            Sub ID
+            <input
+              className="input"
+              value={config.shopeeSubId}
+              onChange={(event) => setConfig((current) => ({ ...current, shopeeSubId: event.target.value }))}
+              placeholder="เช่น page01, campaign_may, fb_reels_01"
+            />
+          </label>
+        </div>
+
+        <div className="grid cols-2 auto-post-grid auto-post-grid-minimal">
+          <label className="label">
+            Sub ID 1
+            <input
+              className="input"
+              value={config.shopeeSubId1}
+              onChange={(event) => setConfig((current) => ({ ...current, shopeeSubId1: event.target.value }))}
+              placeholder="Optional advanced sub id"
+            />
+          </label>
+
+          <label className="label">
+            Sub ID 2
+            <input
+              className="input"
+              value={config.shopeeSubId2}
+              onChange={(event) => setConfig((current) => ({ ...current, shopeeSubId2: event.target.value }))}
+              placeholder="Optional advanced sub id"
+            />
+          </label>
         </div>
 
         <div className="grid cols-2 auto-post-grid auto-post-grid-minimal">
@@ -943,7 +1030,8 @@ export function AutoPostPanel() {
                   onClick={() => togglePage(page.pageId)}
                   disabled={disabled}
                 >
-                  {page.name}
+                  <span>{page.name}</span>
+                  {page.subId ? <small className="muted">Sub ID: {page.subId}</small> : null}
                 </button>
               );
             }) : <div className="composer-media-empty">Connect Facebook Page first</div>}
@@ -1024,6 +1112,8 @@ export function AutoPostPanel() {
         <div className="grid cols-2 auto-post-metrics auto-post-metrics-minimal">
           <div className="auto-post-metric-card"><span className="muted">Shopee API status</span><strong>{controlPanel?.shopeeApiStatus ?? "checking"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Affiliate config status</span><strong>{controlPanel?.affiliateConfigStatus ?? "checking"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Tracking ID</span><strong>{config.shopeeTrackingId || "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Sub ID</span><strong>{config.shopeeSubId || "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Facebook Page status</span><strong>{hasFacebookPages ? `connected (${pages.length})` : controlPanel?.facebookPageStatus ?? "missing"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Auto-post engine status</span><strong>{controlPanel?.autoPostEngineStatus ?? statusLabel(config.autoPostStatus)}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Last product fetch time</span><strong>{formatDateTime(controlPanel?.lastProductFetchAt ?? undefined)}</strong></div>
@@ -1091,6 +1181,8 @@ export function AutoPostPanel() {
                     {result.jobId ? `Job ${result.jobId}` : "Waiting for scheduled slot"}
                     {result.facebookPostId ? ` • Facebook post ${result.facebookPostId}` : ""}
                     {result.scheduledAt ? ` • Scheduled ${formatDateTime(result.scheduledAt)}` : ""}
+                    {result.subId ? ` • Sub ID ${sanitizeText(result.subId)}` : ""}
+                    {result.shortAffiliateLink ? ` • Short link ${sanitizeText(result.shortAffiliateLink)}` : ""}
                     {result.errorMessage ? ` • ${sanitizeText(result.errorMessage)}` : ""}
                   </div>
                 </article>

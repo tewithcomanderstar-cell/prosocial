@@ -6,6 +6,12 @@ const connectedPageSchema = new Schema(
     name: { type: String, required: true },
     pageAccessToken: { type: String, required: true },
     category: { type: String },
+    subId: { type: String, default: "" },
+    subId1: { type: String, default: "" },
+    subId2: { type: String, default: "" },
+    subId3: { type: String, default: "" },
+    subId4: { type: String, default: "" },
+    subId5: { type: String, default: "" },
     profilePictureUrl: { type: String, default: null },
     profilePictureFetchedAt: { type: Date, default: null }
   },

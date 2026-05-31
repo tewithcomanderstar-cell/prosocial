@@ -11,6 +11,12 @@ const affiliateLinkSchema = new Schema(
     sourceUrl: { type: String, default: "" },
     shortUrl: { type: String, default: "", index: true },
     trackingId: { type: String, default: "default", index: true },
+    subId: { type: String, default: "", index: true },
+    subId1: { type: String, default: "", index: true },
+    subId2: { type: String, default: "", index: true },
+    subId3: { type: String, default: "", index: true },
+    subId4: { type: String, default: "", index: true },
+    subId5: { type: String, default: "", index: true },
     status: {
       type: String,
       enum: ["active", "failed", "disabled", "pending"],
@@ -26,6 +32,9 @@ const affiliateLinkSchema = new Schema(
   { timestamps: true }
 );
 
-affiliateLinkSchema.index({ userId: 1, productId: 1, trackingId: 1 }, { unique: true });
+affiliateLinkSchema.index(
+  { userId: 1, productId: 1, trackingId: 1, subId: 1, subId1: 1, subId2: 1, subId3: 1, subId4: 1, subId5: 1 },
+  { unique: true }
+);
 
 export const AffiliateLink = models.AffiliateLink || model("AffiliateLink", affiliateLinkSchema);
