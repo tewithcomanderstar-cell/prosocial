@@ -1129,7 +1129,7 @@ async function resolveImages(userId: string, imageRefs: string[]): Promise<Resol
 }
 
 function getRetryDelayMs(attempts: number) {
-  const steps = [2 * 60_000, 10 * 60_000, 30 * 60_000, 2 * 60 * 60_000];
+  const steps = [1 * 60_000, 3 * 60_000, 5 * 60_000];
   return steps[Math.min(attempts, steps.length - 1)];
 }
 
@@ -1321,18 +1321,20 @@ export async function enqueuePostJobsForPost(userId: string, postId: string, opt
       targetPageIds: [page.pageId]
     });
 
-    const spacingMinutes = options.forceImmediate
-      ? 0
-      : options.payloadExtras?.autoPostConfigId || options.payloadExtras?.autoPostAiConfigId
-      ? AUTO_POST_PAGE_SPACING_MINUTES
-      : 0;
-    const nextRunAt = options.forceImmediate
-      ? new Date()
-      : options.startAt
-      ? new Date(options.startAt.getTime() + pageIndex * spacingMinutes * 60 * 1000)
-      : options.applyRandomDelay === false
+    const isAutoPostPageTask = Boolean(options.payloadExtras?.autoPostConfigId || options.payloadExtras?.autoPostAiConfigId);
+    const isShopeePageTask = options.payloadExtras?.autoSource === "shopee-affiliate";
+    const spacingMinutes = isAutoPostPageTask ? AUTO_POST_PAGE_SPACING_MINUTES : 0;
+    const baseRunAt = options.startAt
+      ? new Date(options.startAt)
+      : options.forceImmediate || options.applyRandomDelay === false
         ? new Date()
         : new Date(Date.now() + randomDelayMs(safeSettings.minDelaySeconds, safeSettings.maxDelaySeconds));
+    const nextRunAt =
+      isShopeePageTask || options.payloadExtras?.autoPostAiConfigId
+        ? new Date(baseRunAt.getTime() + pageIndex * spacingMinutes * 60 * 1000)
+        : options.forceImmediate
+          ? new Date()
+          : baseRunAt;
 
     const job = await Job.create({
       userId,
@@ -1371,7 +1373,10 @@ export async function enqueuePostJobsForPost(userId: string, postId: string, opt
           pageName: page.name ?? "Facebook Page",
           status: "queued",
           nextRunAt: nextRunAt.toISOString(),
-          forceImmediate: Boolean(options.forceImmediate)
+          forceImmediate: Boolean(options.forceImmediate),
+          pageIndex: pageIndex + 1,
+          selectedPagesCount: selectedPages.length,
+          scheduledDelayMinutes: pageIndex * spacingMinutes
         }
       });
       await logAction({
@@ -1389,12 +1394,33 @@ export async function enqueuePostJobsForPost(userId: string, postId: string, opt
           pageId: page.pageId,
           pageName: page.name ?? "Facebook Page",
           status: "queued",
-          nextRunAt: nextRunAt.toISOString()
+          nextRunAt: nextRunAt.toISOString(),
+          pageIndex: pageIndex + 1,
+          selectedPagesCount: selectedPages.length,
+          scheduledDelayMinutes: pageIndex * spacingMinutes
         }
       });
     }
 
     queued += 1;
+  }
+
+  if (options.payloadExtras?.autoSource === "shopee-affiliate" && queued !== selectedPages.length) {
+    await logAction({
+      userId,
+      type: "queue",
+      level: "error",
+      message: "Page task creation incomplete",
+      metadata: {
+        autoPost: true,
+        autoSource: "shopee-affiliate",
+        autoPostConfigId: String(options.payloadExtras.autoPostConfigId ?? ""),
+        workflowRunId: String(options.payloadExtras.workflowRunId ?? ""),
+        selectedPagesCount: selectedPages.length,
+        createdTasksCount: queued
+      }
+    });
+    throw new Error("Page task creation incomplete");
   }
 
   return queued;
@@ -1419,9 +1445,8 @@ export async function retryPendingShopeePageJobs(userId: string, configId?: stri
     "payload.autoSource": "shopee-affiliate",
     "payload.autoPostConfigId": String((config as any)._id),
     $or: [
-      { nextRunAt: { $gt: now } },
-      { createdAt: { $lte: staleBefore } },
-      { nextRunAt: { $lte: now } }
+      { nextRunAt: { $lte: now } },
+      { createdAt: { $lte: staleBefore }, nextRunAt: { $lte: now } }
     ]
   };
   if (workflowRunId) {

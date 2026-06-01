@@ -359,13 +359,19 @@ export async function GET() {
           rawStatus: "not_created",
           facebookPostId: null,
           errorCode: null,
-          errorMessage: "Page publish task has not been created for this run",
+          errorMessage: "Page task creation incomplete",
           startedAt: null,
           scheduledAt: null,
           finishedAt: null
         };
       }
       const payload = (job.payload ?? {}) as Record<string, unknown>;
+      const normalizedStatus = normalizePageJobStatus(job.status);
+      const scheduledAt = job.nextRunAt ?? null;
+      const isFutureQueued =
+        (job.status === "queued" || normalizedStatus === "queued") &&
+        scheduledAt instanceof Date &&
+        scheduledAt.getTime() > Date.now();
 
       return {
         jobId: String(job._id),
@@ -377,13 +383,13 @@ export async function GET() {
             : typeof payload.shortAffiliateLink === "string"
               ? payload.shortAffiliateLink
               : null,
-        status: normalizePageJobStatus(job.status),
+        status: isFutureQueued ? "waiting" : normalizedStatus,
         rawStatus: job.status ?? "queued",
         facebookPostId: typeof (job.result as any)?.id === "string" ? (job.result as any).id : null,
         errorCode: job.errorCode ?? null,
-        errorMessage: sanitizeLegacyMessage(job.failureReason ?? job.lastError ?? null),
+        errorMessage: isFutureQueued ? null : sanitizeLegacyMessage(job.failureReason ?? job.lastError ?? null),
         startedAt: job.processingStartedAt ?? job.createdAt ?? null,
-        scheduledAt: job.nextRunAt ?? null,
+        scheduledAt,
         finishedAt: job.completedAt ?? null
       };
     });
@@ -482,6 +488,7 @@ export async function GET() {
         ? sanitizeLegacyMessage(String(latestSkippedMetadata.reason ?? latestSkippedProductLog.message ?? "Product skipped"))
         : null,
       selectedPagesCount,
+      createdTasksCount: runJobs.length,
       publishedPagesCount,
       failedPagesCount,
       pendingPagesCount,

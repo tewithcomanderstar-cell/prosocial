@@ -66,6 +66,7 @@ type ControlPanelStatus = {
   currentProduct?: string | null;
   lastSkippedReason?: string | null;
   selectedPagesCount?: number;
+  createdTasksCount?: number;
   publishedPagesCount?: number;
   failedPagesCount?: number;
   pendingPagesCount?: number;
@@ -74,7 +75,7 @@ type ControlPanelStatus = {
     jobId: string | null;
     pageId: string;
     pageName: string;
-    status: "pending" | "queued" | "publishing" | "success" | "failed" | "skipped" | "retrying";
+    status: "pending" | "waiting" | "queued" | "publishing" | "success" | "failed" | "skipped" | "retrying";
     rawStatus?: string;
     facebookPostId?: string | null;
     errorCode?: string | null;
@@ -199,6 +200,21 @@ const defaults: AutoPostConfig = {
 function formatDateTime(value?: string) {
   if (!value) return "-";
   return new Date(value).toLocaleString();
+}
+
+function formatScheduledLabel(value?: string | null) {
+  if (!value) return "";
+  const scheduledAt = new Date(value);
+  if (Number.isNaN(scheduledAt.getTime())) return "";
+
+  const diffMs = scheduledAt.getTime() - Date.now();
+  const timeLabel = scheduledAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (diffMs <= 0) {
+    return `Scheduled for ${timeLabel}`;
+  }
+
+  const minutes = Math.max(1, Math.ceil(diffMs / 60_000));
+  return `Scheduled for ${timeLabel} (${minutes} min)`;
 }
 
 function sanitizeText(value?: string | null) {
@@ -1101,6 +1117,7 @@ export function AutoPostPanel() {
           <div className="auto-post-metric-card"><span className="muted">Current product</span><strong>{controlPanel?.currentProduct ? sanitizeText(controlPanel.currentProduct) : "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Last skipped reason</span><strong>{controlPanel?.lastSkippedReason ? sanitizeText(controlPanel.lastSkippedReason) : "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Selected pages</span><strong>{controlPanel?.selectedPagesCount ?? config.targetPageIds.length}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Created tasks</span><strong>{controlPanel?.createdTasksCount ?? controlPanel?.pageResults?.filter((result) => result.jobId).length ?? 0}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Current page</span><strong>{controlPanel?.currentPublishingPage?.pageName ?? "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Published</span><strong>{controlPanel?.publishedPagesCount ?? 0}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Failed / Pending</span><strong>{controlPanel?.failedPagesCount ?? 0} / {controlPanel?.pendingPagesCount ?? 0}</strong></div>
@@ -1122,9 +1139,9 @@ export function AutoPostPanel() {
                     </span>
                   </div>
                   <div className="muted auto-post-log-meta">
-                    {result.jobId ? `Job ${result.jobId}` : "Page task not created for this run"}
+                    {result.jobId ? `Job ${result.jobId}` : "Page task creation incomplete"}
                     {result.facebookPostId ? ` • Facebook post ${result.facebookPostId}` : ""}
-                    {result.scheduledAt ? ` • Scheduled ${formatDateTime(result.scheduledAt)}` : ""}
+                    {result.scheduledAt ? ` • ${formatScheduledLabel(result.scheduledAt) || `Scheduled ${formatDateTime(result.scheduledAt)}`}` : ""}
                     {result.shortAffiliateLink ? ` • Short link ${sanitizeText(result.shortAffiliateLink)}` : ""}
                     {result.errorMessage ? ` • ${sanitizeText(result.errorMessage)}` : ""}
                   </div>

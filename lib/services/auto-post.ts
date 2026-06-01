@@ -1194,10 +1194,10 @@ async function queueShopeeAutoPostsForConfig(
   let failedPageCount = 0;
   let lastPostId: unknown = null;
   const batchDelayMinutes = options.immediate ? 0 : getRandomDelayMinutes(config.minRandomDelayMinutes ?? 0, config.maxRandomDelayMinutes ?? 0);
-  // A Shopee run represents one batch across all selected pages. Page jobs must
-  // be ready in the same batch; otherwise later pages sit in "Waiting for
-  // scheduled slot" and never complete the current run from the user's view.
-  const pageSpacingMinutes = 0;
+  // A Shopee run represents one batch across all selected pages. Create every
+  // page task in the run up front, then let the queue publish each page in a
+  // predictable 10-minute cadence (configurable via AUTO_POST_PAGE_SPACING_MINUTES).
+  const pageSpacingMinutes = Math.max(0, AUTO_POST_BATCH_PAGE_SPACING_MINUTES);
   const batchRequestedStartAt = new Date(Date.now() + batchDelayMinutes * 60 * 1000);
   const batchStartAt = fitBatchStartToPostingWindow(
     batchRequestedStartAt,
@@ -1404,7 +1404,7 @@ async function queueShopeeAutoPostsForConfig(
               aiGeneratedPostId: packageResult.aiGeneratedPostId,
               selectedPagesCount: eligiblePageIds.length,
               pageIndex: Math.max(pageIndex, index) + 1,
-              scheduledDelayMinutes: 0,
+              scheduledDelayMinutes: Math.max(pageIndex, index) * pageSpacingMinutes,
               workflowId: records.workflowId,
               workflowRunId: records.workflowRunId,
               contentItemId: records.contentItemId
@@ -1454,6 +1454,25 @@ async function queueShopeeAutoPostsForConfig(
         failedStep: "GENERATE_POST_PACKAGE"
       });
     }
+  }
+
+  const expectedPreparedPageCount = eligiblePageIds.length;
+  const createdPageTaskCount = queued + failedPageCount;
+  if (!config.approvalMode && createdPageTaskCount !== expectedPreparedPageCount) {
+    const message = `Page task creation incomplete: created ${createdPageTaskCount}/${expectedPreparedPageCount}`;
+    await logShopeeStep({
+      config,
+      step: "PAGE_TASK_CREATION_INCOMPLETE",
+      status: "failed",
+      message,
+      metadata: {
+        queued,
+        failedPageCount,
+        selectedPagesCount: expectedPreparedPageCount,
+        workflowRunId: records.workflowRunId
+      }
+    });
+    throw new Error(message);
   }
 
   const allPagesFailed = queued === 0 && !config.approvalMode && failedPageCount >= eligiblePageIds.length;
