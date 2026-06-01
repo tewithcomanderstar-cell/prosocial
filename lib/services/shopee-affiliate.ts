@@ -9,6 +9,13 @@ import { generateFacebookContent, generateProductReferenceImage } from "@/lib/se
 import { assertNoLargeMongoFields, uploadAutoPostImage } from "@/lib/services/blob-storage";
 import { logAction } from "@/lib/services/logging";
 import { assertValidTextEncoding, normalizeTextEncoding, validateTextEncoding } from "@/lib/services/text-encoding";
+import {
+  DEFAULT_SHOPEE_CATEGORY,
+  getShopeeCategoryLabel,
+  getShopeeCategorySearchTerms,
+  isShopeeCategoryMatch,
+  normalizeShopeeCategory
+} from "@/lib/shopee-categories";
 import { randomItem } from "@/lib/utils";
 import { AffiliateLink } from "@/models/AffiliateLink";
 import { AffiliatePerformance } from "@/models/AffiliatePerformance";
@@ -245,7 +252,7 @@ export class MockShopeeProvider implements ShopeeProductProvider {
     const now = new Date();
     const sourceTag = query.sourceTag ?? "trending";
     const keyword = query.keyword?.trim() || "ของใช้ยอดนิยม";
-    const category = query.category?.trim() || "Lifestyle";
+    const category = getShopeeCategoryLabel(query.category);
     const limit = Math.max(1, Math.min(query.limit ?? 20, 50));
 
     const samples: ShopeeProductRecord[] = [
@@ -375,7 +382,8 @@ export class ShopeeOfficialApiProvider implements ShopeeProductProvider {
     // Adapter shell: keep official API specifics isolated so we can swap endpoint contracts safely.
     const url = new URL(endpoint);
     if (query.keyword) url.searchParams.set("keyword", query.keyword);
-    if (query.category) url.searchParams.set("category", query.category);
+    const categoryTerms = getShopeeCategorySearchTerms(query.category);
+    if (categoryTerms.length) url.searchParams.set("category", categoryTerms[0]);
     if (query.sourceTag) url.searchParams.set("source_tag", query.sourceTag);
     url.searchParams.set("limit", String(Math.max(1, Math.min(query.limit ?? 20, 50))));
 
@@ -469,7 +477,7 @@ function buildShopeeAffiliateGraphqlQuery(query: ProductDiscoveryQuery) {
   const limit = Math.max(1, Math.min(query.limit ?? 20, 50));
   const listType = getShopeeAffiliateListType(query.sourceTag);
   const args = [`limit: ${limit}`, "page: 1", `listType: ${listType}`];
-  const keyword = query.keyword?.trim() || query.category?.trim();
+  const keyword = query.keyword?.trim() || getShopeeCategorySearchTerms(query.category)[0] || "";
   if (keyword) args.push(`keyword: "${escapeGraphqlString(keyword)}"`);
 
   return `query {
@@ -556,8 +564,12 @@ async function fetchCachedShopeeProducts(query: ProductDiscoveryQuery, reason: s
     productImageUrl: { $ne: "" },
     $or: [{ productUrl: { $ne: "" } }, { affiliateUrl: { $ne: "" } }]
   };
-  if (query.category?.trim()) {
-    mongoQuery.category = { $regex: query.category.trim(), $options: "i" };
+  const categoryTerms = getShopeeCategorySearchTerms(query.category);
+  if (categoryTerms.length) {
+    mongoQuery.category = {
+      $regex: categoryTerms.map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"),
+      $options: "i"
+    };
   }
   if (query.keyword?.trim()) {
     const keyword = query.keyword.trim();
@@ -582,7 +594,7 @@ async function fetchCachedShopeeProducts(query: ProductDiscoveryQuery, reason: s
     count: cached.length,
     sourceTag,
     hasKeyword: Boolean(query.keyword),
-    hasCategory: Boolean(query.category)
+    hasCategory: normalizeShopeeCategory(query.category) !== DEFAULT_SHOPEE_CATEGORY
   });
 
   return cached.map((product) => normalizeCachedShopeeProduct(product, sourceTag));
@@ -609,7 +621,7 @@ async function fetchShopeeAffiliateGraphqlProducts(input: {
     console.warn("[shopee/provider] retrying affiliate graphql with minimal query after system error", {
       sourceTag: input.query.sourceTag ?? "trending",
       hasKeyword: Boolean(input.query.keyword),
-      hasCategory: Boolean(input.query.category)
+      hasCategory: normalizeShopeeCategory(input.query.category) !== DEFAULT_SHOPEE_CATEGORY
     });
 
     try {
@@ -652,7 +664,7 @@ async function fetchShopeeAffiliateGraphqlProductsWithQuery(input: {
     endpointPath: url.pathname,
     sourceTag: input.query.sourceTag ?? "trending",
     hasKeyword: Boolean(input.query.keyword),
-    hasCategory: Boolean(input.query.category),
+    hasCategory: normalizeShopeeCategory(input.query.category) !== DEFAULT_SHOPEE_CATEGORY,
     hasAppId: Boolean(input.appId),
     hasSecret: Boolean(input.secret),
     authMode: "affiliate_graphql",
@@ -1717,12 +1729,12 @@ export function scoreShopeeProduct(input: {
     reason.push("มีรีวิวช่วยประกอบการตัดสินใจ");
   }
 
-  if (input.categoryPriority?.includes(product.category)) {
+  if (input.categoryPriority?.some((category) => isShopeeCategoryMatch(product.category, category))) {
     score += 7;
     reason.push("ตรงหมวดหมู่ที่ตั้งค่าไว้");
   }
 
-  if (input.blockedCategories?.includes(product.category)) {
+  if (input.blockedCategories?.some((category) => isShopeeCategoryMatch(product.category, category))) {
     score -= 80;
     riskFlags.push("blocked_category");
   }
@@ -1816,7 +1828,7 @@ export async function selectShopeeProductsForPages(input: {
   const discovered = await provider.fetchProducts({
     sourceTag: input.sourceTag ?? "trending",
     keyword: input.keyword,
-    category: input.category,
+    category: normalizeShopeeCategory(input.category),
     limit: Math.max(20, input.pageIds.length * Math.max(5, excludedProductIds.size + 5))
   });
   await upsertShopeeProducts(discovered);

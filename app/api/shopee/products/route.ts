@@ -8,11 +8,12 @@ import {
   upsertShopeeProducts,
   ShopeeSourceTag
 } from "@/lib/services/shopee-affiliate";
+import { DEFAULT_SHOPEE_CATEGORY, normalizeShopeeCategory } from "@/lib/shopee-categories";
 
 const querySchema = z.object({
   sourceTag: z.enum(["trending", "best_selling", "top_search", "best_roi", "manual"]).default("trending"),
   keyword: z.string().optional(),
-  category: z.string().optional(),
+  category: z.string().default(DEFAULT_SHOPEE_CATEGORY),
   limit: z.number().min(1).max(50).default(20)
 });
 
@@ -27,7 +28,7 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const sourceTag = parseSourceTag(url.searchParams.get("sourceTag"));
     const keyword = url.searchParams.get("keyword") ?? undefined;
-    const category = url.searchParams.get("category") ?? undefined;
+    const category = normalizeShopeeCategory(url.searchParams.get("category"));
     const limit = Number(url.searchParams.get("limit") ?? "20");
 
     const provider = getShopeeProductProvider();
@@ -38,7 +39,7 @@ export async function GET(request: Request) {
       providerMode: envStatus.providerMode,
       sourceTag,
       hasKeyword: Boolean(keyword),
-      hasCategory: Boolean(category),
+      hasCategory: category !== DEFAULT_SHOPEE_CATEGORY,
       limit: Number.isFinite(limit) ? limit : 20,
       missingEnv: envStatus.missing
     });
@@ -92,11 +93,14 @@ export async function POST(request: Request) {
       providerMode: envStatus.providerMode,
       sourceTag: payload.sourceTag,
       hasKeyword: Boolean(payload.keyword),
-      hasCategory: Boolean(payload.category),
+      hasCategory: normalizeShopeeCategory(payload.category) !== DEFAULT_SHOPEE_CATEGORY,
       limit: payload.limit,
       missingEnv: envStatus.missing
     });
-    const products = await provider.fetchProducts(payload);
+    const products = await provider.fetchProducts({
+      ...payload,
+      category: normalizeShopeeCategory(payload.category)
+    });
     await upsertShopeeProducts(products);
     return jsonOk({
       products: products.map((product) => ({

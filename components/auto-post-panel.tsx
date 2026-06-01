@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { DEFAULT_SHOPEE_CATEGORY, SHOPEE_CATEGORY_OPTIONS, isValidShopeeCategory, normalizeShopeeCategory } from "@/lib/shopee-categories";
 
 type AutoPostStatus = "idle" | "running" | "posting" | "success" | "partial_success" | "failed" | "retrying" | "paused" | "waiting";
 type CaptionStrategy = "manual" | "ai" | "hybrid";
@@ -172,7 +173,7 @@ const defaults: AutoPostConfig = {
   folderName: "My Drive",
   shopeeSourceTag: "trending",
   shopeeKeyword: "",
-  shopeeCategory: "",
+  shopeeCategory: DEFAULT_SHOPEE_CATEGORY,
   shopeeCaptionStyle: "soft_sell",
   shopeeTrackingId: "",
   shopeeBlockedCategories: [],
@@ -439,7 +440,12 @@ export function AutoPostPanel() {
       if (statusJson.ok) {
         const loadedStatusData = statusJson.data as StatusResponse;
         statusData = loadedStatusData;
-        setConfig((current) => ({ ...current, ...defaults, ...loadedStatusData.config }));
+        setConfig((current) => ({
+          ...current,
+          ...defaults,
+          ...loadedStatusData.config,
+          shopeeCategory: normalizeShopeeCategory(loadedStatusData.config?.shopeeCategory)
+        }));
         const liveLogs = loadedStatusData.controlPanel?.latestLogs ?? loadedStatusData.logs ?? [];
         setLogs(liveLogs.slice(0, 20).map((log) => ({ ...log, message: sanitizeText(log.message) })));
         setControlPanel(loadedStatusData.controlPanel ?? null);
@@ -584,14 +590,23 @@ export function AutoPostPanel() {
   }
 
   async function saveConfig(enabledOverride?: boolean) {
+    const payload = {
+      ...config,
+      shopeeCategory: normalizeShopeeCategory(config.shopeeCategory),
+      enabled: enabledOverride ?? config.enabled
+    };
     const response = await fetch("/api/auto-post", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...config, enabled: enabledOverride ?? config.enabled })
+      body: JSON.stringify(payload)
     });
     const result = await readApiResult(response);
     if (!result.ok) throw new Error(result.message || "Unable to save Auto Post settings");
-    setConfig({ ...defaults, ...result.data.config });
+    setConfig({
+      ...defaults,
+      ...result.data.config,
+      shopeeCategory: normalizeShopeeCategory(result.data.config?.shopeeCategory)
+    });
     return result;
   }
 
@@ -602,6 +617,9 @@ export function AutoPostPanel() {
     setError("");
 
     try {
+      if (!isValidShopeeCategory(config.shopeeCategory)) {
+        throw new Error("Please select category");
+      }
       const result = await saveConfig();
       setMessage(result.message || "Settings saved");
       await loadStatus(false);
@@ -848,12 +866,19 @@ export function AutoPostPanel() {
 
           <label className="label">
             Category
-            <input
-              className="input"
-              value={config.shopeeCategory}
-              onChange={(event) => setConfig((current) => ({ ...current, shopeeCategory: event.target.value }))}
-              placeholder="Lifestyle, Beauty, Home"
-            />
+            <select
+              className="select"
+              value={normalizeShopeeCategory(config.shopeeCategory)}
+              onChange={(event) => setConfig((current) => ({ ...current, shopeeCategory: normalizeShopeeCategory(event.target.value) }))}
+              aria-label="Shopee category"
+              required
+            >
+              {SHOPEE_CATEGORY_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
           </label>
         </div>
 

@@ -13,6 +13,8 @@ import {
 } from "./shopee-affiliate-core.ts";
 // @ts-ignore Node strip-types runner resolves the .ts module directly in tests.
 import type { ShopeeProductRecord } from "./shopee-affiliate-core.ts";
+// @ts-ignore Node strip-types runner resolves the .ts module directly in tests.
+import { getShopeeCategoryLabel, normalizeShopeeCategory } from "../shopee-categories.ts";
 
 const sampleProduct: ShopeeProductRecord = {
   productId: "test-product",
@@ -50,6 +52,13 @@ function testScoringRewardsStrongProducts() {
   assert.ok(score.reason.length >= 2);
   assert.deepEqual(score.riskFlags, []);
   console.log("PASS Shopee scoring rewards strong products");
+}
+
+function testShopeeCategoryNormalization() {
+  assert.equal(normalizeShopeeCategory("Lifestyle, Beauty, Home"), "all");
+  assert.equal(normalizeShopeeCategory("Home & Living"), "home_living");
+  assert.equal(getShopeeCategoryLabel("beauty"), "Beauty & Personal Care");
+  console.log("PASS Shopee category dropdown values normalize legacy text");
 }
 
 function testScoringBlocksRecentDuplicates() {
@@ -148,6 +157,7 @@ function testImagePromptSetCreatesFourConsistentPrompts() {
 }
 
 await testMockProviderReturnsProducts();
+testShopeeCategoryNormalization();
 testScoringRewardsStrongProducts();
 testScoringBlocksRecentDuplicates();
 testAffiliateLinkBuilderAddsTracking();

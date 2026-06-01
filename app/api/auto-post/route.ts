@@ -3,6 +3,7 @@ import { jsonError, jsonOk, parseBody } from "@/lib/api";
 import { handleRoleError, requireRole } from "@/lib/services/permissions";
 import { logAction } from "@/lib/services/logging";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
+import { DEFAULT_SHOPEE_CATEGORY, normalizeShopeeCategory } from "@/lib/shopee-categories";
 
 type LeanAutoPostConfig = {
   enabled?: boolean;
@@ -17,6 +18,7 @@ type LeanAutoPostConfig = {
   postingWindowCustomized?: boolean | null;
   maxPostsPerDay?: number;
   maxPostsPerPagePerDay?: number;
+  shopeeCategory?: string | null;
 };
 
 const intervalSchema = z.union([
@@ -61,7 +63,7 @@ const schema = z.object({
   folderName: z.string().min(1).default("My Drive"),
   shopeeSourceTag: z.enum(["trending", "best_selling", "top_search", "best_roi", "manual"]).default("trending"),
   shopeeKeyword: z.string().default(""),
-  shopeeCategory: z.string().default(""),
+  shopeeCategory: z.string().default(DEFAULT_SHOPEE_CATEGORY),
   shopeeCaptionStyle: z
     .enum(["soft_sell", "urgency", "problem_solution", "review_style", "deal_alert", "lifestyle"])
     .default("soft_sell"),
@@ -118,6 +120,7 @@ export async function GET() {
           intervalMinutes: 60,
           contentSource: "shopee-affiliate",
           shopeeSourceTag: "trending",
+          shopeeCategory: DEFAULT_SHOPEE_CATEGORY,
           shopeeCaptionStyle: "soft_sell",
           approvalMode: false,
           watermarkEnabled: true,
@@ -155,6 +158,12 @@ export async function GET() {
       config.postingWindowStart = DEFAULT_POSTING_WINDOW_START;
       config.postingWindowEnd = DEFAULT_POSTING_WINDOW_END;
       config.postingWindowCustomized = false;
+    }
+
+    const normalizedCategory = normalizeShopeeCategory(config.shopeeCategory);
+    if (normalizedCategory !== config.shopeeCategory) {
+      await AutoPostConfig.findOneAndUpdate({ userId }, { shopeeCategory: normalizedCategory });
+      config.shopeeCategory = normalizedCategory;
     }
 
     if (config.lastError) {
@@ -196,7 +205,7 @@ export async function POST(request: Request) {
     const payload = parseBody(schema, await request.json());
     const normalizedFolderId = normalizeFolderId(payload.folderId ?? "root");
     const shopeeKeyword = (payload.shopeeKeyword ?? "").trim();
-    const shopeeCategory = (payload.shopeeCategory ?? "").trim();
+    const shopeeCategory = normalizeShopeeCategory(payload.shopeeCategory);
     const shopeeTrackingId = (payload.shopeeTrackingId ?? "").trim();
     const targetPageIds = uniquePageIds(payload.targetPageIds);
     const current = (await AutoPostConfig.findOne({ userId }).lean()) as LeanAutoPostConfig | null;

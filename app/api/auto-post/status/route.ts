@@ -7,6 +7,7 @@ import { Job } from "@/models/Job";
 import { ShopeeProduct } from "@/models/ShopeeProduct";
 import { getShopeeAffiliateConfigStatus, getShopeeEnvStatus, getShopeeProductProvider } from "@/lib/services/shopee-affiliate";
 import { getStorageStatus, mapStorageQuotaMessage } from "@/lib/services/storage-cleanup";
+import { DEFAULT_SHOPEE_CATEGORY, normalizeShopeeCategory } from "@/lib/shopee-categories";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 10;
@@ -215,7 +216,7 @@ export async function GET() {
       folderName: "My Drive",
       shopeeSourceTag: "trending",
       shopeeKeyword: "",
-      shopeeCategory: "",
+      shopeeCategory: DEFAULT_SHOPEE_CATEGORY,
       shopeeCaptionStyle: "soft_sell",
       shopeeTrackingId: "",
       shopeeBlockedCategories: [],
@@ -236,6 +237,11 @@ export async function GET() {
       lastError: null
     };
     const effectiveConfig = normalizePostingWindowForDisplay(config ?? defaultConfig);
+    if (typeof (effectiveConfig as Record<string, unknown>).shopeeCategory === "string") {
+      (effectiveConfig as Record<string, unknown>).shopeeCategory = normalizeShopeeCategory(
+        (effectiveConfig as Record<string, unknown>).shopeeCategory as string
+      );
+    }
     const effectiveConfigDoc = effectiveConfig as AutoPostConfigStatusDoc & {
       targetPageIds?: string[];
       lastWorkflowRunId?: unknown;

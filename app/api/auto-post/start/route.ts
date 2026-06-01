@@ -2,6 +2,7 @@ import { jsonError, jsonOk } from "@/lib/api";
 import { logAction, logAndNotifyError } from "@/lib/services/logging";
 import { handleRoleError, requireRole } from "@/lib/services/permissions";
 import { ensureStorageBeforeAutoPost, mapStorageQuotaMessage } from "@/lib/services/storage-cleanup";
+import { normalizeShopeeCategory } from "@/lib/shopee-categories";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
 import { after } from "next/server";
 
@@ -242,7 +243,7 @@ export async function POST(request: Request) {
         contentSource: "shopee-affiliate",
         shopeeSourceTag: config.shopeeSourceTag ?? "trending",
         shopeeKeyword: config.shopeeKeyword ?? "",
-        shopeeCategory: config.shopeeCategory ?? "",
+        shopeeCategory: normalizeShopeeCategory(config.shopeeCategory),
         targetPageCount: config.targetPageIds.length,
         intervalMinutes: config.intervalMinutes,
         source: "manual-start",

@@ -1,5 +1,6 @@
 ﻿import crypto from "crypto";
 import { buildUgcShopeeImagePromptSet } from "./ugc-image-prompt.ts";
+import { getShopeeCategoryLabel, isShopeeCategoryMatch } from "../shopee-categories.ts";
 
 export type ShopeeSourceTag = "trending" | "best_selling" | "top_search" | "best_roi" | "manual";
 export type ShopeeCaptionStyle = "soft_sell" | "urgency" | "problem_solution" | "review_style" | "deal_alert" | "lifestyle";
@@ -146,7 +147,7 @@ export class MockShopeeProvider implements ShopeeProductProvider {
     const now = new Date();
     const sourceTag = query.sourceTag ?? "trending";
     const keyword = query.keyword?.trim() || "ของใช้ยอดนิยม";
-    const category = query.category?.trim() || "Lifestyle";
+    const category = getShopeeCategoryLabel(query.category);
     const limit = Math.max(1, Math.min(query.limit ?? 20, 50));
 
     const samples: ShopeeProductRecord[] = [
@@ -344,12 +345,12 @@ export function scoreShopeeProduct(input: {
     reason.push(product.sourceTag === "trending" ? "สินค้าอยู่ในกระแส" : "สินค้า best-selling");
   }
 
-  if (input.categoryPriority?.includes(product.category)) {
+  if (input.categoryPriority?.some((category) => isShopeeCategoryMatch(product.category, category))) {
     score += 7;
     reason.push("ตรงหมวดหมู่ที่ตั้งค่าไว้");
   }
 
-  if (input.blockedCategories?.includes(product.category)) {
+  if (input.blockedCategories?.some((category) => isShopeeCategoryMatch(product.category, category))) {
     score -= 80;
     riskFlags.push("blocked_category");
   }

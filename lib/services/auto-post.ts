@@ -16,6 +16,7 @@ import {
   ShopeeSourceTag
 } from "@/lib/services/shopee-affiliate";
 import { randomItem } from "@/lib/utils";
+import { normalizeShopeeCategory } from "@/lib/shopee-categories";
 import { ensureStorageBeforeAutoPost, mapStorageQuotaMessage } from "@/lib/services/storage-cleanup";
 import { normalizeTextEncoding, validateTextEncoding } from "@/lib/services/text-encoding";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
@@ -727,7 +728,7 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
             pageIds: input.eligiblePageIds,
             sourceTag: input.config.shopeeSourceTag ?? "trending",
             keyword: input.config.shopeeKeyword,
-            category: input.config.shopeeCategory,
+            category: normalizeShopeeCategory(input.config.shopeeCategory),
             categoryPriority: input.config.shopeeCategoryPriority ?? [],
             blockedCategories: input.config.shopeeBlockedCategories ?? [],
             minPrice: input.config.shopeeMinPrice ?? 0,
@@ -1164,7 +1165,7 @@ async function queueShopeeAutoPostsForConfig(
     metadata: {
       sourceTag: config.shopeeSourceTag ?? "trending",
       keyword: config.shopeeKeyword ?? "",
-      category: config.shopeeCategory ?? "",
+      category: normalizeShopeeCategory(config.shopeeCategory),
       pageCount: eligiblePageIds.length
     }
   });
@@ -1173,7 +1174,7 @@ async function queueShopeeAutoPostsForConfig(
     pageIds: eligiblePageIds,
     sourceTag: config.shopeeSourceTag ?? "trending",
     keyword: config.shopeeKeyword,
-    category: config.shopeeCategory,
+    category: normalizeShopeeCategory(config.shopeeCategory),
     categoryPriority: config.shopeeCategoryPriority ?? [],
     blockedCategories: config.shopeeBlockedCategories ?? [],
     minPrice: config.shopeeMinPrice ?? 0,
