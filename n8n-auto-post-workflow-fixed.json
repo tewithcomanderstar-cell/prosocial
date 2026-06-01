@@ -1,0 +1,74 @@
+{
+  "name": "Next.js Auto Post System with Facebook and Google Drive Integration (Fixed)",
+  "notes": {
+    "summary": [
+      "Removed direct Receive Auto-Post Command -> Shuffle Pages connection; start flow should go through Validate API Key and Route by Action Type first.",
+      "Removed Send Running Status -> Fetch Drive Files main-path dependency; Send Running Status should be side-effect only.",
+      "Send Running Status must fan out with Shuffle Pages from start route.",
+      "Prepare Caption must fan out to both Send Posting Status and Get Page Access Token so callback status does not replace source items.",
+      "Fetch Drive Files folderId must come from webhook/body.folderId rather than a hard-coded Google Drive folder ID.",
+      "Build Page/Image Pairs should read pageIds from Shuffle Pages and images from Shuffle Images directly.",
+      "Merge Final Caption must be Mode=Append, Inputs=2.",
+      "Send Success Status currentJobStatus should be 'posted', not 'completed'.",
+      "Send Pause/Stop Status currentJobStatus should be 'pending', not 'failed'.",
+      "Recommended: per-item success/failed callbacks use autoPostStatus='running'; final waiting state should be set only by Send Waiting Status."
+    ],
+    "critical_node_replacements": {
+      "Shuffle Pages": "const webhook = $('Receive Auto-Post Command').first().json || {};\nconst body = webhook.body || {};\nconst pageIds = Array.isArray(body.pageIds) ? [...body.pageIds] : [];\n\nif (!pageIds.length) {\n  throw new Error('No pageIds found in webhook body');\n}\n\nfor (let i = pageIds.length - 1; i > 0; i--) {\n  const j = Math.floor(Math.random() * (i + 1));\n  [pageIds[i], pageIds[j]] = [pageIds[j], pageIds[i]];\n}\n\nreturn [{ json: { pageIds, webhookData: webhook } }];",
+      "Build Page/Image Pairs": "const pageData = $('Shuffle Pages').first().json || {};\nconst pageIds = Array.isArray(pageData.pageIds) ? pageData.pageIds : [];\nconst webhookData = pageData.webhookData || {};\nconst images = $('Shuffle Images').all().map((item) => item.json);\n\nif (!pageIds.length) {\n  throw new Error('No pageIds found in Shuffle Pages');\n}\n\nif (!images.length) {\n  throw new Error('No images found in Shuffle Images');\n}\n\nreturn pageIds.map((pageId, index) => ({\n  json: {\n    pageId,\n    image: images[index % images.length],\n    webhookData,\n  },\n}));",
+      "Extract Page Token": "const accountsResponse = $('Get Page Access Token').first().json.body || {};\nconst pageAccounts = Array.isArray(accountsResponse.data) ? accountsResponse.data : [];\n\nconst sourceItems = $('Prepare Caption').all();\n\nif (!pageAccounts.length) {\n  throw new Error('No pages returned from Get Page Access Token');\n}\n\nif (!sourceItems.length) {\n  throw new Error('No items returned from Prepare Caption');\n}\n\nconst results = sourceItems.map((item) => {\n  const source = item.json || {};\n  const targetPageId = String(source.pageId || '').trim();\n\n  if (!targetPageId) {\n    throw new Error('Missing pageId in Prepare Caption item');\n  }\n\n  const matchedPage = pageAccounts.find((page) => String(page.id) === targetPageId);\n\n  if (!matchedPage) {\n    const availablePages = pageAccounts.map((page) => ({\n      id: String(page.id),\n      name: page.name || '',\n    }));\n\n    throw new Error(\n      `Page ID ${targetPageId} not found in /me/accounts. Available pages: ${JSON.stringify(availablePages)}`\n    );\n  }\n\n  return {\n    json: {\n      ...source,\n      pageAccessToken: matchedPage.access_token,\n      pageName: matchedPage.name || '',\n      facebookPageId: String(matchedPage.id),\n    },\n  };\n});\n\nreturn results;"
+    },
+    "status_json_bodies": {
+      "Send Running Status": "={\n  \"configId\": \"{{ $json.body.configId }}\",\n  \"autoPostStatus\": \"running\",\n  \"currentJobStatus\": \"processing\",\n  \"message\": \"Auto post is running\",\n  \"source\": \"n8n\"\n}",
+      "Send Posting Status": "={\n  \"configId\": \"{{ $json.webhookData.body.configId }}\",\n  \"autoPostStatus\": \"running\",\n  \"currentJobStatus\": \"processing\",\n  \"message\": \"Posting to Facebook page\",\n  \"source\": \"n8n\"\n}",
+      "Send Success Status": "={\n  \"configId\": \"{{ $json.webhookData.body.configId }}\",\n  \"autoPostStatus\": \"running\",\n  \"currentJobStatus\": \"posted\",\n  \"message\": \"Post published successfully\",\n  \"source\": \"n8n\",\n  \"pageId\": \"{{ $json.pageId }}\",\n  \"imageUsed\": \"{{ $json.image.id }}\"\n}",
+      "Send Failed Status": "={\n  \"configId\": \"{{ $json.webhookData.body.configId }}\",\n  \"autoPostStatus\": \"running\",\n  \"currentJobStatus\": \"failed\",\n  \"message\": \"Posting failed\",\n  \"source\": \"n8n\",\n  \"pageId\": \"{{ $json.pageId }}\",\n  \"imageUsed\": \"{{ $json.image.id }}\"\n}",
+      "Send Pause Status": "={\n  \"configId\": \"{{ $json.body.configId }}\",\n  \"autoPostStatus\": \"paused\",\n  \"currentJobStatus\": \"pending\",\n  \"message\": \"Auto post paused\",\n  \"source\": \"n8n\"\n}",
+      "Send Stop Status": "={\n  \"configId\": \"{{ $json.body.configId }}\",\n  \"autoPostStatus\": \"paused\",\n  \"currentJobStatus\": \"pending\",\n  \"message\": \"Auto post stopped\",\n  \"source\": \"n8n\"\n}",
+      "Send Waiting Status": "={\n  \"configId\": \"{{ $json.webhookData.body.configId }}\",\n  \"autoPostStatus\": \"waiting\",\n  \"currentJobStatus\": \"pending\",\n  \"nextRunAt\": \"{{ $json.nextRunAt }}\",\n  \"message\": \"Waiting for next interval\",\n  \"source\": \"n8n\"\n}"
+    },
+    "connection_changes": {
+      "delete": [
+        "Receive Auto-Post Command -> Shuffle Pages",
+        "Send Running Status -> Fetch Drive Files",
+        "Send Posting Status -> Get Page Access Token"
+      ],
+      "add": [
+        "Route by Action Type(start) -> Shuffle Pages",
+        "Prepare Caption -> Get Page Access Token",
+        "Prepare Caption -> Send Posting Status"
+      ],
+      "keep": [
+        "Shuffle Pages -> Fetch Drive Files",
+        "Shuffle Pages -> Merge Shuffled Data",
+        "Fetch Drive Files -> Shuffle Images",
+        "Shuffle Images -> Merge Shuffled Data",
+        "Merge Shuffled Data -> Build Page/Image Pairs",
+        "Download Image Binary -> Merge Caption With Binary(input1)",
+        "Merge Final Caption -> Merge Caption With Binary(input2)",
+        "Post to Facebook Page -> Merge Post Result with Caption Data(input1)",
+        "Extract Page Token -> Merge Post Result with Caption Data(input2)"
+      ]
+    },
+    "manual_node_settings": {
+      "Fetch Drive Files.folderId.value": "={{ $('Shuffle Pages').first().json.webhookData.body.folderId }}",
+      "Merge Final Caption.mode": "append",
+      "Merge Final Caption.numberInputs": 2,
+      "Merge Caption With Binary.mode": "combine",
+      "Merge Caption With Binary.combineBy": "combineByPosition",
+      "Merge AI Output With Source Data.mode": "combine",
+      "Merge AI Output With Source Data.combineBy": "combineByPosition"
+    },
+    "expected_item_counts_for_3_pages": {
+      "Build Page/Image Pairs": 3,
+      "Prepare Caption": 3,
+      "Extract Page Token": 3,
+      "Download Image Binary": 3,
+      "Merge AI Output With Source Data": 3,
+      "Use AI Caption + Use Fallback Caption": 3,
+      "Merge Final Caption": 3,
+      "Merge Caption With Binary": 3,
+      "Post to Facebook Page": 3
+    }
+  }
+}

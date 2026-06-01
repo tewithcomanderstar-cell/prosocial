@@ -1,0 +1,58 @@
+{
+  "name": "generate_ai_caption",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "1",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [-420, 240]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OPENAI_API_BASE || 'https://api.openai.com/v1/chat/completions' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.OPENAI_API_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { model: $env.OPENAI_MODEL || 'gpt-4.1-mini', temperature: 0.8, response_format: { type: 'json_object' }, messages: [ { role: 'system', content: 'Return only valid JSON with keys hook, caption, cta, hashtags, confidence.' }, { role: 'user', content: `Image filename: ${$json.image.file_name}\\nFolder context: ${$json.image.folder_context || $json.page.drive_folder_name}\\nPage niche: ${$json.page.page_niche}\\nLanguage: ${$json.page.language}\\nTone: ${$json.page.tone}\\nOutput schema: {\"hook\":\"\",\"caption\":\"\",\"cta\":\"\",\"hashtags\":[],\"confidence\":0}` } ] } }}",
+        "options": { "timeout": 60000 }
+      },
+      "id": "2",
+      "name": "HTTP Request to AI API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-140, 240]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const request = $('Execute Workflow Trigger').first().json;\\nlet parsed;\\ntry {\\n  const content = $json.choices?.[0]?.message?.content || '{}';\\n  parsed = JSON.parse(content);\\n} catch {\\n  parsed = null;\\n}\\nconst hashtags = Array.isArray(parsed?.hashtags) ? parsed.hashtags.filter(Boolean).slice(0, 8) : [];\\nconst valid = Boolean(parsed && (parsed.caption || parsed.hook));\\nconst fallback = request.page.language === 'th'\\n  ? { hook: `โพสต์ใหม่จาก ${request.page.page_name}`, caption: `ภาพนี้เกี่ยวกับ ${request.page.page_niche} พร้อมเล่าเรื่องจากไฟล์ ${request.image.file_name}`, cta: 'ติดตามโพสต์ถัดไปได้เลย', hashtags: ['#อัปเดตใหม่', '#โพสต์อัตโนมัติ'], confidence: 0.35 }\\n  : { hook: `Fresh post from ${request.page.page_name}`, caption: `This image highlights ${request.page.page_niche} based on ${request.image.file_name}.`, cta: 'Follow for the next update.', hashtags: ['#newpost', '#automation'], confidence: 0.35 };\\nconst payload = valid ? parsed : fallback;\\npayload.hashtags = Array.isArray(payload.hashtags) ? payload.hashtags : [];\\npayload.confidence = Number.isFinite(Number(payload.confidence)) ? Math.max(0, Math.min(1, Number(payload.confidence))) : 0.35;\\npayload.final_caption_text = [payload.hook, payload.caption, payload.cta, payload.hashtags.join(' ')].filter(Boolean).join('\\\\n\\\\n').slice(0, 2200);\\nreturn [{ json: { ...request, ai_valid: valid, caption_payload: payload, ai_raw: $json } }];"
+      },
+      "id": "3",
+      "name": "Code node to validate JSON output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [140, 240]
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [[{ "node": "HTTP Request to AI API", "type": "main", "index": 0 }]]
+    },
+    "HTTP Request to AI API": {
+      "main": [[{ "node": "Code node to validate JSON output", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "versionId": "generate-ai-caption-v1",
+  "id": "generate_ai_caption"
+}

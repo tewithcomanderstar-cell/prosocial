@@ -1,0 +1,26 @@
+Return strict JSON only for an automated Facebook posting workflow.
+
+Context:
+- image_filename: {{image_filename}}
+- folder_context: {{folder_context}}
+- page_niche: {{page_niche}}
+- language_preference: {{language}}
+- tone: {{tone}}
+
+Rules:
+- If language_preference is "th", write in Thai
+- If language_preference is "en", write in English
+- Keep the copy safe for business publishing
+- No unsupported claims
+- No markdown
+- hashtags max 8
+- confidence between 0 and 1
+
+JSON schema:
+{
+  "hook": "...",
+  "caption": "...",
+  "cta": "...",
+  "hashtags": ["..."],
+  "confidence": 0.0
+}

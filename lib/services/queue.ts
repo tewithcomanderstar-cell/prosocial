@@ -935,6 +935,18 @@ async function validateShopeeAffiliatePublishPayload(input: {
     /ของมันต้องมี/i,
     /ซื้อเลยตอนนี้/i
   ];
+  const forbiddenGenericPatterns = [
+    /เลือกจากรายละเอียดสินค้าแล้วดูใช้งานได้จริง/i,
+    /เหมาะกับหมวด\s*(?:General|Lifestyle|Beauty|Home)?/i,
+    /เหมาะกับการใช้งานทั่วไป/i,
+    /คุ้มค่ากับราคา/i,
+    /จากข้อมูลสินค้า/i,
+    /จากรายละเอียดสินค้า/i,
+    /ใช้งานได้จริง/i,
+    /คุณสมบัติสินค้า/i,
+    /สินค้าประเภท/i,
+    /(^|\s)(?:General|Lifestyle|Beauty|Home)(\s|$)/i
+  ];
   const forbiddenOpeners = [
     /^เข้าใจแล้วว่าทำไม/i,
     /^ตอนแรกคิดว่า/i,
@@ -981,6 +993,9 @@ async function validateShopeeAffiliatePublishPayload(input: {
   }
   if (hardSellPatterns.some((pattern) => pattern.test(normalizedMessage))) {
     reasons.push("Caption contains hard-sell wording that is not allowed for Shopee UGC review style");
+  }
+  if (forbiddenGenericPatterns.some((pattern) => pattern.test(normalizedMessage))) {
+    reasons.push("Caption contains forbidden generic AI review wording");
   }
   if (payloadProductName && nonEmptyLines[0] !== payloadProductName) {
     reasons.push("Caption first line must be the Shopee product name");

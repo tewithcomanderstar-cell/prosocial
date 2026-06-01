@@ -1,0 +1,597 @@
+const workflow = {
+  name: "Next.js Auto Post System with Facebook and Google Drive Integration (Fixed)",
+  nodes: [
+    {
+      parameters: { httpMethod: "POST", path: "auto-post", responseMode: "responseNode", options: {} },
+      id: "baaa211b-9296-478d-8602-4f478089102d",
+      name: "Receive Auto-Post Command",
+      type: "n8n-nodes-base.webhook",
+      typeVersion: 2.1,
+      position: [-3712, 832],
+      webhookId: "cb0469af-0b20-48cf-982f-a260a850c8de",
+    },
+    {
+      parameters: {
+        jsCode:
+          "const apiKey = $input.item.json.headers['x-api-key'];\nif (apiKey !== 'ProsocialN8NSecret2026') {\n  throw new Error('Unauthorized');\n}\nreturn [$input.item];",
+      },
+      id: "4e1b5b17-865d-4ac8-851e-e04ee641e8de",
+      name: "Validate API Key",
+      type: "n8n-nodes-base.code",
+      typeVersion: 2,
+      position: [-3488, 1024],
+    },
+    {
+      parameters: {
+        rules: {
+          values: [
+            {
+              conditions: {
+                options: { caseSensitive: true, leftValue: "", typeValidation: "strict", version: 3 },
+                conditions: [
+                  {
+                    leftValue: "={{ $json.body.action }}",
+                    rightValue: "start",
+                    operator: { type: "string", operation: "equals" },
+                    id: "e37c251f-733c-47ae-bf70-6779d8591851",
+                  },
+                ],
+                combinator: "and",
+              },
+            },
+            {
+              conditions: {
+                options: { caseSensitive: true, leftValue: "", typeValidation: "strict", version: 3 },
+                conditions: [
+                  {
+                    leftValue: "={{ $json.body.action }}",
+                    rightValue: "pause",
+                    operator: { type: "string", operation: "equals" },
+                    id: "a3e395da-dd45-4867-b488-69d03f40bbdd",
+                  },
+                ],
+                combinator: "and",
+              },
+            },
+            {
+              conditions: {
+                options: { caseSensitive: true, leftValue: "", typeValidation: "strict", version: 3 },
+                conditions: [
+                  {
+                    leftValue: "={{ $json.body.action }}",
+                    rightValue: "stop",
+                    operator: { type: "string", operation: "equals" },
+                    id: "17d21a47-cbef-4d54-a9af-0400fb4f3f3e",
+                  },
+                ],
+                combinator: "and",
+              },
+            },
+          ],
+        },
+        options: {},
+      },
+      id: "b4718210-47fd-4ee0-b868-1f3ff6191803",
+      name: "Route by Action Type",
+      type: "n8n-nodes-base.switch",
+      typeVersion: 3.4,
+      position: [-3264, 880],
+    },
+    {
+      parameters: {
+        respondWith: "json",
+        responseBody: '{\n  "ok": true,\n  "accepted": true,\n  "message": "Auto post workflow accepted"\n}',
+        options: {},
+      },
+      id: "83cf7756-a696-4ed3-94d9-d68e334fb2a6",
+      name: "Respond Accepted",
+      type: "n8n-nodes-base.respondToWebhook",
+      typeVersion: 1.5,
+      position: [-3264, 1104],
+    },
+    {
+      parameters: {
+        method: "POST",
+        url: "https://prosocial-two.vercel.app/api/auto-post/update",
+        sendHeaders: true,
+        headerParameters: { parameters: [{ name: "x-api-key", value: "ProsocialN8NSecret2026" }] },
+        sendBody: true,
+        specifyBody: "json",
+        jsonBody:
+          '={\n  "configId": "{{ $json.body.configId }}",\n  "autoPostStatus": "paused",\n  "currentJobStatus": "pending",\n  "message": "Auto post paused",\n  "source": "n8n"\n}',
+        options: {},
+      },
+      id: "dd376951-a864-4cda-b401-fce6a9226155",
+      name: "Send Pause Status",
+      type: "n8n-nodes-base.httpRequest",
+      typeVersion: 4.4,
+      position: [-3040, 608],
+      onError: "continueRegularOutput",
+    },
+    {
+      parameters: {
+        method: "POST",
+        url: "https://prosocial-two.vercel.app/api/auto-post/update",
+        sendHeaders: true,
+        headerParameters: { parameters: [{ name: "x-api-key", value: "ProsocialN8NSecret2026" }] },
+        sendBody: true,
+        specifyBody: "json",
+        jsonBody:
+          '={\n  "configId": "{{ $json.body.configId }}",\n  "autoPostStatus": "paused",\n  "currentJobStatus": "pending",\n  "message": "Auto post stopped",\n  "source": "n8n"\n}',
+        options: {},
+      },
+      id: "4338e4d6-99e5-4ee6-980b-6945b28cb9af",
+      name: "Send Stop Status",
+      type: "n8n-nodes-base.httpRequest",
+      typeVersion: 4.4,
+      position: [-3040, 912],
+      onError: "continueRegularOutput",
+    },
+    {
+      parameters: {
+        method: "POST",
+        url: "https://prosocial-two.vercel.app/api/auto-post/update",
+        sendHeaders: true,
+        headerParameters: { parameters: [{ name: "x-api-key", value: "ProsocialN8NSecret2026" }] },
+        sendBody: true,
+        specifyBody: "json",
+        jsonBody:
+          '={\n  "configId": "{{ $json.body.configId }}",\n  "autoPostStatus": "running",\n  "currentJobStatus": "processing",\n  "message": "Auto post is running",\n  "source": "n8n"\n}',
+        options: {},
+      },
+      id: "3b742ebe-0105-4b63-b221-30c1ef584e4a",
+      name: "Send Running Status",
+      type: "n8n-nodes-base.httpRequest",
+      typeVersion: 4.4,
+      position: [-3040, 1104],
+      onError: "continueRegularOutput",
+    },
+    {
+      parameters: {
+        resource: "fileFolder",
+        searchMethod: "query",
+        queryString: "(mimeType = 'image/jpeg' or mimeType = 'image/png') and trashed = false",
+        returnAll: true,
+        filter: {
+          folderId: {
+            __rl: true,
+            value: "={{ $('Shuffle Pages').first().json.webhookData.body.folderId }}",
+            mode: "id",
+          },
+        },
+        options: {},
+      },
+      id: "58085406-5944-41b1-91a5-27feb4db83d7",
+      name: "Fetch Drive Files",
+      type: "n8n-nodes-base.googleDrive",
+      typeVersion: 3,
+      position: [-2816, 224],
+      credentials: { googleDriveOAuth2Api: { id: "uSfaMfe1demTqFLf", name: "Google Drive OAuth2 API" } },
+    },
+    {
+      parameters: {
+        jsCode:
+          "const images = $input.all().map(item => item.json);\nfor (let i = images.length - 1; i > 0; i--) {\n  const j = Math.floor(Math.random() * (i + 1));\n  [images[i], images[j]] = [images[j], images[i]];\n}\nreturn images.map(img => ({ json: img }));",
+      },
+      id: "58340e47-fbff-4e74-b274-14cd56c6efb1",
+      name: "Shuffle Images",
+      type: "n8n-nodes-base.code",
+      typeVersion: 2,
+      position: [-2592, 224],
+    },
+    {
+      parameters: {
+        jsCode:
+          "const webhook = $('Receive Auto-Post Command').first().json || {};\nconst body = webhook.body || {};\nconst pageIds = Array.isArray(body.pageIds) ? [...body.pageIds] : [];\n\nif (!pageIds.length) {\n  throw new Error('No pageIds found in webhook body');\n}\n\nfor (let i = pageIds.length - 1; i > 0; i--) {\n  const j = Math.floor(Math.random() * (i + 1));\n  [pageIds[i], pageIds[j]] = [pageIds[j], pageIds[i]];\n}\n\nreturn [{ json: { pageIds, webhookData: webhook } }];",
+      },
+      id: "9e4afd3a-7188-4e55-9551-ffcf95ecd8f3",
+      name: "Shuffle Pages",
+      type: "n8n-nodes-base.code",
+      typeVersion: 2,
+      position: [-3040, 416],
+    },
+    {
+      parameters: {
+        mode: "combine",
+        combineBy: "combineByPosition",
+        options: {},
+      },
+      id: "5978e5de-5b10-42e3-8e76-ac9c2f3164d7",
+      name: "Merge Shuffled Data",
+      type: "n8n-nodes-base.merge",
+      typeVersion: 3.2,
+      position: [-2368, 304],
+    },
+    {
+      parameters: {
+        jsCode:
+          "const pageData = $('Shuffle Pages').first().json || {};\nconst pageIds = Array.isArray(pageData.pageIds) ? pageData.pageIds : [];\nconst webhookData = pageData.webhookData || {};\nconst images = $('Shuffle Images').all().map((item) => item.json);\n\nif (!pageIds.length) {\n  throw new Error('No pageIds found in Shuffle Pages');\n}\n\nif (!images.length) {\n  throw new Error('No images found in Shuffle Images');\n}\n\nreturn pageIds.map((pageId, index) => ({\n  json: {\n    pageId,\n    image: images[index % images.length],\n    webhookData,\n  },\n}));",
+      },
+      id: "7d1bf248-700c-4c8b-91b1-ac405f1368db",
+      name: "Build Page/Image Pairs",
+      type: "n8n-nodes-base.code",
+      typeVersion: 2,
+      position: [-2144, 304],
+    },
+    {
+      parameters: {
+        jsCode:
+          "const items = $input.all();\nconst firstItem = items[0]?.json || {};\nconst webhookData = firstItem.webhookData || {};\nconst captionStrategy = webhookData.body?.captionStrategy || 'manual';\nconst captions = webhookData.body?.captions || [];\nconst aiPrompt = webhookData.body?.aiPrompt || '';\nconst language = webhookData.body?.language || 'th';\n\nconst results = items.map((item) => {\n  let caption = 'Fresh update from Google Drive';\n\n  if (captionStrategy === 'manual' && captions.length > 0) {\n    caption = captions[Math.floor(Math.random() * captions.length)];\n  } else if (captionStrategy === 'hybrid') {\n    if (captions.length > 0) {\n      caption = captions[Math.floor(Math.random() * captions.length)];\n    }\n  } else if (captionStrategy === 'ai') {\n    caption = `[AI Generated - Prompt: ${aiPrompt}, Language: ${language}]`;\n  }\n\n  return { json: { ...item.json, caption } };\n});\n\nreturn results;",
+      },
+      id: "439c4a44-f91f-47f4-adc4-9f98348c9e6e",
+      name: "Prepare Caption",
+      type: "n8n-nodes-base.code",
+      typeVersion: 2,
+      position: [-1920, 304],
+    },
+    {
+      parameters: {
+        method: "POST",
+        url: "https://prosocial-two.vercel.app/api/auto-post/update",
+        sendHeaders: true,
+        headerParameters: { parameters: [{ name: "x-api-key", value: "ProsocialN8NSecret2026" }] },
+        sendBody: true,
+        specifyBody: "json",
+        jsonBody:
+          '={\n  "configId": "{{ $json.webhookData.body.configId }}",\n  "autoPostStatus": "running",\n  "currentJobStatus": "processing",\n  "message": "Posting to Facebook page",\n  "source": "n8n"\n}',
+        options: {},
+      },
+      id: "29c8c637-e8ed-4f33-a42e-332ea44bc2ed",
+      name: "Send Posting Status",
+      type: "n8n-nodes-base.httpRequest",
+      typeVersion: 4.4,
+      position: [-1696, 304],
+      onError: "continueRegularOutput",
+    },
+    {
+      parameters: {
+        url: "https://graph.facebook.com/v21.0/me/accounts",
+        authentication: "predefinedCredentialType",
+        nodeCredentialType: "facebookGraphApi",
+        options: { response: { response: { fullResponse: true } } },
+      },
+      id: "b55c3d6f-3421-47fd-93f8-014849cd8e25",
+      name: "Get Page Access Token",
+      type: "n8n-nodes-base.httpRequest",
+      typeVersion: 4.4,
+      position: [-1472, 304],
+      credentials: { facebookGraphApi: { id: "bVRlf1avFiKcwWsd", name: "Facebook Graph account" } },
+    },
+    {
+      parameters: {
+        jsCode:
+          "const accountsResponse = $('Get Page Access Token').first().json.body || {};\nconst pageAccounts = Array.isArray(accountsResponse.data) ? accountsResponse.data : [];\n\nconst sourceItems = $('Prepare Caption').all();\n\nif (!pageAccounts.length) {\n  throw new Error('No pages returned from Get Page Access Token');\n}\n\nif (!sourceItems.length) {\n  throw new Error('No items returned from Prepare Caption');\n}\n\nconst results = sourceItems.map((item) => {\n  const source = item.json || {};\n  const targetPageId = String(source.pageId || '').trim();\n\n  if (!targetPageId) {\n    throw new Error('Missing pageId in Prepare Caption item');\n  }\n\n  const matchedPage = pageAccounts.find((page) => String(page.id) === targetPageId);\n\n  if (!matchedPage) {\n    const availablePages = pageAccounts.map((page) => ({\n      id: String(page.id),\n      name: page.name || '',\n    }));\n\n    throw new Error(\n      `Page ID ${targetPageId} not found in /me/accounts. Available pages: ${JSON.stringify(availablePages)}`\n    );\n  }\n\n  return {\n    json: {\n      ...source,\n      pageAccessToken: matchedPage.access_token,\n      pageName: matchedPage.name || '',\n      facebookPageId: String(matchedPage.id),\n    },\n  };\n});\n\nreturn results;",
+      },
+      id: "806564ad-ae51-4bb0-87b1-fb0a638a6027",
+      name: "Extract Page Token",
+      type: "n8n-nodes-base.code",
+      typeVersion: 2,
+      position: [-1248, 304],
+    },
+    {
+      parameters: { operation: "download", fileId: { __rl: true, mode: "id", value: "={{ $json.image.id }}" }, options: {} },
+      id: "a3ca9fc3-afc0-4b19-bd62-33be43e327e8",
+      name: "Download Image Binary",
+      type: "n8n-nodes-base.googleDrive",
+      typeVersion: 3,
+      position: [-1024, 416],
+      credentials: { googleDriveOAuth2Api: { id: "uSfaMfe1demTqFLf", name: "Google Drive OAuth2 API" } },
+    },
+    {
+      parameters: {
+        promptType: "define",
+        text: "={{ $binary.data }}",
+        options: {
+          systemMessage:
+            "ดูภาพนี้แล้วเขียนแคปชั่นภาษาไทยสำหรับโพสต์ Facebook 1 ข้อความ\nให้เหมาะกับภาพนี้ อ่านเป็นธรรมชาติ กระชับ ไม่ยาวเกินไป\nถ้าเป็นภาพคำคม ให้คงอารมณ์ของข้อความในภาพ\nถ้าเป็นภาพทั่วไป ให้เขียนแคปชั่นชวนอ่านหรือชวนมีส่วนร่วม\nตอบกลับมาเป็นข้อความ caption อย่างเดียว ไม่ต้องใส่เครื่องหมายคำพูด",
+        },
+      },
+      id: "12f32a46-106e-4233-87b3-b29dae3bcc2d",
+      name: "Generate Caption From Image",
+      type: "@n8n/n8n-nodes-langchain.agent",
+      typeVersion: 3.1,
+      position: [-800, 592],
+    },
+    {
+      parameters: { model: { __rl: true, mode: "id", value: "gpt-4o" }, responsesApiEnabled: false, options: { temperature: 0.7 } },
+      id: "7698deb6-d596-4d9e-90cf-d68cf9f1d66a",
+      name: "OpenAI Vision Model",
+      type: "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      typeVersion: 1.3,
+      position: [-736, 816],
+      credentials: { openAiApi: { id: "YLni9879Hit4p0qc", name: "OpenAI account" } },
+    },
+    {
+      parameters: { mode: "combine", combineBy: "combineByPosition", options: {} },
+      id: "d1418175-a78b-4783-b6fc-ef829cef0f30",
+      name: "Merge AI Output With Source Data",
+      type: "n8n-nodes-base.merge",
+      typeVersion: 3.2,
+      position: [-448, 80],
+    },
+    {
+      parameters: {
+        conditions: {
+          options: { caseSensitive: true, leftValue: "", typeValidation: "strict", version: 3 },
+          conditions: [{ id: "id-1", leftValue: "={{ $json.output }}", operator: { type: "string", operation: "notEmpty" } }],
+          combinator: "and",
+        },
+        options: {},
+      },
+      id: "562f74dd-56a7-4f8d-8993-733b5f2589ff",
+      name: "Check AI Caption Success",
+      type: "n8n-nodes-base.if",
+      typeVersion: 2.3,
+      position: [-224, 80],
+    },
+    {
+      parameters: {
+        assignments: {
+          assignments: [
+            { id: "id-1", name: "caption", value: "={{ $json.output }}", type: "string" },
+            { id: "id-2", name: "pageId", value: "={{ $json.pageId }}", type: "string" },
+            { id: "id-3", name: "image", value: "={{ $json.image }}", type: "object" },
+            { id: "id-4", name: "webhookData", value: "={{ $json.webhookData }}", type: "object" },
+            { id: "id-5", name: "pageAccessToken", value: "={{ $json.pageAccessToken }}", type: "string" },
+            { id: "id-6", name: "pageName", value: "={{ $json.pageName }}", type: "string" },
+            { id: "id-7", name: "facebookPageId", value: "={{ $json.facebookPageId }}", type: "string" },
+          ],
+        },
+        options: {},
+      },
+      id: "a041f2ef-6abb-499a-9f33-6b5366ceaa6c",
+      name: "Use AI Caption",
+      type: "n8n-nodes-base.set",
+      typeVersion: 3.4,
+      position: [0, 0],
+    },
+    {
+      parameters: {
+        assignments: {
+          assignments: [
+            { id: "id-1", name: "caption", value: "={{ $json.caption }}", type: "string" },
+            { id: "id-2", name: "pageId", value: "={{ $json.pageId }}", type: "string" },
+            { id: "id-3", name: "image", value: "={{ $json.image }}", type: "object" },
+            { id: "id-4", name: "webhookData", value: "={{ $json.webhookData }}", type: "object" },
+            { id: "id-5", name: "pageAccessToken", value: "={{ $json.pageAccessToken }}", type: "string" },
+            { id: "id-6", name: "pageName", value: "={{ $json.pageName }}", type: "string" },
+            { id: "id-7", name: "facebookPageId", value: "={{ $json.facebookPageId }}", type: "string" },
+          ],
+        },
+        options: {},
+      },
+      id: "9aecf337-85f5-4f53-a2df-5bfa53865bf1",
+      name: "Use Fallback Caption",
+      type: "n8n-nodes-base.set",
+      typeVersion: 3.4,
+      position: [0, 192],
+    },
+    {
+      parameters: { mode: "append", numberInputs: 2 },
+      id: "9650afbc-3351-48df-b776-c58eef392811",
+      name: "Merge Final Caption",
+      type: "n8n-nodes-base.merge",
+      typeVersion: 3.2,
+      position: [224, 80],
+    },
+    {
+      parameters: { mode: "combine", combineBy: "combineByPosition", options: {} },
+      id: "70c5a5c1-69f8-4108-bceb-5aebbbad7418",
+      name: "Merge Caption With Binary",
+      type: "n8n-nodes-base.merge",
+      typeVersion: 3.2,
+      position: [448, 80],
+    },
+    {
+      parameters: {
+        httpRequestMethod: "POST",
+        graphApiVersion: "v21.0",
+        node: "={{ $json.pageId }}",
+        edge: "photos",
+        sendBinaryData: true,
+        binaryPropertyName: "data",
+        options: {
+          queryParameters: {
+            parameter: [
+              { name: "message", value: "={{ $json.caption }}" },
+              { name: "access_token", value: "={{ $json.pageAccessToken }}" },
+            ],
+          },
+        },
+      },
+      id: "9c7c54c5-ccb2-4e69-b925-2ec46c22778d",
+      name: "Post to Facebook Page",
+      type: "n8n-nodes-base.facebookGraphApi",
+      typeVersion: 1,
+      position: [672, 80],
+      credentials: { facebookGraphApi: { id: "bVRlf1avFiKcwWsd", name: "Facebook Graph account" } },
+      onError: "continueRegularOutput",
+    },
+    {
+      parameters: { mode: "combine", combineBy: "combineByPosition", options: {} },
+      id: "191e95dc-41cf-4cac-8ddc-31a1c0c38c96",
+      name: "Merge Post Result with Caption Data",
+      type: "n8n-nodes-base.merge",
+      typeVersion: 3.2,
+      position: [896, 768],
+    },
+    {
+      parameters: {
+        conditions: {
+          options: { caseSensitive: true, leftValue: "", typeValidation: "strict", version: 3 },
+          conditions: [{ id: "id-1", leftValue: "={{ $json.statusCode }}", rightValue: 200, operator: { type: "number", operation: "equals" } }],
+          combinator: "and",
+        },
+        options: {},
+      },
+      id: "eccc2402-db66-4e11-87f9-cc2af882747c",
+      name: "Check Post Success",
+      type: "n8n-nodes-base.if",
+      typeVersion: 2.3,
+      position: [1120, 768],
+    },
+    {
+      parameters: {
+        method: "POST",
+        url: "https://prosocial-two.vercel.app/api/auto-post/update",
+        sendHeaders: true,
+        headerParameters: { parameters: [{ name: "x-api-key", value: "ProsocialN8NSecret2026" }] },
+        sendBody: true,
+        specifyBody: "json",
+        jsonBody:
+          '={\n  "configId": "{{ $json.webhookData.body.configId }}",\n  "autoPostStatus": "running",\n  "currentJobStatus": "failed",\n  "message": "Posting failed",\n  "source": "n8n",\n  "pageId": "{{ $json.pageId }}",\n  "imageUsed": "{{ $json.image.id }}"\n}',
+        options: {},
+      },
+      id: "2b6e2a7f-7b1d-47ff-a812-d46d8a5e866a",
+      name: "Send Failed Status",
+      type: "n8n-nodes-base.httpRequest",
+      typeVersion: 4.4,
+      position: [1344, 80],
+      onError: "continueRegularOutput",
+    },
+    {
+      parameters: {
+        method: "POST",
+        url: "https://prosocial-two.vercel.app/api/auto-post/update",
+        sendHeaders: true,
+        headerParameters: { parameters: [{ name: "x-api-key", value: "ProsocialN8NSecret2026" }] },
+        sendBody: true,
+        specifyBody: "json",
+        jsonBody:
+          '={\n  "configId": "{{ $json.webhookData.body.configId }}",\n  "autoPostStatus": "running",\n  "currentJobStatus": "posted",\n  "message": "Post published successfully",\n  "source": "n8n",\n  "pageId": "{{ $json.pageId }}",\n  "imageUsed": "{{ $json.image.id }}"\n}',
+        options: {},
+      },
+      id: "b6e84bc5-b6a0-40b6-8711-64a14f2b0465",
+      name: "Send Success Status",
+      type: "n8n-nodes-base.httpRequest",
+      typeVersion: 4.4,
+      position: [1344, 816],
+      onError: "continueRegularOutput",
+    },
+    {
+      parameters: {
+        jsCode:
+          "const items = $input.all();\nif (!items.length) {\n  throw new Error('No post results to collect');\n}\nconst first = items[0].json || {};\nconst successCount = items.filter((item) => Number(item.json.statusCode) === 200).length;\nreturn [{\n  json: {\n    ...first,\n    totalResults: items.length,\n    successCount,\n    failedCount: items.length - successCount,\n  },\n}];",
+      },
+      id: "53f359e3-9ae5-413b-b360-1dd94481506d",
+      name: "Collect All Results",
+      type: "n8n-nodes-base.code",
+      typeVersion: 2,
+      position: [1568, 128],
+    },
+    {
+      parameters: {
+        jsCode:
+          "const intervalMinutes = $input.first().json.webhookData?.body?.intervalMinutes || 15;\nconst nextRunAt = new Date(Date.now() + intervalMinutes * 60 * 1000).toISOString();\nconst webhookData = $input.first().json.webhookData;\nreturn [{ json: { webhookData, nextRunAt } }];",
+      },
+      id: "ed2b282d-4342-4289-99aa-4b78be5e0f12",
+      name: "Compute Next Run",
+      type: "n8n-nodes-base.code",
+      typeVersion: 2,
+      position: [1792, 128],
+    },
+    {
+      parameters: {
+        method: "POST",
+        url: "https://prosocial-two.vercel.app/api/auto-post/update",
+        sendHeaders: true,
+        headerParameters: { parameters: [{ name: "x-api-key", value: "ProsocialN8NSecret2026" }] },
+        sendBody: true,
+        specifyBody: "json",
+        jsonBody:
+          '={\n  "configId": "{{ $json.webhookData.body.configId }}",\n  "autoPostStatus": "waiting",\n  "currentJobStatus": "pending",\n  "nextRunAt": "{{ $json.nextRunAt }}",\n  "message": "Waiting for next interval",\n  "source": "n8n"\n}',
+        options: {},
+      },
+      id: "232e00e2-0c90-4b38-82fd-f334ae36b25a",
+      name: "Send Waiting Status",
+      type: "n8n-nodes-base.httpRequest",
+      typeVersion: 4.4,
+      position: [2016, 128],
+      onError: "continueRegularOutput",
+    },
+    {
+      parameters: { amount: "={{ $json.webhookData.body.intervalMinutes }}", unit: "minutes" },
+      id: "50f92da7-ed4f-4f5c-82ba-0adf84573450",
+      name: "Wait for Next Round",
+      type: "n8n-nodes-base.wait",
+      typeVersion: 1.1,
+      position: [2240, 208],
+      webhookId: "b6a08075-e5bb-4e82-9f0d-b48cb3057280",
+    },
+  ],
+  connections: {
+    "Receive Auto-Post Command": { main: [[{ node: "Validate API Key", type: "main", index: 0 }]] },
+    "Validate API Key": {
+      main: [[{ node: "Route by Action Type", type: "main", index: 0 }, { node: "Respond Accepted", type: "main", index: 0 }]],
+    },
+    "Route by Action Type": {
+      main: [
+        [
+          { node: "Send Running Status", type: "main", index: 0 },
+          { node: "Shuffle Pages", type: "main", index: 0 },
+        ],
+        [{ node: "Send Pause Status", type: "main", index: 0 }],
+        [{ node: "Send Stop Status", type: "main", index: 0 }],
+      ],
+    },
+    "Shuffle Pages": {
+      main: [[{ node: "Fetch Drive Files", type: "main", index: 0 }, { node: "Merge Shuffled Data", type: "main", index: 1 }]],
+    },
+    "Fetch Drive Files": { main: [[{ node: "Shuffle Images", type: "main", index: 0 }]] },
+    "Shuffle Images": { main: [[{ node: "Merge Shuffled Data", type: "main", index: 0 }]] },
+    "Merge Shuffled Data": { main: [[{ node: "Build Page/Image Pairs", type: "main", index: 0 }]] },
+    "Build Page/Image Pairs": { main: [[{ node: "Prepare Caption", type: "main", index: 0 }]] },
+    "Prepare Caption": {
+      main: [[{ node: "Send Posting Status", type: "main", index: 0 }, { node: "Get Page Access Token", type: "main", index: 0 }]],
+    },
+    "Get Page Access Token": { main: [[{ node: "Extract Page Token", type: "main", index: 0 }]] },
+    "Extract Page Token": {
+      main: [[
+        { node: "Download Image Binary", type: "main", index: 0 },
+        { node: "Merge AI Output With Source Data", type: "main", index: 1 },
+        { node: "Merge Post Result with Caption Data", type: "main", index: 1 },
+      ]],
+    },
+    "Download Image Binary": {
+      main: [[
+        { node: "Generate Caption From Image", type: "main", index: 0 },
+        { node: "Merge Caption With Binary", type: "main", index: 0 },
+      ]],
+    },
+    "OpenAI Vision Model": { ai_languageModel: [[{ node: "Generate Caption From Image", type: "ai_languageModel", index: 0 }]] },
+    "Generate Caption From Image": { main: [[{ node: "Merge AI Output With Source Data", type: "main", index: 0 }]] },
+    "Merge AI Output With Source Data": { main: [[{ node: "Check AI Caption Success", type: "main", index: 0 }]] },
+    "Check AI Caption Success": {
+      main: [
+        [{ node: "Use AI Caption", type: "main", index: 0 }],
+        [{ node: "Use Fallback Caption", type: "main", index: 0 }],
+      ],
+    },
+    "Use AI Caption": { main: [[{ node: "Merge Final Caption", type: "main", index: 0 }]] },
+    "Use Fallback Caption": { main: [[{ node: "Merge Final Caption", type: "main", index: 1 }]] },
+    "Merge Final Caption": { main: [[{ node: "Merge Caption With Binary", type: "main", index: 1 }]] },
+    "Merge Caption With Binary": { main: [[{ node: "Post to Facebook Page", type: "main", index: 0 }]] },
+    "Post to Facebook Page": { main: [[{ node: "Merge Post Result with Caption Data", type: "main", index: 0 }]] },
+    "Merge Post Result with Caption Data": { main: [[{ node: "Check Post Success", type: "main", index: 0 }]] },
+    "Check Post Success": {
+      main: [
+        [
+          { node: "Send Success Status", type: "main", index: 0 },
+          { node: "Collect All Results", type: "main", index: 0 },
+        ],
+        [
+          { node: "Send Failed Status", type: "main", index: 0 },
+          { node: "Collect All Results", type: "main", index: 0 },
+        ],
+      ],
+    },
+    "Collect All Results": { main: [[{ node: "Compute Next Run", type: "main", index: 0 }]] },
+    "Compute Next Run": { main: [[{ node: "Send Waiting Status", type: "main", index: 0 }]] },
+    "Send Waiting Status": { main: [[{ node: "Wait for Next Round", type: "main", index: 0 }]] },
+    "Wait for Next Round": { main: [[{ node: "Shuffle Pages", type: "main", index: 0 }]] },
+  },
+  active: true,
+  settings: { executionOrder: "v1", binaryMode: "separate" },
+};
+
+process.stdout.write(JSON.stringify(workflow, null, 2));

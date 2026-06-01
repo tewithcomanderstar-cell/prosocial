@@ -1,0 +1,16 @@
+/workflows
+  facebook_automation_main.json
+  generate_ai_caption.json
+  publish_facebook_post.json
+/scripts
+  n8n_code_nodes.js
+/prompts
+  thai_prompt.txt
+  english_prompt.txt
+  bilingual_safe_prompt.txt
+/db
+  facebook_automation_schema.sql
+/config
+  .env.example
+/docs
+  REPO_STRUCTURE.txt

@@ -1,0 +1,1205 @@
+{
+  "name": "Next.js Auto Post System (Simplified Stable)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "auto-post",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-auto-post",
+      "name": "Receive Auto-Post Command",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -3200,
+        200
+      ],
+      "webhookId": "cb0469af-0b20-48cf-982f-a260a850c8de"
+    },
+    {
+      "parameters": {
+        "jsCode": "const apiKey = $input.item.json.headers['x-api-key'];\nif (apiKey !== 'ProsocialN8NSecret2026') {\n  throw new Error('Unauthorized');\n}\nreturn [$input.item];"
+      },
+      "id": "validate-api-key",
+      "name": "Validate API Key",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2960,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"ok\": true,\n  \"accepted\": true,\n  \"message\": \"Auto post workflow accepted\"\n}",
+        "options": {}
+      },
+      "id": "respond-accepted",
+      "name": "Respond Accepted",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        -2720,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.body.action }}",
+                    "rightValue": "start",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "action-start"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.body.action }}",
+                    "rightValue": "pause",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "action-pause"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.body.action }}",
+                    "rightValue": "stop",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "action-stop"
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "route-action",
+      "name": "Route by Action Type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        -2720,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://prosocial-two.vercel.app/api/auto-post/update",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "ProsocialN8NSecret2026"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"configId\": \"{{ $json.body.configId }}\",\n  \"autoPostStatus\": \"paused\",\n  \"currentJobStatus\": \"pending\",\n  \"message\": \"Auto post paused\",\n  \"source\": \"n8n\"\n}",
+        "options": {}
+      },
+      "id": "send-pause-status",
+      "name": "Send Pause Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -2480,
+        80
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://prosocial-two.vercel.app/api/auto-post/update",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "ProsocialN8NSecret2026"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"configId\": \"{{ $json.body.configId }}\",\n  \"autoPostStatus\": \"paused\",\n  \"currentJobStatus\": \"pending\",\n  \"message\": \"Auto post stopped\",\n  \"source\": \"n8n\"\n}",
+        "options": {}
+      },
+      "id": "send-stop-status",
+      "name": "Send Stop Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -2480,
+        200
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://prosocial-two.vercel.app/api/auto-post/update",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "ProsocialN8NSecret2026"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"configId\": \"{{ $json.body.configId }}\",\n  \"autoPostStatus\": \"running\",\n  \"currentJobStatus\": \"processing\",\n  \"message\": \"Auto post is running\",\n  \"source\": \"n8n\"\n}",
+        "options": {}
+      },
+      "id": "send-running-status",
+      "name": "Send Running Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -2480,
+        320
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const webhook = $('Receive Auto-Post Command').first().json || {};\nconst body = webhook.body || {};\nconst pageIds = Array.isArray(body.pageIds) ? [...body.pageIds] : [];\n\nif (!pageIds.length) {\n  throw new Error('No pageIds found in webhook body');\n}\n\nfor (let i = pageIds.length - 1; i > 0; i--) {\n  const j = Math.floor(Math.random() * (i + 1));\n  [pageIds[i], pageIds[j]] = [pageIds[j], pageIds[i]];\n}\n\nreturn [{ json: { pageIds, webhookData: webhook } }];"
+      },
+      "id": "shuffle-pages",
+      "name": "Shuffle Pages",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2480,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "searchMethod": "query",
+        "queryString": "(mimeType = 'image/jpeg' or mimeType = 'image/png') and trashed = false",
+        "returnAll": true,
+        "filter": {
+          "folderId": {
+            "__rl": true,
+            "value": "={{ $('Shuffle Pages').first().json.webhookData.body.folderId }}",
+            "mode": "id"
+          }
+        },
+        "options": {}
+      },
+      "id": "fetch-drive-files",
+      "name": "Fetch Drive Files",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -2240,
+        480
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "uSfaMfe1demTqFLf",
+          "name": "Google Drive OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const images = $input.all().map(item => item.json);\nfor (let i = images.length - 1; i > 0; i--) {\n  const j = Math.floor(Math.random() * (i + 1));\n  [images[i], images[j]] = [images[j], images[i]];\n}\nreturn images.map(img => ({ json: img }));"
+      },
+      "id": "shuffle-images",
+      "name": "Shuffle Images",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2000,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const pageData = $('Shuffle Pages').first().json || {};\nconst pageIds = Array.isArray(pageData.pageIds) ? pageData.pageIds : [];\nconst webhookData = pageData.webhookData || {};\nconst images = $('Shuffle Images').all().map((item) => item.json);\n\nif (!pageIds.length) {\n  throw new Error('No pageIds found in Shuffle Pages');\n}\n\nif (!images.length) {\n  throw new Error('No images found in Shuffle Images');\n}\n\nreturn pageIds.map((pageId, index) => ({\n  json: {\n    pageId,\n    image: images[index % images.length],\n    webhookData,\n  },\n}));"
+      },
+      "id": "build-page-image-pairs",
+      "name": "Build Page/Image Pairs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1760,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst firstItem = items[0]?.json || {};\nconst webhookData = firstItem.webhookData || {};\nconst captionStrategy = webhookData.body?.captionStrategy || 'manual';\nconst captions = webhookData.body?.captions || [];\nconst aiPrompt = webhookData.body?.aiPrompt || '';\nconst language = webhookData.body?.language || 'th';\n\nconst results = items.map((item) => {\n  let caption = 'Fresh update from Google Drive';\n\n  if ((captionStrategy === 'manual' || captionStrategy === 'hybrid') && captions.length > 0) {\n    caption = captions[Math.floor(Math.random() * captions.length)];\n  } else if (captionStrategy === 'ai' && aiPrompt) {\n    caption = `[AI Prompt: ${aiPrompt}, Language: ${language}]`;\n  }\n\n  return {\n    json: {\n      ...item.json,\n      caption,\n    },\n  };\n});\n\nreturn results;"
+      },
+      "id": "prepare-caption",
+      "name": "Prepare Caption",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1520,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://prosocial-two.vercel.app/api/auto-post/update",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "ProsocialN8NSecret2026"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"configId\": \"{{ $json.webhookData.body.configId }}\",\n  \"autoPostStatus\": \"running\",\n  \"currentJobStatus\": \"processing\",\n  \"message\": \"Posting to Facebook page\",\n  \"source\": \"n8n\"\n}",
+        "options": {}
+      },
+      "id": "send-posting-status",
+      "name": "Send Posting Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1520,
+        320
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://graph.facebook.com/v21.0/me/accounts",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "facebookGraphApi",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "get-page-access-token",
+      "name": "Get Page Access Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1280,
+        480
+      ],
+      "credentials": {
+        "facebookGraphApi": {
+          "id": "bVRlf1avFiKcwWsd",
+          "name": "Facebook Graph account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const accountsResponse = $('Get Page Access Token').first().json.body || {};\nconst pageAccounts = Array.isArray(accountsResponse.data) ? accountsResponse.data : [];\nconst sourceItems = $('Prepare Caption').all();\n\nif (!pageAccounts.length) {\n  throw new Error('No pages returned from Get Page Access Token');\n}\n\nif (!sourceItems.length) {\n  throw new Error('No items returned from Prepare Caption');\n}\n\nreturn sourceItems.map((item) => {\n  const source = item.json || {};\n  const targetPageId = String(source.pageId || '').trim();\n\n  if (!targetPageId) {\n    throw new Error('Missing pageId in Prepare Caption item');\n  }\n\n  const matchedPage = pageAccounts.find((page) => String(page.id) === targetPageId);\n\n  if (!matchedPage) {\n    const availablePages = pageAccounts.map((page) => ({ id: String(page.id), name: page.name || '' }));\n    throw new Error(`Page ID ${targetPageId} not found in /me/accounts. Available pages: ${JSON.stringify(availablePages)}`);\n  }\n\n  return {\n    json: {\n      ...source,\n      pageAccessToken: matchedPage.access_token,\n      pageName: matchedPage.name || '',\n      facebookPageId: String(matchedPage.id),\n    },\n  };\n});"
+      },
+      "id": "extract-page-token",
+      "name": "Extract Page Token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1040,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.image.id }}"
+        },
+        "options": {}
+      },
+      "id": "download-image-binary",
+      "name": "Download Image Binary",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -800,
+        560
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "uSfaMfe1demTqFLf",
+          "name": "Google Drive OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $binary.data }}",
+        "options": {
+          "systemMessage": "?????????????????????????????????????????? Facebook 1 ???????\n????????????????? ???????????????? ?????? ????????????\n?????????????? ??????????????????????????\n???????????????? ???????????????????????????????????????\n???????????????????? caption ?????????? ??????????????????????????"
+        }
+      },
+      "id": "generate-caption-from-image",
+      "name": "Generate Caption From Image",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        -800,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "id",
+          "value": "gpt-4o"
+        },
+        "responsesApiEnabled": false,
+        "options": {
+          "temperature": 0.7
+        }
+      },
+      "id": "openai-vision-model",
+      "name": "OpenAI Vision Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        -800,
+        160
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "YLni9879Hit4p0qc",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "id": "merge-ai-output",
+      "name": "Merge AI Output With Source Data",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -560,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "ai-output-not-empty",
+              "leftValue": "={{ $json.output }}",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-ai-caption-success",
+      "name": "Check AI Caption Success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -320,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "caption",
+              "value": "={{ $json.output }}",
+              "type": "string"
+            },
+            {
+              "id": "a2",
+              "name": "pageId",
+              "value": "={{ $json.pageId }}",
+              "type": "string"
+            },
+            {
+              "id": "a3",
+              "name": "image",
+              "value": "={{ $json.image }}",
+              "type": "object"
+            },
+            {
+              "id": "a4",
+              "name": "webhookData",
+              "value": "={{ $json.webhookData }}",
+              "type": "object"
+            },
+            {
+              "id": "a5",
+              "name": "pageAccessToken",
+              "value": "={{ $json.pageAccessToken }}",
+              "type": "string"
+            },
+            {
+              "id": "a6",
+              "name": "pageName",
+              "value": "={{ $json.pageName }}",
+              "type": "string"
+            },
+            {
+              "id": "a7",
+              "name": "facebookPageId",
+              "value": "={{ $json.facebookPageId }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "use-ai-caption",
+      "name": "Use AI Caption",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -80,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f1",
+              "name": "caption",
+              "value": "={{ $json.caption }}",
+              "type": "string"
+            },
+            {
+              "id": "f2",
+              "name": "pageId",
+              "value": "={{ $json.pageId }}",
+              "type": "string"
+            },
+            {
+              "id": "f3",
+              "name": "image",
+              "value": "={{ $json.image }}",
+              "type": "object"
+            },
+            {
+              "id": "f4",
+              "name": "webhookData",
+              "value": "={{ $json.webhookData }}",
+              "type": "object"
+            },
+            {
+              "id": "f5",
+              "name": "pageAccessToken",
+              "value": "={{ $json.pageAccessToken }}",
+              "type": "string"
+            },
+            {
+              "id": "f6",
+              "name": "pageName",
+              "value": "={{ $json.pageName }}",
+              "type": "string"
+            },
+            {
+              "id": "f7",
+              "name": "facebookPageId",
+              "value": "={{ $json.facebookPageId }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "use-fallback-caption",
+      "name": "Use Fallback Caption",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -80,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "append"
+      },
+      "id": "merge-final-caption",
+      "name": "Merge Final Caption",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        160,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "id": "merge-caption-binary",
+      "name": "Merge Caption With Binary",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        400,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "httpRequestMethod": "POST",
+        "graphApiVersion": "v21.0",
+        "node": "={{ $json.pageId }}",
+        "edge": "photos",
+        "sendBinaryData": true,
+        "binaryPropertyName": "data",
+        "options": {
+          "queryParameters": {
+            "parameter": [
+              {
+                "name": "message",
+                "value": "={{ $json.caption }}"
+              },
+              {
+                "name": "access_token",
+                "value": "={{ $json.pageAccessToken }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "post-facebook-page",
+      "name": "Post to Facebook Page",
+      "type": "n8n-nodes-base.facebookGraphApi",
+      "typeVersion": 1,
+      "position": [
+        640,
+        320
+      ],
+      "credentials": {
+        "facebookGraphApi": {
+          "id": "bVRlf1avFiKcwWsd",
+          "name": "Facebook Graph account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "id": "merge-post-result",
+      "name": "Merge Post Result with Caption Data",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        880,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "status-200",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 200,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-post-success",
+      "name": "Check Post Success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1120,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://prosocial-two.vercel.app/api/auto-post/update",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "ProsocialN8NSecret2026"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"configId\": \"{{ $json.webhookData.body.configId }}\",\n  \"autoPostStatus\": \"running\",\n  \"currentJobStatus\": \"posted\",\n  \"message\": \"Post published successfully\",\n  \"source\": \"n8n\",\n  \"pageId\": \"{{ $json.pageId }}\",\n  \"imageUsed\": \"{{ $json.image.id }}\"\n}",
+        "options": {}
+      },
+      "id": "send-success-status",
+      "name": "Send Success Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1360,
+        440
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://prosocial-two.vercel.app/api/auto-post/update",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "ProsocialN8NSecret2026"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"configId\": \"{{ $json.webhookData.body.configId }}\",\n  \"autoPostStatus\": \"running\",\n  \"currentJobStatus\": \"failed\",\n  \"message\": \"Posting failed\",\n  \"source\": \"n8n\",\n  \"pageId\": \"{{ $json.pageId }}\",\n  \"imageUsed\": \"{{ $json.image.id }}\"\n}",
+        "options": {}
+      },
+      "id": "send-failed-status",
+      "name": "Send Failed Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1360,
+        600
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst first = items[0]?.json || {};\nconst successCount = items.filter((item) => Number(item.json.statusCode) === 200).length;\nconst failedCount = items.length - successCount;\n\nreturn [{\n  json: {\n    ...first,\n    totalPosts: items.length,\n    successCount,\n    failedCount,\n    results: items.map((item) => item.json),\n  },\n}];"
+      },
+      "id": "collect-all-results",
+      "name": "Collect All Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1600,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const intervalMinutes = $input.first().json.webhookData?.body?.intervalMinutes || 15;\nconst nextRunAt = new Date(Date.now() + intervalMinutes * 60 * 1000).toISOString();\nconst current = $input.first().json || {};\n\nreturn [{\n  json: {\n    ...current,\n    nextRunAt,\n  },\n}];"
+      },
+      "id": "compute-next-run",
+      "name": "Compute Next Run",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1840,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://prosocial-two.vercel.app/api/auto-post/update",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "ProsocialN8NSecret2026"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"configId\": \"{{ $json.webhookData.body.configId }}\",\n  \"autoPostStatus\": \"waiting\",\n  \"currentJobStatus\": \"pending\",\n  \"nextRunAt\": \"{{ $json.nextRunAt }}\",\n  \"message\": \"Waiting for next interval\",\n  \"source\": \"n8n\"\n}",
+        "options": {}
+      },
+      "id": "send-waiting-status",
+      "name": "Send Waiting Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2080,
+        440
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "amount": "={{ $json.webhookData.body.intervalMinutes || 15 }}",
+        "unit": "minutes"
+      },
+      "id": "wait-next-round",
+      "name": "Wait for Next Round",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2080,
+        600
+      ],
+      "webhookId": "b6a08075-e5bb-4e82-9f0d-b48cb3057280"
+    }
+  ],
+  "connections": {
+    "Receive Auto-Post Command": {
+      "main": [
+        [
+          {
+            "node": "Validate API Key",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate API Key": {
+      "main": [
+        [
+          {
+            "node": "Route by Action Type",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Respond Accepted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Action Type": {
+      "main": [
+        [
+          {
+            "node": "Send Running Status",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Shuffle Pages",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Pause Status",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Stop Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shuffle Pages": {
+      "main": [
+        [
+          {
+            "node": "Fetch Drive Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Drive Files": {
+      "main": [
+        [
+          {
+            "node": "Shuffle Images",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shuffle Images": {
+      "main": [
+        [
+          {
+            "node": "Build Page/Image Pairs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Page/Image Pairs": {
+      "main": [
+        [
+          {
+            "node": "Prepare Caption",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Caption": {
+      "main": [
+        [
+          {
+            "node": "Send Posting Status",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Page Access Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Page Access Token": {
+      "main": [
+        [
+          {
+            "node": "Extract Page Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Page Token": {
+      "main": [
+        [
+          {
+            "node": "Download Image Binary",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge Post Result with Caption Data",
+            "type": "main",
+            "index": 1
+          },
+          {
+            "node": "Merge AI Output With Source Data",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Download Image Binary": {
+      "main": [
+        [
+          {
+            "node": "Generate Caption From Image",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge Caption With Binary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Vision Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Generate Caption From Image",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Caption From Image": {
+      "main": [
+        [
+          {
+            "node": "Merge AI Output With Source Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge AI Output With Source Data": {
+      "main": [
+        [
+          {
+            "node": "Check AI Caption Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check AI Caption Success": {
+      "main": [
+        [
+          {
+            "node": "Use AI Caption",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Use Fallback Caption",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Use AI Caption": {
+      "main": [
+        [
+          {
+            "node": "Merge Final Caption",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Use Fallback Caption": {
+      "main": [
+        [
+          {
+            "node": "Merge Final Caption",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Final Caption": {
+      "main": [
+        [
+          {
+            "node": "Merge Caption With Binary",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Caption With Binary": {
+      "main": [
+        [
+          {
+            "node": "Post to Facebook Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post to Facebook Page": {
+      "main": [
+        [
+          {
+            "node": "Merge Post Result with Caption Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Post Result with Caption Data": {
+      "main": [
+        [
+          {
+            "node": "Check Post Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Post Success": {
+      "main": [
+        [
+          {
+            "node": "Send Success Status",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Collect All Results",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Failed Status",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Collect All Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect All Results": {
+      "main": [
+        [
+          {
+            "node": "Compute Next Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Next Run": {
+      "main": [
+        [
+          {
+            "node": "Send Waiting Status",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Wait for Next Round",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Next Round": {
+      "main": [
+        [
+          {
+            "node": "Shuffle Pages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "simplified-fixed-v1",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "da0f770e8dcb997940f40865a6ba87bc8521c5bed4341e708c0a589f742a9fa3"
+  },
+  "id": "simplified-auto-post-workflow",
+  "tags": []
+}

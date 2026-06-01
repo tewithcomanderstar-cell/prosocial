@@ -8,6 +8,7 @@ import { enqueuePostJobsForPost, processQueuedJobs } from "@/lib/services/queue"
 import {
   buildShopeePostPackage,
   ensureShopeeAffiliateConfigured,
+  getShopeeCaptionProductName,
   logShopeeAutomationEvent,
   recordShopeeQueueItem,
   selectShopeeProductsForPages,
@@ -1332,6 +1333,7 @@ async function queueShopeeAutoPostsForConfig(
         contentHash,
         imageHash
       });
+      const captionProductName = getShopeeCaptionProductName(selected.product.productName);
       const post = await Post.create({
         userId: config.userId,
         title: `Shopee Affiliate ${selected.product.productName}`,
@@ -1360,7 +1362,7 @@ async function queueShopeeAutoPostsForConfig(
               autoPostConfigId: config._id,
               autoSource: "shopee-affiliate",
               shopeeProductId: selected.product.productId,
-              shopeeProductName: selected.product.productName,
+              shopeeProductName: captionProductName,
               shopeeProductScore: selected.score.productScore,
               shopeeSelectionReason: selected.score.reason,
               affiliateLink: packageResult.shortAffiliateLink,

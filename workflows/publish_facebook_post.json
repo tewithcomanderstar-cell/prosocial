@@ -1,0 +1,193 @@
+{
+  "name": "publish_facebook_post",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "1",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [-880, 300]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return [{ json: { ...$json, request_url: `${$env.FB_API_BASE || 'https://graph.facebook.com/v20.0'}/${$json.page.page_id}/photos`, request_body: { url: $json.image.source_url, caption: $json.caption_payload.final_caption_text, access_token: $json.page.page_access_token } } }];"
+      },
+      "id": "2",
+      "name": "Build Facebook Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-620, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.request_url }}",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "url", "value": "={{ $json.request_body.url }}" },
+            { "name": "caption", "value": "={{ $json.request_body.caption }}" },
+            { "name": "access_token", "value": "={{ $json.request_body.access_token }}" }
+          ]
+        },
+        "options": { "ignoreResponseCode": true, "timeout": 60000 }
+      },
+      "id": "3",
+      "name": "HTTP Request to Facebook Graph API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-360, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.body?.error?.code || $json.error?.code || '' }}",
+              "rightValue": "4|17|32|341|368",
+              "operator": { "type": "string", "operation": "regex" }
+            }
+          ],
+          "combinator": "or"
+        }
+      },
+      "id": "4",
+      "name": "Retryable Error?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-100, 300]
+    },
+    {
+      "parameters": { "amount": 30, "unit": "seconds" },
+      "id": "5",
+      "name": "Wait 30 Seconds",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [140, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.request_url }}",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "url", "value": "={{ $json.request_body.url }}" },
+            { "name": "caption", "value": "={{ $json.request_body.caption }}" },
+            { "name": "access_token", "value": "={{ $json.request_body.access_token }}" }
+          ]
+        },
+        "options": { "ignoreResponseCode": true, "timeout": 60000 }
+      },
+      "id": "6",
+      "name": "HTTP Retry Attempt 2",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [380, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.body?.error?.code || $json.error?.code || '' }}",
+              "rightValue": "4|17|32|341|368",
+              "operator": { "type": "string", "operation": "regex" }
+            }
+          ],
+          "combinator": "or"
+        }
+      },
+      "id": "7",
+      "name": "Retry Again?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [620, 200]
+    },
+    {
+      "parameters": { "amount": 90, "unit": "seconds" },
+      "id": "8",
+      "name": "Wait 90 Seconds",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [860, 120]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.request_url }}",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "url", "value": "={{ $json.request_body.url }}" },
+            { "name": "caption", "value": "={{ $json.request_body.caption }}" },
+            { "name": "access_token", "value": "={{ $json.request_body.access_token }}" }
+          ]
+        },
+        "options": { "ignoreResponseCode": true, "timeout": 60000 }
+      },
+      "id": "9",
+      "name": "HTTP Retry Attempt 3",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 120]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const result = $json;\\nconst successId = result.body?.id || result.id || null;\\nconst error = result.body?.error || result.error || null;\\nreturn [{ json: { ...$('Build Facebook Request').first().json, publish_success: Boolean(successId), external_post_id: successId, publish_error: error, raw_response: result } }];"
+      },
+      "id": "10",
+      "name": "Error handling branch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1360, 220]
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [[{ "node": "Build Facebook Request", "type": "main", "index": 0 }]]
+    },
+    "Build Facebook Request": {
+      "main": [[{ "node": "HTTP Request to Facebook Graph API", "type": "main", "index": 0 }]]
+    },
+    "HTTP Request to Facebook Graph API": {
+      "main": [[{ "node": "Retryable Error?", "type": "main", "index": 0 }]]
+    },
+    "Retryable Error?": {
+      "main": [
+        [{ "node": "Wait 30 Seconds", "type": "main", "index": 0 }],
+        [{ "node": "Error handling branch", "type": "main", "index": 0 }]
+      ]
+    },
+    "Wait 30 Seconds": {
+      "main": [[{ "node": "HTTP Retry Attempt 2", "type": "main", "index": 0 }]]
+    },
+    "HTTP Retry Attempt 2": {
+      "main": [[{ "node": "Retry Again?", "type": "main", "index": 0 }]]
+    },
+    "Retry Again?": {
+      "main": [
+        [{ "node": "Wait 90 Seconds", "type": "main", "index": 0 }],
+        [{ "node": "Error handling branch", "type": "main", "index": 0 }]
+      ]
+    },
+    "Wait 90 Seconds": {
+      "main": [[{ "node": "HTTP Retry Attempt 3", "type": "main", "index": 0 }]]
+    },
+    "HTTP Retry Attempt 3": {
+      "main": [[{ "node": "Error handling branch", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "versionId": "publish-facebook-post-v1",
+  "id": "publish_facebook_post"
+}

@@ -1,0 +1,304 @@
+{
+  "name": "facebook_automation_main",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "1",
+      "name": "Cron Trigger",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [-1200, 260]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const workflowName = 'facebook_automation_main';\\nconst cycleOwner = crypto.randomUUID();\\nconst driveFolderId = $env.DRIVE_FOLDER_ID || 'root';\\nconst lockTimeout = Number($env.LOCK_TIMEOUT || 900);\\nconst retryLimit = Number($env.RETRY_LIMIT || 3);\\nconst staggerBaseSeconds = Number($env.STAGGER_BASE_SECONDS || 45);\\nreturn [{ json: { workflow_name: workflowName, cycle_owner: cycleOwner, drive_folder_id: driveFolderId, lock_timeout: lockTimeout, retry_limit: retryLimit, stagger_base_seconds: staggerBaseSeconds, triggered_at: new Date().toISOString() } }];"
+      },
+      "id": "2",
+      "name": "Code (selection logic)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-980, 260]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO workflow_locks (lock_key, owner_id, workflow_name, acquired_at, heartbeat_at, expires_at, metadata)\\nVALUES (\\n  'facebook_automation_main',\\n  '{{ $json.cycle_owner }}'::uuid,\\n  '{{ $json.workflow_name }}',\\n  NOW(),\\n  NOW(),\\n  NOW() + (('{{ $json.lock_timeout }} seconds')::interval),\\n  jsonb_build_object('triggered_at', '{{ $json.triggered_at }}')\\n)\\nON CONFLICT (lock_key)\\nDO UPDATE SET\\n  owner_id = EXCLUDED.owner_id,\\n  workflow_name = EXCLUDED.workflow_name,\\n  acquired_at = NOW(),\\n  heartbeat_at = NOW(),\\n  expires_at = NOW() + (('{{ $json.lock_timeout }} seconds')::interval),\\n  metadata = workflow_locks.metadata || EXCLUDED.metadata\\nWHERE workflow_locks.expires_at <= NOW()\\nRETURNING lock_key, owner_id, workflow_name, expires_at;",
+        "additionalFields": {}
+      },
+      "id": "3",
+      "name": "Postgres (lock acquire)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [-760, 260],
+      "credentials": {
+        "postgres": {
+          "id": "postgres_main",
+          "name": "postgres_main"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT p.id, p.page_name, p.page_niche, p.language, p.tone, p.page_id, p.page_access_token, p.drive_folder_id, p.drive_folder_name, p.cooldown_hours, p.stagger_seconds, p.last_posted_at, p.platform_targets, p.metadata\\nFROM pages p\\nWHERE p.active = TRUE\\nORDER BY COALESCE(p.last_posted_at, TIMESTAMPTZ '1970-01-01') ASC, p.page_name ASC;",
+        "additionalFields": {}
+      },
+      "id": "4",
+      "name": "Postgres (load pages)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [-540, 260],
+      "credentials": {
+        "postgres": {
+          "id": "postgres_main",
+          "name": "postgres_main"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://www.googleapis.com/drive/v3/files",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "='{{ $items(\"Postgres (load pages)\").map(item => item.json.drive_folder_id).filter((v, i, a) => a.indexOf(v) === i).map(id => \"'\" + id + \"' in parents\").join(\" or \") }}' and trashed = false'"
+            },
+            {
+              "name": "fields",
+              "value": "files(id,name,mimeType,parents,webContentLink,thumbnailLink,imageMediaMetadata)"
+            },
+            {
+              "name": "pageSize",
+              "value": "200"
+            },
+            {
+              "name": "supportsAllDrives",
+              "value": "true"
+            },
+            {
+              "name": "includeItemsFromAllDrives",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "5",
+      "name": "HTTP (Google Drive list)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-320, 260],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "google_drive_main",
+          "name": "google_drive_main"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const response = $input.first().json;\\nconst files = Array.isArray(response.files) ? response.files : [];\\nconst allowed = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);\\nreturn files.filter(file => file && allowed.has(String(file.mimeType || '').toLowerCase())).map(file => ({ json: { drive_file_id: file.id, file_name: file.name, mime_type: file.mimeType, drive_folder_id: Array.isArray(file.parents) ? file.parents[0] : null, source_url: file.webContentLink || `https://drive.google.com/uc?id=${file.id}`, thumbnail_url: file.thumbnailLink || null, width: file.imageMediaMetadata?.width || null, height: file.imageMediaMetadata?.height || null } }));"
+      },
+      "id": "6",
+      "name": "Code (filter images)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-100, 260]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const pages = $('Postgres (load pages)').all().map(item => item.json);\\nconst mediaFiles = $('Code (filter images)').all().map(item => item.json);\\nconst control = $('Code (selection logic)').first().json;\\nif (!pages.length) return [];\\nfunction shuffle(array) { const copy = [...array]; for (let i = copy.length - 1; i > 0; i -= 1) { const j = Math.floor(Math.random() * (i + 1)); [copy[i], copy[j]] = [copy[j], copy[i]]; } return copy; }\\nconst groupedByFolder = mediaFiles.reduce((acc, file) => { const key = file.drive_folder_id || 'shared'; if (!acc[key]) acc[key] = []; acc[key].push(file); return acc; }, {});\\nconst sharedPool = [...(groupedByFolder.shared || []), ...(groupedByFolder.drive_shared || [])];\\nconst assignedInCycle = new Set();\\nconst assignments = [];\\nfor (let index = 0; index < pages.length; index += 1) { const page = pages[index]; const folderPool = groupedByFolder[page.drive_folder_id] || []; const eligible = shuffle([...folderPool, ...sharedPool]).filter(file => !assignedInCycle.has(file.drive_file_id)); const selected = eligible[0] || null; const delaySeconds = Math.max(0, Number(page.stagger_seconds || control.stagger_base_seconds || 0) * index); assignments.push({ json: { workflow_name: control.workflow_name, cycle_owner: control.cycle_owner, retry_limit: control.retry_limit, delaySeconds, page, image: selected, assignment_status: selected ? 'assigned' : 'skipped_no_media' } }); if (selected) assignedInCycle.add(selected.drive_file_id); }\\nreturn assignments;"
+      },
+      "id": "7",
+      "name": "Code (random unique assignment)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [140, 260]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "8",
+      "name": "Split In Batches (pages)",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [380, 260]
+    },
+    {
+      "parameters": {
+        "amount": "={{ $json.delaySeconds }}",
+        "unit": "seconds"
+      },
+      "id": "9",
+      "name": "Wait (stagger delay)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [620, 260]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OPENAI_API_BASE || 'https://api.openai.com/v1/chat/completions' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.OPENAI_API_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { model: $env.OPENAI_MODEL || 'gpt-4.1-mini', temperature: 0.8, response_format: { type: 'json_object' }, messages: [ { role: 'system', content: 'Return only valid JSON with keys hook, caption, cta, hashtags, confidence.' }, { role: 'user', content: `Image filename: ${$json.image?.file_name || 'N/A'}\\nFolder context: ${$json.page.drive_folder_name}\\nPage niche: ${$json.page.page_niche}\\nLanguage: ${$json.page.language}\\nTone: ${$json.page.tone}\\nOutput schema: {\"hook\":\"\",\"caption\":\"\",\"cta\":\"\",\"hashtags\":[],\"confidence\":0}` } ] } }}",
+        "options": { "timeout": 60000 }
+      },
+      "id": "10",
+      "name": "HTTP (AI caption)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [860, 260]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const source = $json;\\nconst assignment = $('Split In Batches (pages)').first().json;\\nlet parsed;\\ntry { const content = source.choices?.[0]?.message?.content || source.body?.choices?.[0]?.message?.content || source.caption_json || '{}'; parsed = typeof content === 'string' ? JSON.parse(content) : content; } catch { parsed = null; }\\nconst hashtags = Array.isArray(parsed?.hashtags) ? parsed.hashtags.filter(Boolean).slice(0, 8) : [];\\nconst hook = String(parsed?.hook || '').trim();\\nconst caption = String(parsed?.caption || '').trim();\\nconst cta = String(parsed?.cta || '').trim();\\nconst confidence = Number(parsed?.confidence ?? 0);\\nconst fallbackCaption = assignment.page.language === 'th' ? `ภาพใหม่สำหรับ ${assignment.page.page_name} พร้อมแชร์แล้ว ดูรายละเอียดเพิ่มเติมได้เลย` : `Fresh post for ${assignment.page.page_name}. Check it out and learn more.`;\\nconst safeCaption = [hook, caption || fallbackCaption, cta, hashtags.join(' ')].filter(Boolean).join('\\\\n\\\\n').slice(0, 2200);\\nreturn [{ json: { ...assignment, ai_raw: source, ai_valid: Boolean(caption || hook), caption_payload: { hook: hook || null, caption: caption || fallbackCaption, cta: cta || null, hashtags, confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : 0.25, final_caption_text: safeCaption } } }];"
+      },
+      "id": "11",
+      "name": "Code (validate AI output)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 260]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ `${$env.FB_API_BASE || 'https://graph.facebook.com/v20.0'}/${$json.page.page_id}/photos` }}",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "url", "value": "={{ $json.image?.source_url }}" },
+            { "name": "caption", "value": "={{ $json.caption_payload.final_caption_text }}" },
+            { "name": "access_token", "value": "={{ $json.page.page_access_token }}" }
+          ]
+        },
+        "options": { "ignoreResponseCode": true, "timeout": 60000 }
+      },
+      "id": "12",
+      "name": "HTTP (Facebook post)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 260]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH cycle AS (\\n  INSERT INTO workflow_cycles (workflow_name, status, total_pages_targeted, total_pages_posted, total_pages_failed, metadata)\\n  VALUES (\\n    '{{ $json.workflow_name }}',\\n    '{{ $json.image ? 'running' : 'skipped' }}',\\n    1,\\n    CASE WHEN '{{ $json.body?.id || $json.id || '' }}' <> '' THEN 1 ELSE 0 END,\\n    CASE WHEN '{{ $json.body?.id || $json.id || '' }}' <> '' THEN 0 ELSE 1 END,\\n    jsonb_build_object('cycle_owner', '{{ $json.cycle_owner }}')\\n  )\\n  RETURNING id\\n), post_row AS (\\n  INSERT INTO posts (\\n    workflow_cycle_id, page_id, media_asset_id, platform, external_post_id, status, caption_text,\\n    request_payload, response_payload, error_code, error_message, attempt_count, posted_at\\n  )\\n  VALUES (\\n    (SELECT id FROM cycle),\\n    '{{ $json.page.id }}'::uuid,\\n    COALESCE((SELECT id FROM media_assets WHERE drive_file_id = '{{ $json.image?.drive_file_id || '' }}'), NULL),\\n    'facebook',\\n    '{{ $json.body?.id || $json.id || '' }}',\\n    CASE WHEN '{{ $json.body?.id || $json.id || '' }}' <> '' THEN 'success' ELSE 'failure' END,\\n    $n8n$ {{ $json.caption_payload.final_caption_text }} $n8n$,\\n    jsonb_build_object('image_url', '{{ $json.image?.source_url || '' }}'),\\n    '{{ JSON.stringify($json) }}'::jsonb,\\n    '{{ $json.error?.code || $json.body?.error?.code || '' }}',\\n    $n8n$ {{ $json.error?.message || $json.body?.error?.message || '' }} $n8n$,\\n    1,\\n    CASE WHEN '{{ $json.body?.id || $json.id || '' }}' <> '' THEN NOW() ELSE NULL END\\n  )\\n  RETURNING id, workflow_cycle_id\\n)\\nINSERT INTO page_media_history (page_id, media_asset_id, workflow_cycle_id, post_id, assigned_at, posted_at, status)\\nVALUES (\\n  '{{ $json.page.id }}'::uuid,\\n  COALESCE((SELECT id FROM media_assets WHERE drive_file_id = '{{ $json.image?.drive_file_id || '' }}'), NULL),\\n  (SELECT workflow_cycle_id FROM post_row),\\n  (SELECT id FROM post_row),\\n  NOW(),\\n  CASE WHEN '{{ $json.body?.id || $json.id || '' }}' <> '' THEN NOW() ELSE NULL END,\\n  CASE WHEN '{{ $json.body?.id || $json.id || '' }}' <> '' THEN 'posted' ELSE 'failed' END\\n)\\nON CONFLICT DO NOTHING;",
+        "additionalFields": {}
+      },
+      "id": "13",
+      "name": "Postgres (log result)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1580, 260],
+      "credentials": {
+        "postgres": {
+          "id": "postgres_main",
+          "name": "postgres_main"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM workflow_locks\\nWHERE lock_key = 'facebook_automation_main'\\n  AND owner_id = '{{ $('Code (selection logic)').first().json.cycle_owner }}'::uuid\\nRETURNING lock_key;",
+        "additionalFields": {}
+      },
+      "id": "14",
+      "name": "Postgres (release lock)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [620, 520],
+      "credentials": {
+        "postgres": {
+          "id": "postgres_main",
+          "name": "postgres_main"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Cron Trigger": {
+      "main": [[{ "node": "Code (selection logic)", "type": "main", "index": 0 }]]
+    },
+    "Code (selection logic)": {
+      "main": [[{ "node": "Postgres (lock acquire)", "type": "main", "index": 0 }]]
+    },
+    "Postgres (lock acquire)": {
+      "main": [[{ "node": "Postgres (load pages)", "type": "main", "index": 0 }]]
+    },
+    "Postgres (load pages)": {
+      "main": [[{ "node": "HTTP (Google Drive list)", "type": "main", "index": 0 }]]
+    },
+    "HTTP (Google Drive list)": {
+      "main": [[{ "node": "Code (filter images)", "type": "main", "index": 0 }]]
+    },
+    "Code (filter images)": {
+      "main": [[{ "node": "Code (random unique assignment)", "type": "main", "index": 0 }]]
+    },
+    "Code (random unique assignment)": {
+      "main": [[{ "node": "Split In Batches (pages)", "type": "main", "index": 0 }]]
+    },
+    "Split In Batches (pages)": {
+      "main": [
+        [{ "node": "Wait (stagger delay)", "type": "main", "index": 0 }],
+        [{ "node": "Postgres (release lock)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Wait (stagger delay)": {
+      "main": [[{ "node": "HTTP (AI caption)", "type": "main", "index": 0 }]]
+    },
+    "HTTP (AI caption)": {
+      "main": [[{ "node": "Code (validate AI output)", "type": "main", "index": 0 }]]
+    },
+    "Code (validate AI output)": {
+      "main": [[{ "node": "HTTP (Facebook post)", "type": "main", "index": 0 }]]
+    },
+    "HTTP (Facebook post)": {
+      "main": [[{ "node": "Postgres (log result)", "type": "main", "index": 0 }]]
+    },
+    "Postgres (log result)": {
+      "main": [[{ "node": "Split In Batches (pages)", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "versionId": "fb-automation-main-v1",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "id": "facebook_automation_main"
+}
