@@ -16,6 +16,7 @@ import {
 } from "@/lib/services/shopee-affiliate";
 import { randomItem } from "@/lib/utils";
 import { ensureStorageBeforeAutoPost, mapStorageQuotaMessage } from "@/lib/services/storage-cleanup";
+import { normalizeTextEncoding, validateTextEncoding } from "@/lib/services/text-encoding";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
 import { Job } from "@/models/Job";
 import { Post } from "@/models/Post";
@@ -1264,6 +1265,43 @@ async function queueShopeeAutoPostsForConfig(
         });
         packageCache.set(packageCacheKey, packageResult);
       }
+      packageResult.caption = normalizeTextEncoding(packageResult.caption);
+      await logShopeeStep({
+        config,
+        step: "CAPTION_GENERATED",
+        status: "success",
+        message: "[Caption Generated] Shopee caption generated",
+        pageId: selected.pageId,
+        productId: selected.product.productId,
+        metadata: {
+          captionPreview: packageResult.caption.slice(0, 160),
+          captionLength: packageResult.caption.length
+        }
+      });
+      const captionEncodingValidation = validateTextEncoding(packageResult.caption, "Shopee caption");
+      if (!captionEncodingValidation.ok) {
+        await logShopeeStep({
+          config,
+          step: "ENCODING_ERROR_DETECTED",
+          status: "failed",
+          message: "[Encoding Error Detected] Caption contains corrupted UTF-8 and will not be queued",
+          pageId: selected.pageId,
+          productId: selected.product.productId,
+          metadata: {
+            markers: captionEncodingValidation.markers,
+            preview: captionEncodingValidation.preview
+          }
+        });
+        throw new Error(`Caption encoding validation failed: ${captionEncodingValidation.reasons.join("; ")}`);
+      }
+      await logShopeeStep({
+        config,
+        step: "UTF8_VALIDATION_PASSED",
+        status: "success",
+        message: "[UTF-8 Validation Passed] Caption is safe to save and publish",
+        pageId: selected.pageId,
+        productId: selected.product.productId
+      });
       await logShopeeStep({
         config,
         step: "VALIDATE_POST_PAYLOAD",

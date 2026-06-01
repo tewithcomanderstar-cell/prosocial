@@ -1,4 +1,4 @@
-﻿import crypto from "crypto";
+import crypto from "crypto";
 import {
   buildShopeeImagePromptSet as buildShopeeImagePromptSetCore,
   isShopeeProductNameDuplicateText,
@@ -8,6 +8,7 @@ import {
 import { generateFacebookContent, generateProductReferenceImage } from "@/lib/services/ai";
 import { assertNoLargeMongoFields, uploadAutoPostImage } from "@/lib/services/blob-storage";
 import { logAction } from "@/lib/services/logging";
+import { assertValidTextEncoding, normalizeTextEncoding, validateTextEncoding } from "@/lib/services/text-encoding";
 import { randomItem } from "@/lib/utils";
 import { AffiliateLink } from "@/models/AffiliateLink";
 import { AffiliatePerformance } from "@/models/AffiliatePerformance";
@@ -243,7 +244,7 @@ export class MockShopeeProvider implements ShopeeProductProvider {
   async fetchProducts(query: ProductDiscoveryQuery): Promise<ShopeeProductRecord[]> {
     const now = new Date();
     const sourceTag = query.sourceTag ?? "trending";
-    const keyword = query.keyword?.trim() || "Ã Â¸â€šÃ Â¸Â­Ã Â¸â€¡Ã Â¹Æ’Ã Â¸Å Ã Â¹â€°Ã Â¸Â¢Ã Â¸Â­Ã Â¸â€Ã Â¸â„¢Ã Â¸Â´Ã Â¸Â¢Ã Â¸Â¡";
+    const keyword = query.keyword?.trim() || "ของใช้ยอดนิยม";
     const category = query.category?.trim() || "Lifestyle";
     const limit = Math.max(1, Math.min(query.limit ?? 20, 50));
 
@@ -252,8 +253,8 @@ export class MockShopeeProvider implements ShopeeProductProvider {
         productId: "mock-thermal-cup",
         shopId: "10001",
         itemId: "90001",
-        productName: "Ã Â¹ÂÃ Â¸ÂÃ Â¹â€°Ã Â¸Â§Ã Â¹â‚¬Ã Â¸ÂÃ Â¹â€¡Ã Â¸Å¡Ã Â¸Â­Ã Â¸Â¸Ã Â¸â€œÃ Â¸Â«Ã Â¸Â Ã Â¸Â¹Ã Â¸Â¡Ã Â¸Â´Ã Â¸Å¾Ã Â¸ÂÃ Â¸Å¾Ã Â¸Â² 600ml",
-        productDescription: "Ã Â¹ÂÃ Â¸ÂÃ Â¹â€°Ã Â¸Â§Ã Â¸ÂªÃ Â¹ÂÃ Â¸â€¢Ã Â¸â„¢Ã Â¹â‚¬Ã Â¸Â¥Ã Â¸ÂªÃ Â¹â‚¬Ã Â¸ÂÃ Â¹â€¡Ã Â¸Å¡Ã Â¹â‚¬Ã Â¸Â¢Ã Â¹â€¡Ã Â¸â„¢/Ã Â¸Â£Ã Â¹â€°Ã Â¸Â­Ã Â¸â„¢ Ã Â¹â‚¬Ã Â¸Â«Ã Â¸Â¡Ã Â¸Â²Ã Â¸Â°Ã Â¸ÂÃ Â¸Â±Ã Â¸Å¡Ã Â¸Â­Ã Â¸Â­Ã Â¸Å¸Ã Â¸Å¸Ã Â¸Â´Ã Â¸Â¨ Ã Â¹â‚¬Ã Â¸â€Ã Â¸Â´Ã Â¸â„¢Ã Â¸â€”Ã Â¸Â²Ã Â¸â€¡ Ã Â¹ÂÃ Â¸Â¥Ã Â¸Â°Ã Â¸ÂªÃ Â¸Â²Ã Â¸Â¢Ã Â¸â€žÃ Â¸Â²Ã Â¹â‚¬Ã Â¸Å¸Ã Â¹Ë†",
+        productName: "แก้วเก็บอุณหภูมิพกพา 600ml",
+        productDescription: "แก้วสแตนเลสเก็บเย็นและร้อน ฝาปิดแน่น พกไปทำงาน เดินทาง หรือคาเฟ่ได้สะดวก",
         productPrice: 299,
         discountPrice: 159,
         discountPercent: 47,
@@ -271,8 +272,8 @@ export class MockShopeeProvider implements ShopeeProductProvider {
         productId: "mock-mini-vacuum",
         shopId: "10002",
         itemId: "90002",
-        productName: "Ã Â¹â‚¬Ã Â¸â€žÃ Â¸Â£Ã Â¸Â·Ã Â¹Ë†Ã Â¸Â­Ã Â¸â€¡Ã Â¸â€Ã Â¸Â¹Ã Â¸â€Ã Â¸ÂÃ Â¸Â¸Ã Â¹Ë†Ã Â¸â„¢Ã Â¹â€žÃ Â¸Â£Ã Â¹â€°Ã Â¸ÂªÃ Â¸Â²Ã Â¸Â¢Ã Â¸Â¡Ã Â¸Â´Ã Â¸â„¢Ã Â¸Â´",
-        productDescription: "Ã Â¸â€šÃ Â¸â„¢Ã Â¸Â²Ã Â¸â€Ã Â¹â‚¬Ã Â¸Â¥Ã Â¹â€¡Ã Â¸Â Ã Â¹Æ’Ã Â¸Å Ã Â¹â€°Ã Â¸â€¡Ã Â¹Ë†Ã Â¸Â²Ã Â¸Â¢ Ã Â¹â‚¬Ã Â¸Â«Ã Â¸Â¡Ã Â¸Â²Ã Â¸Â°Ã Â¸ÂÃ Â¸Â±Ã Â¸Å¡Ã Â¹â€šÃ Â¸â€¢Ã Â¹Å Ã Â¸Â°Ã Â¸â€”Ã Â¸Â³Ã Â¸â€¡Ã Â¸Â²Ã Â¸â„¢ Ã Â¸Â£Ã Â¸â€“Ã Â¸Â¢Ã Â¸â„¢Ã Â¸â€¢Ã Â¹Å’ Ã Â¹ÂÃ Â¸Â¥Ã Â¸Â°Ã Â¸Â¡Ã Â¸Â¸Ã Â¸Â¡Ã Â¹â‚¬Ã Â¸Â¥Ã Â¹â€¡Ã Â¸Â Ã Â¹â€  Ã Â¹Æ’Ã Â¸â„¢Ã Â¸Å¡Ã Â¹â€°Ã Â¸Â²Ã Â¸â„¢",
+        productName: "เครื่องดูดฝุ่นไร้สายมินิ",
+        productDescription: "ขนาดเล็ก ใช้งานง่าย เหมาะกับโต๊ะทำงาน รถยนต์ และมุมเล็ก ๆ ในบ้าน",
         productPrice: 490,
         discountPrice: 249,
         discountPercent: 49,
@@ -290,8 +291,8 @@ export class MockShopeeProvider implements ShopeeProductProvider {
         productId: "mock-led-mirror",
         shopId: "10003",
         itemId: "90003",
-        productName: "Ã Â¸ÂÃ Â¸Â£Ã Â¸Â°Ã Â¸Ë†Ã Â¸ÂÃ Â¹ÂÃ Â¸â€¢Ã Â¹Ë†Ã Â¸â€¡Ã Â¸Â«Ã Â¸â„¢Ã Â¹â€°Ã Â¸Â²Ã Â¸Å¾Ã Â¸Â£Ã Â¹â€°Ã Â¸Â­Ã Â¸Â¡Ã Â¹â€žÃ Â¸Å¸ LED",
-        productDescription: "Ã Â¹â€žÃ Â¸Å¸Ã Â¸â„¢Ã Â¸Â¸Ã Â¹Ë†Ã Â¸Â¡ Ã Â¸â€ºÃ Â¸Â£Ã Â¸Â±Ã Â¸Å¡Ã Â¸Â¡Ã Â¸Â¸Ã Â¸Â¡Ã Â¹â€žÃ Â¸â€Ã Â¹â€° Ã Â¹â‚¬Ã Â¸Â«Ã Â¸Â¡Ã Â¸Â²Ã Â¸Â°Ã Â¸ÂÃ Â¸Â±Ã Â¸Å¡Ã Â¹â€šÃ Â¸â€¢Ã Â¹Å Ã Â¸Â°Ã Â¹â‚¬Ã Â¸â€žÃ Â¸Â£Ã Â¸Â·Ã Â¹Ë†Ã Â¸Â­Ã Â¸â€¡Ã Â¹ÂÃ Â¸â€ºÃ Â¹â€°Ã Â¸â€¡Ã Â¹ÂÃ Â¸Â¥Ã Â¸Â°Ã Â¸ÂªÃ Â¸Â²Ã Â¸Â¢Ã Â¹ÂÃ Â¸â€¢Ã Â¹Ë†Ã Â¸â€¡Ã Â¸Â«Ã Â¸â„¢Ã Â¹â€°Ã Â¸Â²",
+        productName: "กระจกแต่งหน้าพร้อมไฟ LED",
+        productDescription: "ไฟนุ่ม ปรับมุมได้ เหมาะกับโต๊ะเครื่องแป้งและการแต่งหน้าในห้อง",
         productPrice: 399,
         discountPrice: 219,
         discountPercent: 45,
@@ -309,8 +310,8 @@ export class MockShopeeProvider implements ShopeeProductProvider {
         productId: "mock-storage-box",
         shopId: "10004",
         itemId: "90004",
-        productName: "Ã Â¸ÂÃ Â¸Â¥Ã Â¹Ë†Ã Â¸Â­Ã Â¸â€¡Ã Â¸Ë†Ã Â¸Â±Ã Â¸â€Ã Â¸Â£Ã Â¸Â°Ã Â¹â‚¬Ã Â¸Å¡Ã Â¸ÂµÃ Â¸Â¢Ã Â¸Å¡Ã Â¸Â¥Ã Â¸Â´Ã Â¹â€°Ã Â¸â„¢Ã Â¸Å Ã Â¸Â±Ã Â¸ÂÃ Â¹ÂÃ Â¸Å¡Ã Â¸Å¡Ã Â¹Æ’Ã Â¸Âª",
-        productDescription: "Ã Â¸Å Ã Â¹Ë†Ã Â¸Â§Ã Â¸Â¢Ã Â¹ÂÃ Â¸Â¢Ã Â¸ÂÃ Â¸â€šÃ Â¸Â­Ã Â¸â€¡Ã Â¹â‚¬Ã Â¸Â¥Ã Â¹â€¡Ã Â¸Â Ã Â¹â€  Ã Â¹Æ’Ã Â¸Â«Ã Â¹â€°Ã Â¸Â«Ã Â¸Â¢Ã Â¸Â´Ã Â¸Å¡Ã Â¸â€¡Ã Â¹Ë†Ã Â¸Â²Ã Â¸Â¢ Ã Â¹â€šÃ Â¸â€¢Ã Â¹Å Ã Â¸Â°Ã Â¸â€Ã Â¸Â¹Ã Â¹â€šÃ Â¸Â¥Ã Â¹Ë†Ã Â¸â€¡Ã Â¸â€šÃ Â¸Â¶Ã Â¹â€°Ã Â¸â„¢ Ã Â¹â‚¬Ã Â¸Â«Ã Â¸Â¡Ã Â¸Â²Ã Â¸Â°Ã Â¸ÂÃ Â¸Â±Ã Â¸Å¡Ã Â¸Å¡Ã Â¹â€°Ã Â¸Â²Ã Â¸â„¢Ã Â¹ÂÃ Â¸Â¥Ã Â¸Â°Ã Â¸Â­Ã Â¸Â­Ã Â¸Å¸Ã Â¸Å¸Ã Â¸Â´Ã Â¸Â¨",
+        productName: "กล่องจัดระเบียบลิ้นชักแบบใส",
+        productDescription: "ช่วยแยกของเล็ก ๆ ให้หยิบง่าย โต๊ะดูโล่งขึ้น เหมาะกับบ้านและออฟฟิศ",
         productPrice: 199,
         discountPrice: 89,
         discountPercent: 55,
@@ -329,7 +330,7 @@ export class MockShopeeProvider implements ShopeeProductProvider {
     const keywordLower = keyword.toLowerCase();
     const filtered = samples.filter((product) => {
       const haystack = `${product.productName} ${product.productDescription} ${product.category}`.toLowerCase();
-      return !query.keyword || haystack.includes(keywordLower) || keywordLower.includes("Ã Â¸Â¢Ã Â¸Â­Ã Â¸â€Ã Â¸â„¢Ã Â¸Â´Ã Â¸Â¢Ã Â¸Â¡");
+      return !query.keyword || haystack.includes(keywordLower) || keywordLower.includes("ยอดนิยม");
     });
 
     return (filtered.length ? filtered : samples).slice(0, limit);
@@ -873,54 +874,54 @@ const TH = {
 };
 
 const SHOPEE_HARD_SELL_PATTERNS = [
-  /à¸ªà¸´à¸™à¸„à¹‰à¸²à¸„à¸¸à¸“à¸ à¸²à¸žà¸”à¸µ/gi,
-  /à¹‚à¸›à¸£à¹‚à¸¡à¸Šà¸±à¹ˆà¸™à¸ªà¸¸à¸”à¸„à¸¸à¹‰à¸¡/gi,
-  /à¸£à¸µà¸šà¸ªà¸±à¹ˆà¸‡à¸‹à¸·à¹‰à¸­/gi,
-  /à¸£à¸µà¸šà¸‹à¸·à¹‰à¸­à¸”à¹ˆà¸§à¸™/gi,
-  /à¹‚à¸›à¸£à¹‚à¸¡à¸Šà¸±à¹ˆà¸™à¸«à¹‰à¸²à¸¡à¸žà¸¥à¸²à¸”/gi,
-  /à¸£à¸µà¸šà¸à¸”à¸à¹ˆà¸­à¸™à¸«à¸¡à¸”/gi,
-  /à¸‚à¸­à¸‡à¸¡à¸±à¸™à¸•à¹‰à¸­à¸‡à¸¡à¸µ/gi,
-  /à¸‹à¸·à¹‰à¸­à¹€à¸¥à¸¢à¸•à¸­à¸™à¸™à¸µà¹‰/gi,
-  /à¸žà¸¥à¸²à¸”à¹„à¸¡à¹ˆà¹„à¸”à¹‰/gi,
-  /à¸¥à¸”à¸à¸£à¸°à¸«à¸™à¹ˆà¸³/gi,
-  /à¸„à¸¸à¹‰à¸¡à¸ªà¸¸à¸”/gi,
-  /à¸‚à¸²à¸¢à¸”à¸µà¸­à¸±à¸™à¸”à¸±à¸š\s*1/gi,
-  /à¸ªà¸´à¸™à¸„à¹‰à¸²à¸‚à¸²à¸¢à¸”à¸µà¸—à¸µà¹ˆà¸ªà¸¸à¸”/gi,
-  /à¸«à¹‰à¸²à¸¡à¸žà¸¥à¸²à¸”/gi
+  /สินค้าคุณภาพดี/gi,
+  /โปรโมชั่นสุดคุ้ม/gi,
+  /รีบสั่งซื้อ/gi,
+  /รีบซื้อด่วน/gi,
+  /โปรโมชั่นห้ามพลาด/gi,
+  /รีบกดก่อนหมด/gi,
+  /ของมันต้องมี/gi,
+  /ซื้อเลยตอนนี้/gi,
+  /พลาดไม่ได้/gi,
+  /ลดกระหน่ำ/gi,
+  /คุ้มสุด/gi,
+  /ขายดีอันดับ\s*1/gi,
+  /สินค้าขายดีที่สุด/gi,
+  /ห้ามพลาด/gi
 ];
 
 const SHOPEE_FORBIDDEN_OPENERS = [
-  /^à¹€à¸‚à¹‰à¸²à¹ƒà¸ˆà¹à¸¥à¹‰à¸§à¸§à¹ˆà¸²à¸—à¸³à¹„à¸¡/i,
-  /^à¸•à¸­à¸™à¹à¸£à¸à¸„à¸´à¸”à¸§à¹ˆà¸²/i,
-  /^à¸•à¸­à¸™à¹à¸£à¸à¹„à¸¡à¹ˆà¹„à¸”à¹‰/i,
-  /^à¸­à¸±à¸™à¸™à¸µà¹‰à¸„à¸·à¸­/i,
-  /^à¹€à¸«à¹‡à¸™à¸„à¸™à¸£à¸µà¸§à¸´à¸§à¹€à¸¢à¸­à¸°/i,
-  /^à¹ƒà¸Šà¹‰à¹à¸¥à¹‰à¸§à¹€à¸‚à¹‰à¸²à¹ƒà¸ˆà¹€à¸¥à¸¢/i,
-  /^à¸‚à¸­à¸‡à¸ˆà¸£à¸´à¸‡à¸ªà¸§à¸¢à¸à¸§à¹ˆà¸²/i,
-  /^à¹‚à¸„à¸•à¸£à¹€à¸«à¸¡à¸²à¸°à¸à¸±à¸š/i,
-  /^à¹ƒà¸„à¸£à¸à¸³à¸¥à¸±à¸‡à¸«à¸².*à¸¥à¸­à¸‡à¸”à¸¹à¸•à¸±à¸§à¸™à¸µà¹‰à¸à¹ˆà¸­à¸™/i,
+  /^เข้าใจแล้วว่าทำไม/i,
+  /^ตอนแรกคิดว่า/i,
+  /^ตอนแรกไม่ได้/i,
+  /^อันนี้คือ/i,
+  /^เห็นคนรีวิวเยอะ/i,
+  /^ใช้แล้วเข้าใจเลย/i,
+  /^ของจริงสวยกว่า/i,
+  /^โคตรเหมาะกับ/i,
+  /^ใครกำลังหา.*ลองดูตัวนี้ก่อน/i,
   /^Stop scrolling/i,
   /^Here are Shopee finds/i
 ];
 
 const SHOPEE_SOFT_CTAS = [
-  "ðŸ›’ à¸à¸”à¸”à¸¹à¸£à¸²à¸¢à¸¥à¸°à¹€à¸­à¸µà¸¢à¸”à¹€à¸žà¸´à¹ˆà¸¡à¹€à¸•à¸´à¸¡",
-  "ðŸ“Œ à¸”à¸¹à¸£à¸²à¸„à¸²à¹à¸¥à¸°à¹‚à¸›à¸£à¸¥à¹ˆà¸²à¸ªà¸¸à¸”",
-  "âœ¨ à¹€à¸‚à¹‰à¸²à¹„à¸›à¸”à¸¹à¸£à¸µà¸§à¸´à¸§à¹€à¸žà¸´à¹ˆà¸¡à¹€à¸•à¸´à¸¡à¹„à¸”à¹‰à¹€à¸¥à¸¢",
-  "ðŸŽ¯ à¹€à¸œà¸·à¹ˆà¸­à¸à¸³à¸¥à¸±à¸‡à¸¡à¸­à¸‡à¸«à¸²à¸ªà¸´à¸™à¸„à¹‰à¸²à¹à¸™à¸§à¸™à¸µà¹‰à¸­à¸¢à¸¹à¹ˆ",
-  "ðŸ’¥ à¸¥à¸­à¸‡à¸à¸”à¹€à¸‚à¹‰à¸²à¹„à¸›à¸”à¸¹à¸£à¸²à¸¢à¸¥à¸°à¹€à¸­à¸µà¸¢à¸”à¸à¹ˆà¸­à¸™à¸•à¸±à¸”à¸ªà¸´à¸™à¹ƒà¸ˆ",
-  "ðŸ›’ à¸à¸”à¸”à¸¹à¸£à¸²à¸¢à¸¥à¸°à¹€à¸­à¸µà¸¢à¸”à¹€à¸žà¸´à¹ˆà¸¡à¹€à¸•à¸´à¸¡à¹„à¸”à¹‰à¸—à¸µà¹ˆ",
-  "ðŸ“Œ à¸”à¸¹à¸£à¸²à¸„à¸²à¹à¸¥à¸°à¹‚à¸›à¸£à¸¥à¹ˆà¸²à¸ªà¸¸à¸”à¸—à¸µà¹ˆà¸¥à¸´à¸‡à¸à¹Œà¸”à¹‰à¸²à¸™à¸¥à¹ˆà¸²à¸‡",
-  "âœ¨ à¸¥à¸­à¸‡à¹€à¸‚à¹‰à¸²à¹„à¸›à¸”à¸¹à¸£à¸²à¸¢à¸¥à¸°à¹€à¸­à¸µà¸¢à¸”à¸à¹ˆà¸­à¸™à¸•à¸±à¸”à¸ªà¸´à¸™à¹ƒà¸ˆà¹„à¸”à¹‰à¹€à¸¥à¸¢",
-  "ðŸŽ¯ à¹€à¸œà¸·à¹ˆà¸­à¸à¸³à¸¥à¸±à¸‡à¸«à¸²à¸ªà¸´à¸™à¸„à¹‰à¸²à¹à¸™à¸§à¸™à¸µà¹‰à¸­à¸¢à¸¹à¹ˆ à¸¥à¸­à¸‡à¸”à¸¹à¹„à¸”à¹‰à¸„à¸£à¸±à¸š",
+  "🛒 กดดูรายละเอียดเพิ่มเติม",
+  "📌 ดูราคาและโปรล่าสุด",
+  "✨ เข้าไปดูรีวิวเพิ่มเติมได้เลย",
+  "🎯 เผื่อกำลังมองหาสินค้าแนวนี้อยู่",
+  "💥 ลองกดเข้าไปดูรายละเอียดก่อนตัดสินใจ",
+  "🛒 กดดูรายละเอียดเพิ่มเติมได้ที่",
+  "📌 ดูราคาและโปรล่าสุดที่ลิงก์ด้านล่าง",
+  "✨ ลองเข้าไปดูรายละเอียดก่อนตัดสินใจได้เลย",
+  "🎯 เผื่อกำลังหาสินค้าแนวนี้อยู่ ลองดูได้ครับ",
   TH.interestedCta,
   TH.detailsCta,
   TH.linkCta,
   TH.moreCta,
-  "à¹ƒà¸„à¸£à¸ªà¸™à¹ƒà¸ˆà¸¥à¸­à¸‡à¸”à¸¹à¸£à¸²à¸¢à¸¥à¸°à¹€à¸­à¸µà¸¢à¸”à¹„à¸”à¹‰à¸„à¸£à¸±à¸š"
+  "ใครสนใจลองดูรายละเอียดได้ครับ"
 ];
 
-const SHOPEE_HASHTAG_FALLBACKS = ["#Shopee", "#à¸‚à¸­à¸‡à¹ƒà¸Šà¹‰à¸”à¸µà¸šà¸­à¸à¸•à¹ˆà¸­"];
+const SHOPEE_HASHTAG_FALLBACKS = ["#Shopee", "#ของใช้ดีบอกต่อ"];
 
 const SHOPEE_GENERIC_CATEGORY_TERMS = new Set([
   "general",
@@ -933,12 +934,12 @@ const SHOPEE_GENERIC_CATEGORY_TERMS = new Set([
   "misc",
   "other",
   "others",
-  "à¸—à¸±à¹ˆà¸§à¹„à¸›",
-  "à¹„à¸¥à¸Ÿà¹Œà¸ªà¹„à¸•à¸¥à¹Œ",
-  "à¸„à¸§à¸²à¸¡à¸‡à¸²à¸¡",
-  "à¸«à¸¡à¸§à¸”à¸«à¸¡à¸¹à¹ˆ",
-  "à¸ªà¸´à¸™à¸„à¹‰à¸²",
-  "à¸šà¹‰à¸²à¸™"
+  "ทั่วไป",
+  "ไลฟ์สไตล์",
+  "ความงาม",
+  "หมวดหมู่",
+  "สินค้า",
+  "บ้าน"
 ]);
 
 const SHOPEE_FORBIDDEN_HASHTAGS = new Set([
@@ -952,15 +953,15 @@ const SHOPEE_FORBIDDEN_HASHTAGS = new Set([
 ]);
 
 const SHOPEE_MARKETPLACE_METRIC_PATTERNS = [
-  /à¸„à¸°à¹à¸™à¸™à¸£à¹‰à¸²à¸™/iu,
-  /à¸£à¹‰à¸²à¸™à¹„à¸”à¹‰à¸„à¸°à¹à¸™à¸™/iu,
-  /à¸„à¸°à¹à¸™à¸™à¸£à¸µà¸§à¸´à¸§/iu,
-  /à¸ˆà¸³à¸™à¸§à¸™à¸£à¸µà¸§à¸´à¸§/iu,
-  /à¸¢à¸­à¸”à¸‚à¸²à¸¢/iu,
-  /à¸‚à¸²à¸¢à¹à¸¥à¹‰à¸§/iu,
-  /à¸‚à¸²à¸¢à¹„à¸›à¹à¸¥à¹‰à¸§/iu,
-  /à¸‚à¸²à¸¢à¸”à¸µà¸­à¸±à¸™à¸”à¸±à¸š/iu,
-  /à¸­à¸±à¸™à¸”à¸±à¸š\s*1/iu,
+  /คะแนนร้าน/iu,
+  /ร้านได้คะแนน/iu,
+  /คะแนนรีวิว/iu,
+  /จำนวนรีวิว/iu,
+  /ยอดขาย/iu,
+  /ขายแล้ว/iu,
+  /ขายไปแล้ว/iu,
+  /ขายดีอันดับ/iu,
+  /อันดับ\s*1/iu,
   /bestseller/iu,
   /best\s*seller/iu,
   /review count/iu,
@@ -1150,23 +1151,23 @@ function extractHashtags(lines: string[], product?: ShopeeProductRecord) {
 }
 
 function hasSoftCta(caption: string) {
-  return /(à¸¥à¸­à¸‡à¸”à¸¹|à¸ªà¸™à¹ƒà¸ˆ|à¸£à¸²à¸¢à¸¥à¸°à¹€à¸­à¸µà¸¢à¸”|à¸¥à¸´à¸‡à¸à¹Œ|à¸¥à¸´à¸‡à¸„à¹Œ|à¹€à¸žà¸´à¹ˆà¸¡à¹€à¸•à¸´à¸¡|à¸”à¹‰à¸²à¸™à¸¥à¹ˆà¸²à¸‡|à¸à¸”à¸”à¸¹|à¸žà¸´à¸à¸±à¸”|à¸£à¸²à¸„à¸²|à¹‚à¸›à¸£à¸¥à¹ˆà¸²à¸ªà¸¸à¸”|Shopee|shopee|à¸”à¸¹à¹„à¸”à¹‰|à¸”à¸¹à¸•à¸±à¸§à¸™à¸µà¹‰|à¹„à¸”à¹‰à¸—à¸µà¹ˆ)/i.test(caption);
+  return /(ลองดู|สนใจ|รายละเอียด|ลิงก์|ลิงค์|เพิ่มเติม|ด้านล่าง|กดดู|พิกัด|ราคา|โปรล่าสุด|Shopee|shopee|ดูได้|ดูตัวนี้|ได้ที่)/i.test(normalizeTextEncoding(caption));
 }
 
 function formatShopeePrice(product?: ShopeeProductRecord) {
   const price = product?.discountPrice || product?.productPrice;
   if (!price || !Number.isFinite(price)) return "";
-  return `ðŸ’° à¸£à¸²à¸„à¸²à¹‚à¸›à¸£ ${new Intl.NumberFormat("th-TH", { maximumFractionDigits: 0 }).format(price)} à¸šà¸²à¸—`;
+  return `💰 ราคาโปร ${new Intl.NumberFormat("th-TH", { maximumFractionDigits: 0 }).format(price)} บาท`;
 }
 
 function isCategoryLikeShopeeFeature(value?: string, product?: ShopeeProductRecord) {
-  const cleaned = (value ?? "")
-    .replace(/^[*â€¢\-âœ…\s]+/, "")
+  const cleaned = normalizeTextEncoding(value ?? "")
+    .replace(/^[*•\-✅\s]+/, "")
     .replace(/^#+/, "")
-    .replace(/^(à¹€à¸«à¸¡à¸²à¸°à¸à¸±à¸šà¸«à¸¡à¸§à¸”|à¸«à¸¡à¸§à¸”|category|à¸«à¸¡à¸§à¸”à¸«à¸¡à¸¹à¹ˆ)\s*[:ï¼š]?\s*/i, "")
+    .replace(/^(เหมาะกับหมวด|หมวด|หมวดหมู่|category)\s*[:：]?\s*/i, "")
     .trim();
   if (!cleaned) return true;
-  if (/^(à¹€à¸«à¸¡à¸²à¸°à¸à¸±à¸šà¸«à¸¡à¸§à¸”|à¸«à¸¡à¸§à¸”|category|general|lifestyle|beauty|home|product)$/i.test(cleaned)) return true;
+  if (/^(เหมาะกับหมวด|หมวด|หมวดหมู่|category|general|lifestyle|beauty|home|product)$/i.test(cleaned)) return true;
   if (isGenericShopeeCategoryText(cleaned)) return true;
   if (product?.category && cleaned.toLowerCase() === product.category.trim().toLowerCase()) return true;
   return false;
@@ -1174,16 +1175,16 @@ function isCategoryLikeShopeeFeature(value?: string, product?: ShopeeProductReco
 
 function normalizeShopeeBullet(value: string, max = 86, product?: ShopeeProductRecord) {
   const cleaned = compactProductText(
-    value
-      .replace(/^[*â€¢\-âœ…\s]+/, "")
-      .replace(/^(à¸ˆà¸¸à¸”à¹€à¸”à¹ˆà¸™|à¸£à¸²à¸¢à¸¥à¸°à¹€à¸­à¸µà¸¢à¸”|feature|detail)\s*[:ï¼š]?\s*/i, "")
+    normalizeTextEncoding(value)
+      .replace(/^[*•\-✅\s]+/, "")
+      .replace(/^(จุดเด่น|รายละเอียด|feature|detail)\s*[:：]?\s*/i, "")
       .trim(),
     max
   );
   if (!cleaned) return "";
   if (SHOPEE_MARKETPLACE_METRIC_PATTERNS.some((pattern) => pattern.test(cleaned))) return "";
   if (isCategoryLikeShopeeFeature(cleaned, product)) return "";
-  return `âœ… ${cleaned}`;
+  return `✅ ${cleaned}`;
 }
 
 function stringifyShopeeMetadataValue(value: unknown): string[] {
@@ -1216,8 +1217,8 @@ function rotateShopeeFacts(items: string[], product: ShopeeProductRecord) {
 function collectShopeeProductFacts(product: ShopeeProductRecord) {
   const record = product as ShopeeProductRecord & Record<string, unknown>;
   const productName = product.productName || "";
-  const descriptionParts = (product.productDescription || "")
-    .split(/\r?\n|[.!?ã€‚]|[à¸¯à¹†]/)
+  const descriptionParts = normalizeTextEncoding(product.productDescription || "")
+    .split(/\r?\n|[.!?。]|[ฯๆ]/)
     .map((part) => compactProductText(part, 86))
     .filter((part): part is string => Boolean(part) && !isShopeeProductNameDuplicateText(part, productName));
   const metadataParts = ["productFeatures", "features", "specifications", "specs", "attributes", "variants"]
@@ -1237,7 +1238,7 @@ function collectShopeeProductFacts(product: ShopeeProductRecord) {
 }
 
 function formatShopeeShortLinkLine(shopeeShortUrl: string) {
-  return `ðŸ“ à¸žà¸´à¸à¸±à¸” ${shopeeShortUrl}`;
+  return `📍 พิกัด ${shopeeShortUrl}`;
 }
 
 function removeOldShopeeHookLines(lines: string[]) {
@@ -1254,25 +1255,25 @@ function stripShopeeLeadingEmoji(value: string) {
 }
 
 function buildShopeeProductHook(product: ShopeeProductRecord) {
-  const haystack = `${product.productName} ${product.productDescription || ""}`.toLowerCase();
-  if (/à¹„à¸«à¸¡à¸‚à¸±à¸”à¸Ÿà¸±à¸™|floss|dental|à¸Šà¹ˆà¸­à¸‡à¸›à¸²à¸|à¸Ÿà¸±à¸™/.test(haystack)) return randomText(["à¸‹à¸·à¹‰à¸­à¸„à¸£à¸±à¹‰à¸‡à¹€à¸”à¸µà¸¢à¸§à¹ƒà¸Šà¹‰à¹„à¸”à¹‰à¸™à¸²à¸™à¸«à¸¥à¸²à¸¢à¹€à¸”à¸·à¸­à¸™", "à¸à¸¥à¸²à¸¢à¹€à¸›à¹‡à¸™à¸‚à¸­à¸‡à¸—à¸µà¹ˆà¸«à¸¢à¸´à¸šà¹ƒà¸Šà¹‰à¸—à¸¸à¸à¸§à¸±à¸™"]);
-  if (/à¸à¸²à¸‡à¹€à¸à¸‡|short|sportswear|à¸§à¸´à¹ˆà¸‡|à¸à¸µà¸¬à¸²|à¸Ÿà¸´à¸•à¹€à¸™à¸ª/.test(haystack)) return randomText(["à¹ƒà¸ªà¹ˆà¸§à¸´à¹ˆà¸‡à¹à¸¥à¹‰à¸§à¸„à¸¥à¹ˆà¸­à¸‡à¸•à¸±à¸§à¸à¸§à¹ˆà¸²à¸—à¸µà¹ˆà¸„à¸´à¸”", "à¸œà¹‰à¸²à¹€à¸šà¸²à¸ˆà¸™à¹à¸—à¸šà¹„à¸¡à¹ˆà¸£à¸¹à¹‰à¸ªà¸¶à¸à¸§à¹ˆà¸²à¹ƒà¸ªà¹ˆ"]);
-  if (/à¹à¸à¹‰à¸§|tumbler|à¹€à¸à¹‡à¸šà¸„à¸§à¸²à¸¡à¹€à¸¢à¹‡à¸™|à¸™à¹‰à¸³à¹à¸‚à¹‡à¸‡|à¸‚à¸§à¸”à¸™à¹‰à¸³/.test(haystack)) return randomText(["à¸™à¹‰à¸³à¹à¸‚à¹‡à¸‡à¸¢à¸±à¸‡à¸­à¸¢à¸¹à¹ˆà¸«à¸¥à¸±à¸‡à¹€à¸¥à¸´à¸à¸‡à¸²à¸™", "à¸žà¸à¸­à¸­à¸à¹„à¸›à¸—à¸±à¹‰à¸‡à¸§à¸±à¸™à¹à¸¥à¹‰à¸§à¸¢à¸±à¸‡à¹€à¸¢à¹‡à¸™à¸­à¸¢à¸¹à¹ˆ"]);
-  if (/à¸à¸£à¸°à¹€à¸›à¹‹à¸²|bag|à¹€à¸›à¹‰|à¸„à¸²à¸”à¸­à¸|wallet/.test(haystack)) return randomText(["à¸Šà¹ˆà¸­à¸‡à¹€à¸à¹‡à¸šà¸‚à¸­à¸‡à¹€à¸¢à¸­à¸°à¸à¸§à¹ˆà¸²à¸—à¸µà¹ˆà¸„à¸´à¸”", "à¸«à¸¢à¸´à¸šà¸‚à¸­à¸‡à¸‡à¹ˆà¸²à¸¢à¸‚à¸¶à¹‰à¸™à¹€à¸§à¸¥à¸²à¸­à¸­à¸à¸ˆà¸²à¸à¸šà¹‰à¸²à¸™"]);
-  if (/à¸žà¸±à¸”à¸¥à¸¡|fan|à¸£à¸°à¸šà¸²à¸¢à¸­à¸²à¸à¸²à¸¨/.test(haystack)) return randomText(["à¸­à¸²à¸à¸²à¸¨à¸£à¹‰à¸­à¸™ à¹† à¸žà¸à¹„à¸§à¹‰à¸„à¸·à¸­à¸Šà¹ˆà¸§à¸¢à¹„à¸”à¹‰à¹€à¸¢à¸­à¸°", "à¸¥à¸¡à¹à¸£à¸‡à¸à¸§à¹ˆà¸²à¸‚à¸™à¸²à¸”à¸—à¸µà¹ˆà¹€à¸«à¹‡à¸™à¸ˆà¸£à¸´à¸‡"]);
-  if (/à¸£à¸­à¸‡à¹€à¸—à¹‰à¸²|shoe|sneaker|à¹à¸•à¸°/.test(haystack)) return randomText(["à¹ƒà¸ªà¹ˆà¹€à¸”à¸´à¸™à¸—à¸±à¹‰à¸‡à¸§à¸±à¸™à¹à¸¥à¹‰à¸§à¸¢à¸±à¸‡à¸ªà¸šà¸²à¸¢à¹€à¸—à¹‰à¸²", "à¹à¸¡à¸•à¸Šà¹Œà¸Šà¸¸à¸”à¸‡à¹ˆà¸²à¸¢à¸à¸§à¹ˆà¸²à¸—à¸µà¹ˆà¸„à¸´à¸”"]);
+  const haystack = normalizeTextEncoding(`${product.productName} ${product.productDescription || ""}`).toLowerCase();
+  if (/ไหมขัดฟัน|floss|dental|ช่องปาก|ฟัน/.test(haystack)) return randomText(["ซื้อครั้งเดียวใช้ได้นานหลายเดือน", "กลายเป็นของที่หยิบใช้ทุกวัน"]);
+  if (/กางเกง|short|sportswear|วิ่ง|กีฬา|ฟิตเนส/.test(haystack)) return randomText(["ใส่วิ่งแล้วคล่องตัวกว่าที่คิด", "ผ้าเบาจนแทบไม่รู้สึกว่าใส่"]);
+  if (/แก้ว|tumbler|เก็บความเย็น|น้ำแข็ง|ขวดน้ำ/.test(haystack)) return randomText(["น้ำแข็งยังอยู่หลังเลิกงาน", "พกออกไปทั้งวันแล้วยังเย็นอยู่"]);
+  if (/กระเป๋า|bag|เป้|คาดอก|wallet/.test(haystack)) return randomText(["ช่องเก็บของเยอะกว่าที่คิด", "หยิบของง่ายขึ้นเวลาออกจากบ้าน"]);
+  if (/พัดลม|fan|ระบายอากาศ/.test(haystack)) return randomText(["อากาศร้อน ๆ พกไว้คือช่วยได้เยอะ", "ลมแรงกว่าขนาดที่เห็นจริง"]);
+  if (/รองเท้า|shoe|sneaker|แตะ/.test(haystack)) return randomText(["ใส่เดินทั้งวันแล้วยังสบายเท้า", "แมตช์ชุดง่ายกว่าที่คิด"]);
 
   const fact = stripShopeeLeadingEmoji(collectShopeeProductFacts(product)[0] || "");
-  return fact ? compactProductText(`${fact} à¹ƒà¸Šà¹‰à¸‡à¸²à¸™à¸ˆà¸£à¸´à¸‡à¹à¸¥à¹‰à¸§à¸£à¸¹à¹‰à¸ªà¸¶à¸à¹„à¸”à¹‰`, 90) : "à¹€à¸¥à¸·à¸­à¸à¸ˆà¸²à¸à¸£à¸²à¸¢à¸¥à¸°à¹€à¸­à¸µà¸¢à¸”à¸ªà¸´à¸™à¸„à¹‰à¸²à¹à¸¥à¹‰à¸§à¸”à¸¹à¹ƒà¸Šà¹‰à¸‡à¸²à¸™à¹„à¸”à¹‰à¸ˆà¸£à¸´à¸‡";
+  return fact ? compactProductText(`${fact} ใช้งานจริงแล้วรู้สึกได้`, 90) : "เลือกจากรายละเอียดสินค้าแล้วดูใช้งานได้จริง";
 }
 
 function buildShopeeReviewFeeling(product: ShopeeProductRecord) {
   const facts = collectShopeeProductFacts(product).map((line) => stripShopeeLeadingEmoji(line));
-  const primaryFact = facts[0] || "à¹ƒà¸Šà¹‰à¸‡à¸²à¸™à¸‡à¹ˆà¸²à¸¢à¹ƒà¸™à¸Šà¸µà¸§à¸´à¸•à¸›à¸£à¸°à¸ˆà¸³à¸§à¸±à¸™";
+  const primaryFact = facts[0] || "ใช้งานง่ายในชีวิตประจำวัน";
   const templates = [
-    `${primaryFact} à¸Ÿà¸µà¸¥à¹ƒà¸Šà¹‰à¸‡à¸²à¸™à¸ˆà¸£à¸´à¸‡à¸„à¹ˆà¸­à¸™à¸‚à¹‰à¸²à¸‡à¹‚à¸­à¹€à¸„ à¹€à¸«à¸¡à¸²à¸°à¸à¸±à¸šà¸«à¸¢à¸´à¸šà¹ƒà¸Šà¹‰à¸šà¹ˆà¸­à¸¢ à¹†`,
-    `à¸ˆà¸¸à¸”à¸—à¸µà¹ˆà¸Šà¸­à¸šà¸„à¸·à¸­ ${primaryFact} à¹ƒà¸Šà¹‰à¹à¸¥à¹‰à¸§à¸£à¸¹à¹‰à¸ªà¸¶à¸à¸§à¹ˆà¸²à¸ªà¸°à¸”à¸§à¸à¸‚à¸¶à¹‰à¸™`,
-    `${primaryFact} à¸£à¸²à¸¢à¸¥à¸°à¹€à¸­à¸µà¸¢à¸”à¸”à¸¹à¸•à¸­à¸šà¹‚à¸ˆà¸—à¸¢à¹Œà¸„à¸™à¸—à¸µà¹ˆà¸­à¸¢à¸²à¸à¹„à¸”à¹‰à¸‚à¸­à¸‡à¹ƒà¸Šà¹‰à¹à¸šà¸šà¹„à¸¡à¹ˆà¸¢à¸¸à¹ˆà¸‡à¸¢à¸²à¸`
+    `${primaryFact} ฟีลใช้งานจริงค่อนข้างโอเค เหมาะกับหยิบใช้บ่อย ๆ`,
+    `จุดที่ชอบคือ ${primaryFact} ใช้แล้วรู้สึกว่าสะดวกขึ้น`,
+    `${primaryFact} รายละเอียดดูตอบโจทย์คนที่อยากได้ของใช้แบบไม่ยุ่งยาก`
   ];
   return compactProductText(randomText(templates), 170);
 }
@@ -1288,15 +1289,15 @@ export function buildShopeeFallbackCaption(product: ShopeeProductRecord, shopeeS
       "",
       buildShopeeProductHook(product),
       "",
-      `âœ¨ ${buildShopeeReviewFeeling(product)}`,
+      `✨ ${buildShopeeReviewFeeling(product)}`,
       "",
-      "ðŸ“Œ à¸ˆà¸¸à¸”à¹€à¸”à¹ˆà¸™à¸—à¸µà¹ˆà¸Šà¸­à¸š",
+      "📌 จุดเด่นที่ชอบ",
       "",
       ...buildShopeeDetailBullets(product),
       "",
       formatShopeePrice(product),
       "",
-      "ðŸ›’ à¸à¸”à¸”à¸¹à¸£à¸²à¸¢à¸¥à¸°à¹€à¸­à¸µà¸¢à¸”à¹€à¸žà¸´à¹ˆà¸¡à¹€à¸•à¸´à¸¡",
+      "🛒 กดดูรายละเอียดเพิ่มเติม",
       "",
       formatShopeeShortLinkLine(shopeeShortUrl),
       "",
@@ -1308,28 +1309,29 @@ export function buildShopeeFallbackCaption(product: ShopeeProductRecord, shopeeS
 }
 
 export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string, product?: ShopeeProductRecord) {
-  const cleanedCaption = removeMarketplaceMetricLines(removeHardSellPhrases(stripForbiddenAffiliateDisclosure(caption)))
+  const cleanedInput = normalizeTextEncoding(caption);
+  const cleanedCaption = removeMarketplaceMetricLines(removeHardSellPhrases(stripForbiddenAffiliateDisclosure(cleanedInput)))
     .replace(/https?:\/\/prosocial-app-theta\.vercel\.app\/\S+/gi, "")
     .replace(/https?:\/\/[^\s]*\/api\/s\/\S+/gi, "")
-    .replace(/(?:â”{3,}|[-=]{3,})/g, "")
+    .replace(/(?:━{3,}|[-=]{3,})/g, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
-  const rawLines = cleanedCaption
+  const rawLines = normalizeTextEncoding(cleanedCaption)
     .replace(/https?:\/\/[^\s]+/gi, (match) => (isShopeeShortLink(match) ? shopeeShortUrl : ""))
-    .replace(/à¸«à¸¡à¸²à¸¢à¹€à¸«à¸•à¸¸[^\n]*/gi, "")
+    .replace(/หมายเหตุ[^\n]*/gi, "")
     .replace(/affiliate/gi, "")
     .split(/\r?\n/)
-    .map((line) => line.trim())
+    .map((line) => normalizeTextEncoding(line).trim())
     .filter(
       (line) =>
         line &&
         !line.includes(shopeeShortUrl) &&
         !/^Shopee\s*Link\s*:/i.test(line) &&
-        !/^(?:ðŸ“\s*)?à¸žà¸´à¸à¸±à¸”/i.test(line) &&
-        !/^âœ¨\s*à¸„à¸§à¸²à¸¡à¸£à¸¹à¹‰à¸ªà¸¶à¸à¸«à¸¥à¸±à¸‡à¹ƒà¸Šà¹‰à¸‡à¸²à¸™/i.test(line) &&
-        !/^ðŸ›’\s*à¸à¸”à¸”à¸¹à¸£à¸²à¸¢à¸¥à¸°à¹€à¸­à¸µà¸¢à¸”/i.test(line) &&
-        !/^(?:ðŸ’°\s*)?à¸£à¸²à¸„à¸²(à¹‚à¸›à¸£)?\s*/i.test(line)
+        !/^(?:📍\s*)?พิกัด/i.test(line) &&
+        !/^✨\s*ความรู้สึกหลังใช้งาน/i.test(line) &&
+        !/^🛒\s*กดดูรายละเอียด/i.test(line) &&
+        !/^(?:💰\s*)?ราคา(โปร)?\s*/i.test(line)
     );
 
   const noOldHooks = removeOldShopeeHookLines(rawLines);
@@ -1342,7 +1344,7 @@ export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string, p
   const bodyLines = deDuplicatedContentLines
     .filter((line) => line !== productName && !isShopeeProductNameDuplicateText(line, productName))
     .slice(0, 10);
-  const isBullet = (line: string) => /^[*â€¢\-âœ…]/.test(line);
+  const isBullet = (line: string) => /^[*•\-✅]/.test(line);
 
   const aiReviewLine = bodyLines.find((line) => !isBullet(line) && !hasSoftCta(line) && !isCategoryLikeShopeeFeature(line, product) && !isShopeeProductNameDuplicateText(line, productName));
   const reviewLine = stripShopeeLeadingEmoji(
@@ -1357,8 +1359,8 @@ export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string, p
   const hookLine = isShopeeProductNameDuplicateText(rawHookLine, productName)
     ? stripShopeeProductNameFromText(rawHookLine, productName) || buildShopeeReviewFeeling(product ?? ({ productName } as ShopeeProductRecord))
     : rawHookLine;
-  const priceLine = formatShopeePrice(product);
-  const ctaLine = "ðŸ›’ à¸à¸”à¸”à¸¹à¸£à¸²à¸¢à¸¥à¸°à¹€à¸­à¸µà¸¢à¸”à¹€à¸žà¸´à¹ˆà¸¡à¹€à¸•à¸´à¸¡";
+  const priceLine = normalizeTextEncoding(formatShopeePrice(product));
+  const ctaLine = "🛒 กดดูรายละเอียดเพิ่มเติม";
   const spacedDetails = details.flatMap((line) => [line, ""]).slice(0, -1);
 
   const finalLines = [
@@ -1366,9 +1368,9 @@ export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string, p
     "",
     hookLine,
     "",
-    `âœ¨ ${reviewLine}`,
+    `✨ ${reviewLine}`,
     "",
-    "ðŸ“Œ à¸ˆà¸¸à¸”à¹€à¸”à¹ˆà¸™à¸—à¸µà¹ˆà¸Šà¸­à¸š",
+    "📌 จุดเด่นที่ชอบ",
     "",
     ...spacedDetails,
     ...(priceLine ? ["", priceLine] : []),
@@ -1380,7 +1382,10 @@ export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string, p
     safeHashtags.join(" ")
   ];
 
-  const normalizedCaption = finalLines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  const normalizedCaption = assertValidTextEncoding(
+    normalizeTextEncoding(finalLines.join("\n").replace(/\n{3,}/g, "\n\n").trim()),
+    "Shopee caption"
+  );
 
   if (normalizedCaption.length <= 700) {
     return normalizedCaption;
@@ -1389,14 +1394,14 @@ export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string, p
   const compactDetails = details.slice(0, 3).map((line) => normalizeShopeeBullet(line, 72, product)).filter(Boolean);
   const compactSpacedDetails = compactDetails.flatMap((line) => [line, ""]).slice(0, -1);
 
-  return [
+  const compactCaption = [
     productName,
     "",
     compactProductText(hookLine, 80),
     "",
-    `âœ¨ ${compactProductText(reviewLine, 120)}`,
+    `✨ ${compactProductText(reviewLine, 120)}`,
     "",
-    "ðŸ“Œ à¸ˆà¸¸à¸”à¹€à¸”à¹ˆà¸™à¸—à¸µà¹ˆà¸Šà¸­à¸š",
+    "📌 จุดเด่นที่ชอบ",
     "",
     ...compactSpacedDetails,
     ...(priceLine ? ["", priceLine] : []),
@@ -1410,6 +1415,7 @@ export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string, p
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+  return assertValidTextEncoding(normalizeTextEncoding(compactCaption), "Shopee compact caption");
 }
 export async function createOrReuseAffiliateShortLink(input: {
   userId: string;
@@ -1544,22 +1550,22 @@ export function scoreShopeeProduct(input: {
   const sales = product.salesCount ?? 0;
   if (sales >= 10000) {
     score += 18;
-    reason.push("Ã Â¸Â¢Ã Â¸Â­Ã Â¸â€Ã Â¸â€šÃ Â¸Â²Ã Â¸Â¢Ã Â¸ÂªÃ Â¸Â¹Ã Â¸â€¡Ã Â¸Â¡Ã Â¸Â²Ã Â¸Â");
+    reason.push("ยอดขายสูงมาก");
   } else if (sales >= 3000) {
     score += 12;
-    reason.push("Ã Â¸Â¢Ã Â¸Â­Ã Â¸â€Ã Â¸â€šÃ Â¸Â²Ã Â¸Â¢Ã Â¸â€Ã Â¸Âµ");
+    reason.push("ยอดขายดี");
   } else if (sales > 0) {
     score += 6;
-    reason.push("Ã Â¸Â¡Ã Â¸ÂµÃ Â¸ÂªÃ Â¸Â±Ã Â¸ÂÃ Â¸ÂÃ Â¸Â²Ã Â¸â€œÃ Â¸Â¢Ã Â¸Â­Ã Â¸â€Ã Â¸â€šÃ Â¸Â²Ã Â¸Â¢");
+    reason.push("มีสัญญาณยอดขาย");
   }
 
   const rating = product.rating ?? 0;
   if (rating >= 4.8) {
     score += 14;
-    reason.push("Ã Â¹â‚¬Ã Â¸Â£Ã Â¸â€¢Ã Â¸â€¢Ã Â¸Â´Ã Â¹â€°Ã Â¸â€¡Ã Â¸â€Ã Â¸ÂµÃ Â¸Â¡Ã Â¸Â²Ã Â¸Â");
+    reason.push("เรตติ้งดีมาก");
   } else if (rating >= 4.5) {
     score += 10;
-    reason.push("Ã Â¹â‚¬Ã Â¸Â£Ã Â¸â€¢Ã Â¸â€¢Ã Â¸Â´Ã Â¹â€°Ã Â¸â€¡Ã Â¸â€Ã Â¸Âµ");
+    reason.push("เรตติ้งดี");
   } else if (rating > 0 && rating < 4.2) {
     score -= 10;
     riskFlags.push("rating_low");
@@ -1568,38 +1574,38 @@ export function scoreShopeeProduct(input: {
   const discount = product.discountPercent ?? 0;
   if (discount >= 45) {
     score += 14;
-    reason.push("Ã Â¸ÂªÃ Â¹Ë†Ã Â¸Â§Ã Â¸â„¢Ã Â¸Â¥Ã Â¸â€Ã Â¹â‚¬Ã Â¸â€Ã Â¹Ë†Ã Â¸â„¢");
+    reason.push("ส่วนลดเด่น");
   } else if (discount >= 20) {
     score += 8;
-    reason.push("Ã Â¸Â¡Ã Â¸ÂµÃ Â¸ÂªÃ Â¹Ë†Ã Â¸Â§Ã Â¸â„¢Ã Â¸Â¥Ã Â¸â€Ã Â¸â„¢Ã Â¹Ë†Ã Â¸Â²Ã Â¸ÂªÃ Â¸â„¢Ã Â¹Æ’Ã Â¸Ë†");
+    reason.push("มีส่วนลดน่าสนใจ");
   }
 
   const commission = product.commissionRate ?? 0;
   if (commission >= 8) {
     score += 10;
-    reason.push("Ã Â¸â€žÃ Â¸Â­Ã Â¸Â¡Ã Â¸Â¡Ã Â¸Â´Ã Â¸Å Ã Â¸Å Ã Â¸Â±Ã Â¸â„¢Ã Â¸â€Ã Â¸Âµ");
+    reason.push("คอมมิชชันดี");
   } else if (commission >= 5) {
     score += 6;
-    reason.push("Ã Â¸â€žÃ Â¸Â­Ã Â¸Â¡Ã Â¸Â¡Ã Â¸Â´Ã Â¸Å Ã Â¸Å Ã Â¸Â±Ã Â¸â„¢Ã Â¹Æ’Ã Â¸Å Ã Â¹â€°Ã Â¹â€žÃ Â¸â€Ã Â¹â€°");
+    reason.push("คอมมิชชันใช้ได้");
   }
 
   if (product.sourceTag === "trending" || product.sourceTag === "best_selling") {
     score += 10;
-    reason.push(product.sourceTag === "trending" ? "Ã Â¸ÂªÃ Â¸Â´Ã Â¸â„¢Ã Â¸â€žÃ Â¹â€°Ã Â¸Â²Ã Â¸Â­Ã Â¸Â¢Ã Â¸Â¹Ã Â¹Ë†Ã Â¹Æ’Ã Â¸â„¢Ã Â¸ÂÃ Â¸Â£Ã Â¸Â°Ã Â¹ÂÃ Â¸Âª" : "Ã Â¸ÂªÃ Â¸Â´Ã Â¸â„¢Ã Â¸â€žÃ Â¹â€°Ã Â¸Â² best-selling");
+    reason.push(product.sourceTag === "trending" ? "สินค้าอยู่ในกระแส" : "สินค้า best-selling");
   }
 
   const reviews = product.reviewCount ?? 0;
   if (reviews >= 1000) {
     score += 8;
-    reason.push("Ã Â¸Â¡Ã Â¸ÂµÃ Â¸Â£Ã Â¸ÂµÃ Â¸Â§Ã Â¸Â´Ã Â¸Â§Ã Â¸Ë†Ã Â¸Â³Ã Â¸â„¢Ã Â¸Â§Ã Â¸â„¢Ã Â¸Â¡Ã Â¸Â²Ã Â¸Â");
+    reason.push("มีรีวิวจำนวนมาก");
   } else if (reviews >= 100) {
     score += 4;
-    reason.push("Ã Â¸Â¡Ã Â¸ÂµÃ Â¸Â£Ã Â¸ÂµÃ Â¸Â§Ã Â¸Â´Ã Â¸Â§Ã Â¸Å Ã Â¹Ë†Ã Â¸Â§Ã Â¸Â¢Ã Â¸â€ºÃ Â¸Â£Ã Â¸Â°Ã Â¸ÂÃ Â¸Â­Ã Â¸Å¡Ã Â¸ÂÃ Â¸Â²Ã Â¸Â£Ã Â¸â€¢Ã Â¸Â±Ã Â¸â€Ã Â¸ÂªÃ Â¸Â´Ã Â¸â„¢Ã Â¹Æ’Ã Â¸Ë†");
+    reason.push("มีรีวิวช่วยประกอบการตัดสินใจ");
   }
 
   if (input.categoryPriority?.includes(product.category)) {
     score += 7;
-    reason.push("Ã Â¸â€¢Ã Â¸Â£Ã Â¸â€¡Ã Â¸Â«Ã Â¸Â¡Ã Â¸Â§Ã Â¸â€Ã Â¸Â«Ã Â¸Â¡Ã Â¸Â¹Ã Â¹Ë†Ã Â¸â€”Ã Â¸ÂµÃ Â¹Ë†Ã Â¸â€¢Ã Â¸Â±Ã Â¹â€°Ã Â¸â€¡Ã Â¸â€žÃ Â¹Ë†Ã Â¸Â²Ã Â¹â€žÃ Â¸Â§Ã Â¹â€°");
+    reason.push("ตรงหมวดหมู่ที่ตั้งค่าไว้");
   }
 
   if (input.blockedCategories?.includes(product.category)) {
@@ -1624,7 +1630,7 @@ export function scoreShopeeProduct(input: {
 
   return {
     productScore: Math.max(0, Math.min(100, Math.round(score))),
-    reason: reason.length ? reason : ["Ã Â¸ÂªÃ Â¸Â´Ã Â¸â„¢Ã Â¸â€žÃ Â¹â€°Ã Â¸Â²Ã Â¸Â­Ã Â¸Â¢Ã Â¸Â¹Ã Â¹Ë†Ã Â¹Æ’Ã Â¸â„¢Ã Â¹â‚¬Ã Â¸ÂÃ Â¸â€œÃ Â¸â€˜Ã Â¹Å’Ã Â¸Å¾Ã Â¸Â·Ã Â¹â€°Ã Â¸â„¢Ã Â¸ÂÃ Â¸Â²Ã Â¸â„¢"],
+    reason: reason.length ? reason : ["สินค้าอยู่ในเกณฑ์พื้นฐาน"],
     riskFlags
   };
 }
@@ -1767,90 +1773,117 @@ export async function generateShopeeCaption(input: {
     : product.productPrice
       ? `\u0e23\u0e32\u0e04\u0e32: ${product.productPrice.toLocaleString("th-TH")} \u0e1a\u0e32\u0e17`
       : "\u0e23\u0e32\u0e04\u0e32: \u0e14\u0e39\u0e23\u0e32\u0e22\u0e25\u0e30\u0e40\u0e2d\u0e35\u0e22\u0e14\u0e43\u0e19\u0e25\u0e34\u0e07\u0e01\u0e4c";
-  const fallback = buildShopeeFallbackCaption(product, input.affiliateLink);
+  const fallback = assertValidTextEncoding(
+    normalizeTextEncoding(buildShopeeFallbackCaption(product, input.affiliateLink)),
+    "Shopee fallback caption"
+  );
   const productFactLines = collectShopeeProductFacts(product).map((line) => stripShopeeLeadingEmoji(line));
 
   const customPrompt = [
-    "à¹€à¸‚à¸µà¸¢à¸™à¹‚à¸žà¸ªà¸•à¹Œà¸£à¸µà¸§à¸´à¸§à¸ªà¸´à¸™à¸„à¹‰à¸² Shopee Affiliate à¸ªà¸³à¸«à¸£à¸±à¸š Facebook Page à¸•à¸²à¸¡ format à¸™à¸µà¹‰à¹€à¸—à¹ˆà¸²à¸™à¸±à¹‰à¸™",
+    "เขียนโพสต์รีวิวสินค้า Shopee Affiliate สำหรับ Facebook Page ตาม format นี้เท่านั้น",
     "",
     "FORMAT:",
     `${product.productName}`,
     "",
-    "{hook_line à¸—à¸µà¹ˆà¸­à¸´à¸‡à¸ˆà¸²à¸à¸ªà¸´à¸™à¸„à¹‰à¸²à¹‚à¸”à¸¢à¸•à¸£à¸‡ à¸«à¹‰à¸²à¸¡à¹ƒà¸Šà¹‰ hook à¸ªà¸³à¹€à¸£à¹‡à¸ˆà¸£à¸¹à¸›}",
+    "{hook_line ที่อิงจากสินค้าโดยตรง ห้ามใช้ hook สำเร็จรูป และห้ามพูดชื่อสินค้าซ้ำ}",
     "",
-    "âœ¨ {feeling_line à¸ à¸²à¸©à¸²à¸„à¸™à¸ˆà¸£à¸´à¸‡ 1 à¸šà¸£à¸£à¸—à¸±à¸” à¸­à¸´à¸‡à¸£à¸²à¸¢à¸¥à¸°à¹€à¸­à¸µà¸¢à¸”à¸ªà¸´à¸™à¸„à¹‰à¸²}",
+    "✨ {feeling_line ภาษาคนจริง 1 บรรทัด อิงรายละเอียดสินค้า}",
     "",
-    "ðŸ“Œ à¸ˆà¸¸à¸”à¹€à¸”à¹ˆà¸™à¸—à¸µà¹ˆà¸Šà¸­à¸š",
+    "📌 จุดเด่นที่ชอบ",
     "",
-    "âœ… {feature_1 à¸ˆà¸²à¸à¸‚à¹‰à¸­à¸¡à¸¹à¸¥à¸ªà¸´à¸™à¸„à¹‰à¸²à¸ˆà¸£à¸´à¸‡}",
+    "✅ {feature_1 จากข้อมูลสินค้าจริง ห้ามเป็น category}",
     "",
-    "âœ… {feature_2 à¸ˆà¸²à¸à¸‚à¹‰à¸­à¸¡à¸¹à¸¥à¸ªà¸´à¸™à¸„à¹‰à¸²à¸ˆà¸£à¸´à¸‡}",
+    "✅ {feature_2 จากข้อมูลสินค้าจริง ห้ามเป็น category}",
     "",
-    "âœ… {feature_3 à¸–à¹‰à¸²à¸¡à¸µà¸‚à¹‰à¸­à¸¡à¸¹à¸¥à¸ˆà¸£à¸´à¸‡}",
+    "✅ {feature_3 ถ้ามีข้อมูลจริง}",
     "",
-    "âœ… {feature_4 à¸–à¹‰à¸²à¸¡à¸µà¸‚à¹‰à¸­à¸¡à¸¹à¸¥à¸ˆà¸£à¸´à¸‡}",
+    "✅ {feature_4 ถ้ามีข้อมูลจริง}",
     "",
-    `{price_line à¹ƒà¸Šà¹‰à¸„à¸£à¸±à¹‰à¸‡à¹€à¸”à¸µà¸¢à¸§à¹€à¸—à¹ˆà¸²à¸™à¸±à¹‰à¸™: ${formatShopeePrice(product) || priceLine}}`,
+    `{price_line ใช้ครั้งเดียวเท่านั้น: ${formatShopeePrice(product) || priceLine}}`,
     "",
-    "ðŸ›’ à¸à¸”à¸”à¸¹à¸£à¸²à¸¢à¸¥à¸°à¹€à¸­à¸µà¸¢à¸”à¹€à¸žà¸´à¹ˆà¸¡à¹€à¸•à¸´à¸¡",
+    "🛒 กดดูรายละเอียดเพิ่มเติม",
     "",
-    `ðŸ“ à¸žà¸´à¸à¸±à¸” ${input.affiliateLink}`,
+    `📍 พิกัด ${input.affiliateLink}`,
     "",
-    "{hashtags 3-5 à¸­à¸±à¸™ à¹€à¸à¸µà¹ˆà¸¢à¸§à¸‚à¹‰à¸­à¸‡à¸à¸±à¸šà¸ªà¸´à¸™à¸„à¹‰à¸²à¹€à¸—à¹ˆà¸²à¸™à¸±à¹‰à¸™ à¸­à¸¢à¸¹à¹ˆà¸¥à¹ˆà¸²à¸‡à¸ªà¸¸à¸”}",
+    "{hashtags 3-5 อัน เกี่ยวข้องกับสินค้าเท่านั้น อยู่ล่างสุด}",
     "",
-    "à¸à¸Žà¸ªà¸³à¸„à¸±à¸:",
+    "กฎสำคัญ:",
     "- CRITICAL: Product name must appear exactly once, on the first line only.",
     "- Do not repeat product name in hook, feeling line, product detail, bullet points, CTA, or hashtags.",
     "- Product details must summarize actual material, size, usage, quantity, function, or practical benefit. Never copy the product name as a detail.",
     "- If any source description is the same as the product name or more than 70% similar, ignore that description.",
-    "- à¸«à¹‰à¸²à¸¡à¸™à¸³ category à¸¡à¸²à¹€à¸›à¹‡à¸™ feature à¹€à¸”à¹‡à¸”à¸‚à¸²à¸” à¹€à¸Šà¹ˆà¸™ General, Lifestyle, Beauty, Home",
-    "- Feature à¸•à¹‰à¸­à¸‡à¸¡à¸²à¸ˆà¸²à¸ product description, specifications, attributes, product features, variants à¸«à¸£à¸·à¸­ title à¹€à¸—à¹ˆà¸²à¸™à¸±à¹‰à¸™",
-    "- à¸–à¹‰à¸²à¸‚à¹‰à¸­à¸¡à¸¹à¸¥ feature à¹„à¸¡à¹ˆà¸žà¸­ à¹ƒà¸«à¹‰à¹€à¸‚à¸µà¸¢à¸™à¹à¸„à¹ˆ 2-3 feature à¸”à¸µà¸à¸§à¹ˆà¸²à¸ªà¸£à¹‰à¸²à¸‡à¸‚à¹‰à¸­à¸¡à¸¹à¸¥à¸¡à¸±à¹ˆà¸§",
-    "- à¸«à¹‰à¸²à¸¡à¹ƒà¸Šà¹‰à¸«à¸±à¸§à¸‚à¹‰à¸­à¸‹à¹‰à¸³ à¹€à¸Šà¹ˆà¸™ 'âœ¨ à¸„à¸§à¸²à¸¡à¸£à¸¹à¹‰à¸ªà¸¶à¸à¸«à¸¥à¸±à¸‡à¹ƒà¸Šà¹‰à¸‡à¸²à¸™' à¹ƒà¸«à¹‰à¹ƒà¸Šà¹‰à¹€à¸‰à¸žà¸²à¸° 'âœ¨ {feeling_line}'",
-    "- à¸«à¹‰à¸²à¸¡à¹ƒà¸Šà¹‰à¹€à¸ªà¹‰à¸™à¸„à¸±à¹ˆà¸™à¸—à¸¸à¸à¹à¸šà¸š à¹€à¸Šà¹ˆà¸™ â”â”â”â”â”, ---, ===",
-    "- à¸«à¹‰à¸²à¸¡à¹à¸ªà¸”à¸‡à¸£à¸²à¸„à¸²à¹€à¸à¸´à¸™ 1 à¸„à¸£à¸±à¹‰à¸‡",
-    "- Hook à¸•à¹‰à¸­à¸‡à¸­à¸´à¸‡à¸ªà¸´à¸™à¸„à¹‰à¸² à¹€à¸Šà¹ˆà¸™ à¹„à¸«à¸¡à¸‚à¸±à¸”à¸Ÿà¸±à¸™=à¸‹à¸·à¹‰à¸­à¸„à¸£à¸±à¹‰à¸‡à¹€à¸”à¸µà¸¢à¸§à¹ƒà¸Šà¹‰à¹„à¸”à¹‰à¸™à¸²à¸™à¸«à¸¥à¸²à¸¢à¹€à¸”à¸·à¸­à¸™, à¸à¸²à¸‡à¹€à¸à¸‡à¸à¸µà¸¬à¸²=à¹ƒà¸ªà¹ˆà¸§à¸´à¹ˆà¸‡à¹à¸¥à¹‰à¸§à¸„à¸¥à¹ˆà¸­à¸‡à¸•à¸±à¸§, à¹à¸à¹‰à¸§=à¸™à¹‰à¸³à¹à¸‚à¹‡à¸‡à¸¢à¸±à¸‡à¸­à¸¢à¸¹à¹ˆà¸«à¸¥à¸±à¸‡à¹€à¸¥à¸´à¸à¸‡à¸²à¸™",
-    "- à¸«à¹‰à¸²à¸¡à¹ƒà¸Šà¹‰ hook à¸ªà¸³à¹€à¸£à¹‡à¸ˆà¸£à¸¹à¸› à¹€à¸Šà¹ˆà¸™ à¸¥à¸­à¸‡à¹à¸¥à¹‰à¸§à¸Šà¸­à¸šà¸à¸§à¹ˆà¸²à¸—à¸µà¹ˆà¸„à¸´à¸”, à¹ƒà¸Šà¹‰à¹à¸¥à¹‰à¸§à¸•à¸´à¸”à¹ƒà¸ˆ, à¸„à¸¸à¹‰à¸¡à¸¡à¸²à¸",
-    "- CTA à¸•à¹‰à¸­à¸‡à¸­à¸¢à¸¹à¹ˆà¹€à¸«à¸™à¸·à¸­ link à¸•à¸²à¸¡à¸£à¸¹à¸›à¹à¸šà¸š: ðŸ›’ à¸à¸”à¸”à¸¹à¸£à¸²à¸¢à¸¥à¸°à¹€à¸­à¸µà¸¢à¸”à¹€à¸žà¸´à¹ˆà¸¡à¹€à¸•à¸´à¸¡ à¹à¸¥à¹‰à¸§à¸•à¸²à¸¡à¸”à¹‰à¸§à¸¢ ðŸ“ à¸žà¸´à¸à¸±à¸” {link}",
-    "- Hashtag à¸•à¹‰à¸­à¸‡à¹€à¸à¸µà¹ˆà¸¢à¸§à¸‚à¹‰à¸­à¸‡à¸à¸±à¸šà¸ªà¸´à¸™à¸„à¹‰à¸² à¸«à¹‰à¸²à¸¡ #General #Lifestyle #Beauty #Category #Product",
-    "- à¸«à¹‰à¸²à¸¡à¹ƒà¸Šà¹‰à¸„à¸°à¹à¸™à¸™à¸£à¹‰à¸²à¸™ à¸¢à¸­à¸”à¸‚à¸²à¸¢ à¸ˆà¸³à¸™à¸§à¸™à¸£à¸µà¸§à¸´à¸§ bestseller à¸‚à¸²à¸¢à¸”à¸µà¸­à¸±à¸™à¸”à¸±à¸š 1",
-    "- à¸«à¹‰à¸²à¸¡à¹ƒà¸Šà¹‰à¸„à¸³à¸§à¹ˆà¸² à¸«à¸¡à¸²à¸¢à¹€à¸«à¸•à¸¸ à¸«à¸£à¸·à¸­ affiliate",
-    "- à¸«à¹‰à¸²à¸¡à¹ƒà¸Šà¹‰ internal redirect URL",
-    "- à¹„à¸¡à¹ˆà¹€à¸à¸´à¸™ 700 à¸•à¸±à¸§à¸­à¸±à¸à¸©à¸£ à¹à¸¥à¸°à¸­à¹ˆà¸²à¸™à¸‡à¹ˆà¸²à¸¢à¸šà¸™à¸¡à¸·à¸­à¸–à¸·à¸­",
+    "- ห้ามนำ category มาเป็น feature เด็ดขาด เช่น General, Lifestyle, Beauty, Home",
+    "- Feature ต้องมาจาก product description, specifications, attributes, product features, variants หรือ title เท่านั้น",
+    "- ถ้าข้อมูล feature ไม่พอ ให้เขียนแค่ 2-3 feature ดีกว่าสร้างข้อมูลมั่ว",
+    "- ห้ามใช้หัวข้อซ้ำ เช่น '✨ ความรู้สึกหลังใช้งาน' ให้ใช้เฉพาะ '✨ {feeling_line}'",
+    "- ห้ามใช้เส้นคั่นทุกแบบ เช่น ━━━━━, ---, ===",
+    "- ห้ามแสดงราคาเกิน 1 ครั้ง",
+    "- Hook ต้องอิงสินค้า เช่น ไหมขัดฟัน=ซื้อครั้งเดียวใช้ได้นานหลายเดือน, กางเกงกีฬา=ใส่วิ่งแล้วคล่องตัว, แก้ว=น้ำแข็งยังอยู่หลังเลิกงาน",
+    "- ห้ามใช้ hook สำเร็จรูป เช่น ลองแล้วชอบกว่าที่คิด, ใช้แล้วติดใจ, คุ้มมาก",
+    "- CTA ต้องอยู่เหนือ link ตามรูปแบบ: 🛒 กดดูรายละเอียดเพิ่มเติม แล้วตามด้วย 📍 พิกัด {link}",
+    "- Hashtag ต้องเกี่ยวข้องกับสินค้า ห้าม #General #Lifestyle #Beauty #Category #Product",
+    "- ห้ามใช้คะแนนร้าน ยอดขาย จำนวนรีวิว bestseller ขายดีอันดับ 1",
+    "- ห้ามใช้คำว่า หมายเหตุ หรือ affiliate",
+    "- ห้ามใช้ internal redirect URL",
+    "- ไม่เกิน 700 ตัวอักษร และอ่านง่ายบนมือถือ",
+    "- UTF-8 only: ห้ามส่งข้อความ mojibake, emoji เสีย, หรือภาษาไทยเพี้ยน",
     "",
     "Product data:",
-    `à¸Šà¸·à¹ˆà¸­à¸ªà¸´à¸™à¸„à¹‰à¸²: ${product.productName}`,
-    `à¸«à¸¡à¸§à¸”à¸«à¸¡à¸¹à¹ˆ (à¹ƒà¸Šà¹‰à¹€à¸‚à¹‰à¸²à¹ƒà¸ˆà¸šà¸£à¸´à¸šà¸—à¹€à¸—à¹ˆà¸²à¸™à¸±à¹‰à¸™ à¸«à¹‰à¸²à¸¡à¹à¸ªà¸”à¸‡à¹€à¸›à¹‡à¸™ feature): ${product.category || "-"}`,
-    `à¸£à¸²à¸¢à¸¥à¸°à¹€à¸­à¸µà¸¢à¸”à¸ªà¸´à¸™à¸„à¹‰à¸²: ${product.productDescription || "-"}`,
-    `à¸ˆà¸¸à¸”à¹€à¸”à¹ˆà¸™à¸—à¸µà¹ˆà¸ªà¸à¸±à¸”à¹„à¸”à¹‰à¸ˆà¸²à¸à¸‚à¹‰à¸­à¸¡à¸¹à¸¥à¸ˆà¸£à¸´à¸‡: ${productFactLines.join(" | ") || "-"}`,
+    `ชื่อสินค้า: ${product.productName}`,
+    `หมวดหมู่ (ใช้เข้าใจบริบทเท่านั้น ห้ามแสดงเป็น feature): ${product.category || "-"}`,
+    `รายละเอียดสินค้า: ${product.productDescription || "-"}`,
+    `จุดเด่นที่สกัดได้จากข้อมูลจริง: ${productFactLines.join(" | ") || "-"}`,
     `Shopee Short Link: ${input.affiliateLink}`,
     "",
     "Return caption only inside JSON variants[].caption."
   ].join("\n");
 
-  try {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
     const variants = await generateFacebookContent(product.productName, {
       userId: input.userId,
-      customPrompt,
+      customPrompt: normalizeTextEncoding(customPrompt),
       sourceLabel: "Shopee product facts for UGC review caption",
-      sourceText: [
+      sourceText: normalizeTextEncoding([
         `Product name: ${product.productName}`,
         `Description: ${product.productDescription}`,
         `Extracted facts: ${productFactLines.join(" | ")}`,
         priceLine,
         `Shopee short link: ${input.affiliateLink}`
-      ].join("\n")
+      ].join("\n"))
     });
     const chosen = variants?.length ? randomItem(variants) : null;
     if (!chosen?.caption) return fallback;
-    const withLink = chosen.caption.includes(input.affiliateLink)
-      ? chosen.caption
-      : `${chosen.caption.trim()}\n${input.affiliateLink}`;
+    const generatedCaption = normalizeTextEncoding(chosen.caption);
+    const withLink = generatedCaption.includes(input.affiliateLink)
+      ? generatedCaption
+      : `${generatedCaption.trim()}\n${input.affiliateLink}`;
     const sanitized = sanitizeShopeeCaption(withLink, input.affiliateLink, product);
+    const validation = validateTextEncoding(sanitized, "Shopee AI caption");
+    if (!validation.ok) {
+      console.warn("[Encoding Error Detected] Caption regenerated", {
+        attempt,
+        markers: validation.markers,
+        preview: validation.preview
+      });
+      if (attempt < 3) continue;
+      return fallback;
+    }
     return sanitized.length > input.affiliateLink.length + 20 ? sanitized : fallback;
-  } catch {
-    return fallback;
+    } catch (error) {
+      const validation = validateTextEncoding(String(error instanceof Error ? error.message : error), "Shopee caption generation error");
+      if (!validation.ok && attempt < 3) {
+        console.warn("[Encoding Error Detected] Caption regenerated", {
+          attempt,
+          markers: validation.markers
+        });
+        continue;
+      }
+      return fallback;
+    }
   }
+
+  return fallback;
 }
 async function fetchShopeeReferenceImage(url: string) {
   const response = await fetch(url, { cache: "no-store" });

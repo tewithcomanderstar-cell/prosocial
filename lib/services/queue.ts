@@ -32,6 +32,7 @@ import { checkRateLimits } from "@/lib/services/rate-limit";
 import { getUserSettings, randomDelayMs } from "@/lib/services/settings";
 import { countShopeeProductNameOccurrences } from "@/lib/services/shopee-affiliate-core";
 import { isShopeeShortLink } from "@/lib/services/shopee-affiliate";
+import { normalizeTextEncoding, validateTextEncoding } from "@/lib/services/text-encoding";
 import { computeNextRunAt, randomItem } from "@/lib/utils";
 
 const AUTO_POST_PAGE_SPACING_MINUTES = Number(process.env.AUTO_POST_PAGE_SPACING_MINUTES ?? "10");
@@ -918,7 +919,9 @@ async function validateShopeeAffiliatePublishPayload(input: {
   imageCount: number;
 }) {
   const reasons: string[] = [];
-  const shopeeLinkMatch = input.message.match(/https:\/\/s\.shopee\.co\.th\/\S+/);
+  const normalizedMessage = normalizeTextEncoding(input.message);
+  const encodingValidation = validateTextEncoding(normalizedMessage, "Shopee publish caption");
+  const shopeeLinkMatch = normalizedMessage.match(/https:\/\/s\.shopee\.co\.th\/\S+/);
   const payloadAffiliateLink = typeof input.job.payload?.affiliateLink === "string" ? input.job.payload.affiliateLink : "";
   const payloadProductName = typeof input.job.payload?.shopeeProductName === "string" ? input.job.payload.shopeeProductName.trim() : "";
   const hardSellPatterns = [
@@ -944,14 +947,17 @@ async function validateShopeeAffiliatePublishPayload(input: {
     /^Stop scrolling/i,
     /^Here are Shopee finds/i
   ];
-  const nonEmptyLines = input.message
+  const nonEmptyLines = normalizedMessage
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
   const firstHashtagLineIndex = nonEmptyLines.findIndex((line) => /#[^\s#]+/.test(line));
   const linkLineIndex = nonEmptyLines.findIndex((line) => /https:\/\/s\.shopee\.co\.th\/\S+/.test(line));
-  const hashtagCount = input.message.match(/#[^\s#]+/g)?.length ?? 0;
+  const hashtagCount = normalizedMessage.match(/#[^\s#]+/g)?.length ?? 0;
 
+  if (!encodingValidation.ok) {
+    reasons.push(`Caption encoding is corrupted: ${encodingValidation.markers.join(", ")}`);
+  }
   if (input.imageCount !== 4) {
     reasons.push("Shopee Affiliate post requires exactly 4 generated images");
   }
@@ -961,25 +967,25 @@ async function validateShopeeAffiliatePublishPayload(input: {
   if (payloadAffiliateLink && !isShopeeShortLink(payloadAffiliateLink)) {
     reasons.push("Queued affiliate link is not a Shopee short link");
   }
-  if (/prosocial-app-theta\.vercel\.app|\/api\/s\//i.test(input.message)) {
+  if (/prosocial-app-theta\.vercel\.app|\/api\/s\//i.test(normalizedMessage)) {
     reasons.push("Caption contains an internal redirect URL");
   }
-  if (input.message.includes("\u0e2b\u0e21\u0e32\u0e22\u0e40\u0e2b\u0e15\u0e38")) {
+  if (normalizedMessage.includes("\u0e2b\u0e21\u0e32\u0e22\u0e40\u0e2b\u0e15\u0e38")) {
     reasons.push("Caption contains forbidden disclosure word: \u0e2b\u0e21\u0e32\u0e22\u0e40\u0e2b\u0e15\u0e38");
   }
-  if (input.message.toLowerCase().includes("affiliate")) {
+  if (normalizedMessage.toLowerCase().includes("affiliate")) {
     reasons.push("Caption contains forbidden disclosure word: affiliate");
   }
-  if (input.message.length > 700) {
-    reasons.push(`Caption is too long (${input.message.length}/700 characters)`);
+  if (normalizedMessage.length > 700) {
+    reasons.push(`Caption is too long (${normalizedMessage.length}/700 characters)`);
   }
-  if (hardSellPatterns.some((pattern) => pattern.test(input.message))) {
+  if (hardSellPatterns.some((pattern) => pattern.test(normalizedMessage))) {
     reasons.push("Caption contains hard-sell wording that is not allowed for Shopee UGC review style");
   }
   if (payloadProductName && nonEmptyLines[0] !== payloadProductName) {
     reasons.push("Caption first line must be the Shopee product name");
   }
-  if (payloadProductName && countShopeeProductNameOccurrences(input.message, payloadProductName) > 1) {
+  if (payloadProductName && countShopeeProductNameOccurrences(normalizedMessage, payloadProductName) > 1) {
     reasons.push("Caption repeats the Shopee product name after the first line");
   }
   if (forbiddenOpeners.some((pattern) => pattern.test(nonEmptyLines[0] ?? ""))) {
@@ -1006,7 +1012,9 @@ async function validateShopeeAffiliatePublishPayload(input: {
     userId: input.job.userId,
     type: "queue",
     level: "error",
-    message: "Shopee Affiliate validation failed before Facebook publish",
+    message: encodingValidation.ok
+      ? "Shopee Affiliate validation failed before Facebook publish"
+      : "[Encoding Error Detected] Shopee caption failed UTF-8 validation before Facebook publish",
     relatedJobId: input.job._id,
     relatedPostId: input.job.postId,
     relatedScheduleId: input.job.scheduleId,
@@ -1595,7 +1603,9 @@ async function executePostJob(job: JobExecution) {
   const variants = post.variants?.length ? post.variants : [{ caption: post.content, hashtags: post.hashtags }];
   const chosenVariant = post.randomizeCaption ? randomItem(variants) : variants[0];
   const rawMessage = buildPublishMessage(chosenVariant.caption, chosenVariant.hashtags);
-  const message = isShopeeAffiliateJob(job) ? normalizeShopeePublishHashtags(rawMessage) : rawMessage;
+  const message = isShopeeAffiliateJob(job)
+    ? normalizeShopeePublishHashtags(normalizeTextEncoding(rawMessage))
+    : rawMessage;
   const repairedImageRefs = await ensureShopeeAffiliateImageRefs(job, post);
   const imageRefs = post.randomizeImages && repairedImageRefs.length > 0 ? [randomItem(repairedImageRefs)] : repairedImageRefs;
   await logAction({
@@ -1628,6 +1638,21 @@ async function executePostJob(job: JobExecution) {
       message,
       imageCount: images.length
     });
+    await logAction({
+      userId: job.userId,
+      type: "queue",
+      level: "success",
+      message: "[UTF-8 Validation Passed] Shopee caption is safe for Facebook publish",
+      relatedJobId: job._id,
+      relatedPostId: job.postId,
+      relatedScheduleId: job.scheduleId,
+      metadata: {
+        ...getAutoPostLogFlags(job),
+        targetPageId: page.pageId,
+        pageName: page.name,
+        correlationId: job.correlationId
+      }
+    });
   }
 
   if (hasBoundAutoPostConfig(job)) {
@@ -1654,7 +1679,7 @@ async function executePostJob(job: JobExecution) {
     userId: job.userId,
     type: "queue",
     level: "info",
-    message: "PAGE_PUBLISH_STARTED: Publishing Shopee post to Facebook page",
+    message: "[Facebook Publish Started] PAGE_PUBLISH_STARTED: Publishing Shopee post to Facebook page",
     relatedJobId: job._id,
     relatedPostId: job.postId,
     relatedScheduleId: job.scheduleId,
@@ -1711,7 +1736,7 @@ async function executePostJob(job: JobExecution) {
     userId: job.userId,
     type: "post",
     level: "success",
-    message: `PAGE_PUBLISH_SUCCESS: Shopee post published to ${page.name}`,
+    message: `[Facebook Publish Success] PAGE_PUBLISH_SUCCESS: Shopee post published to ${page.name}`,
     relatedJobId: job._id,
     relatedPostId: String(post._id),
     relatedScheduleId: job.scheduleId,
