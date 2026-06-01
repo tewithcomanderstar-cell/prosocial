@@ -4,7 +4,7 @@ import { extractExactTextFromImage, extractPrimaryCreativeTextFromImage, generat
 import { fetchDriveImageBinary, fetchImagesFromFolder } from "@/lib/services/google-drive";
 import { ensureValidFacebookConnection, ensureValidGoogleDriveConnection } from "@/lib/services/integration-auth";
 import { logAction, logAndNotifyError } from "@/lib/services/logging";
-import { enqueuePostJobsForPost, processQueuedJobs } from "@/lib/services/queue";
+import { enqueuePostJobsForPost, processQueuedJobs, retryPendingShopeePageJobs } from "@/lib/services/queue";
 import {
   buildShopeePostPackage,
   ensureShopeeAffiliateConfigured,
@@ -1021,6 +1021,28 @@ async function queueShopeeAutoPostsForConfig(
 
   const openPageJobs = await countOpenShopeePageJobsForConfig(config._id, config.userId);
   if (openPageJobs > 0) {
+    const pendingRecovery = await retryPendingShopeePageJobs(config.userId, config._id);
+    if (pendingRecovery.requeued > 0) {
+      await logShopeeStep({
+        config,
+        step: "PAGE_PENDING_TIMEOUT_REQUEUED",
+        status: "success",
+        message: `Re-queued ${pendingRecovery.requeued} pending Shopee page task(s) from the current batch.`,
+        metadata: {
+          openPageJobs,
+          requeued: pendingRecovery.requeued,
+          processed: pendingRecovery.processed
+        }
+      });
+
+      return {
+        queued: pendingRecovery.requeued,
+        workflowId: String(config._id),
+        workflowRunId: String(config._id),
+        contentItemId: String(config._id)
+      };
+    }
+
     const delayedNextRunAt = getNextAutoRun(
       config.intervalMinutes,
       config.postingWindowStart,
@@ -1070,6 +1092,16 @@ async function queueShopeeAutoPostsForConfig(
     metadata: { selectedPageCount: eligiblePageIds.length }
   });
   await ensureValidFacebookConnection(config.userId);
+  await logShopeeStep({
+    config,
+    step: "SELECTED_PAGES_LOADED",
+    status: "success",
+    message: `Loaded ${eligiblePageIds.length} selected Facebook page(s) for this Shopee run`,
+    metadata: {
+      selectedPagesCount: eligiblePageIds.length,
+      pageIds: eligiblePageIds
+    }
+  });
 
   const maxPostsPerPage = Math.max(0, config.maxPostsPerPagePerDay ?? 0);
   if ((config.contentSource ?? "shopee-affiliate") !== "shopee-affiliate" && maxPostsPerPage > 0) {
@@ -1162,10 +1194,10 @@ async function queueShopeeAutoPostsForConfig(
   let failedPageCount = 0;
   let lastPostId: unknown = null;
   const batchDelayMinutes = options.immediate ? 0 : getRandomDelayMinutes(config.minRandomDelayMinutes ?? 0, config.maxRandomDelayMinutes ?? 0);
-  // Even manual Start Now should fan out page publishing gradually. Posting
-  // every selected page at once makes Facebook uploads, OpenAI image work, and
-  // the monitor compete for the same serverless window.
-  const pageSpacingMinutes = Math.max(0, AUTO_POST_BATCH_PAGE_SPACING_MINUTES);
+  // A Shopee run represents one batch across all selected pages. Page jobs must
+  // be ready in the same batch; otherwise later pages sit in "Waiting for
+  // scheduled slot" and never complete the current run from the user's view.
+  const pageSpacingMinutes = 0;
   const batchRequestedStartAt = new Date(Date.now() + batchDelayMinutes * 60 * 1000);
   const batchStartAt = fitBatchStartToPostingWindow(
     batchRequestedStartAt,
@@ -1183,7 +1215,7 @@ async function queueShopeeAutoPostsForConfig(
 
   let selectedProductsForQueue =
     SHOPEE_BATCH_PRODUCT_MODE === "single" && selectedProducts.length > 0
-      ? eligiblePageIds.map((pageId) => ({ ...selectedProducts[0], pageId }))
+    ? eligiblePageIds.map((pageId) => ({ ...selectedProducts[0], pageId }))
       : selectedProducts;
   let sharedSingleProductPackage: ShopeePostPackageResult | null = null;
   let sharedSingleProductPackageKey: string | null = null;
@@ -1358,6 +1390,7 @@ async function queueShopeeAutoPostsForConfig(
         : await enqueuePostJobsForPost(config.userId, String(post._id), {
             applyRandomDelay: false,
             startAt,
+            forceImmediate: true,
             payloadExtras: {
               autoPostConfigId: config._id,
               autoSource: "shopee-affiliate",
@@ -1371,7 +1404,7 @@ async function queueShopeeAutoPostsForConfig(
               aiGeneratedPostId: packageResult.aiGeneratedPostId,
               selectedPagesCount: eligiblePageIds.length,
               pageIndex: Math.max(pageIndex, index) + 1,
-              scheduledDelayMinutes: batchDelayMinutes + Math.max(pageIndex, index) * pageSpacingMinutes,
+              scheduledDelayMinutes: 0,
               workflowId: records.workflowId,
               workflowRunId: records.workflowRunId,
               contentItemId: records.contentItemId

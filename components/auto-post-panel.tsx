@@ -74,7 +74,7 @@ type ControlPanelStatus = {
     jobId: string | null;
     pageId: string;
     pageName: string;
-    status: "pending" | "publishing" | "success" | "failed" | "skipped" | "retrying";
+    status: "pending" | "queued" | "publishing" | "success" | "failed" | "skipped" | "retrying";
     rawStatus?: string;
     facebookPostId?: string | null;
     errorCode?: string | null;
@@ -86,6 +86,7 @@ type ControlPanelStatus = {
   }>;
   latestLogs?: StatusLog[];
   lastActivityAt?: string | null;
+  lastWorkerHeartbeat?: string | null;
   lastSuccessAt?: string | null;
   missingEnv?: string[];
   lastError?: {
@@ -381,6 +382,7 @@ export function AutoPostPanel() {
   const [pausing, setPausing] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [clearingStuck, setClearingStuck] = useState(false);
+  const [retryingPendingPages, setRetryingPendingPages] = useState(false);
   const [cleaningStorage, setCleaningStorage] = useState(false);
   const loadStatusInFlightRef = useRef(false);
   const pagesRef = useRef<FacebookPage[]>([]);
@@ -708,6 +710,30 @@ export function AutoPostPanel() {
       );
     } finally {
       setClearingStuck(false);
+    }
+  }
+
+  async function handleRetryPendingPages() {
+    setRetryingPendingPages(true);
+    setMessage("");
+    setError("");
+
+    try {
+      const response = await fetch("/api/auto-post/retry-pending-pages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ configId: (config as any)._id })
+      });
+      const result = await readApiResult(response);
+      if (!result.ok) throw new Error(result.message || "Unable to retry pending page tasks");
+      setMessage(result.message || "Retried pending page tasks");
+      await loadStatus(false);
+    } catch (retryError) {
+      setError(
+        sanitizeAutomationError(retryError instanceof Error ? retryError.message : "Unable to retry pending page tasks")
+      );
+    } finally {
+      setRetryingPendingPages(false);
     }
   }
 
@@ -1078,6 +1104,7 @@ export function AutoPostPanel() {
           <div className="auto-post-metric-card"><span className="muted">Current page</span><strong>{controlPanel?.currentPublishingPage?.pageName ?? "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Published</span><strong>{controlPanel?.publishedPagesCount ?? 0}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Failed / Pending</span><strong>{controlPanel?.failedPagesCount ?? 0} / {controlPanel?.pendingPagesCount ?? 0}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Worker heartbeat</span><strong>{formatDateTime(controlPanel?.lastWorkerHeartbeat ?? undefined)}</strong></div>
         </div>
         {controlPanel?.pageResults?.length ? (
           <div className="stack compact-stack">
@@ -1095,7 +1122,7 @@ export function AutoPostPanel() {
                     </span>
                   </div>
                   <div className="muted auto-post-log-meta">
-                    {result.jobId ? `Job ${result.jobId}` : "Waiting for scheduled slot"}
+                    {result.jobId ? `Job ${result.jobId}` : "Page task not created for this run"}
                     {result.facebookPostId ? ` • Facebook post ${result.facebookPostId}` : ""}
                     {result.scheduledAt ? ` • Scheduled ${formatDateTime(result.scheduledAt)}` : ""}
                     {result.shortAffiliateLink ? ` • Short link ${sanitizeText(result.shortAffiliateLink)}` : ""}
@@ -1134,6 +1161,14 @@ export function AutoPostPanel() {
             disabled={clearingStuck || starting || pausing || stopping}
           >
             {clearingStuck ? "Clearing..." : "Clear stuck"}
+          </button>
+          <button
+            className="button button-secondary"
+            type="button"
+            onClick={handleRetryPendingPages}
+            disabled={retryingPendingPages || starting || pausing || stopping}
+          >
+            {retryingPendingPages ? "Retrying..." : "Retry pending pages"}
           </button>
           <button
             className="button button-secondary"

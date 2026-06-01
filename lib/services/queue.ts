@@ -197,6 +197,7 @@ type EnqueueOptions = {
   applyRandomDelay?: boolean;
   startAt?: Date;
   payloadExtras?: Record<string, unknown>;
+  forceImmediate?: boolean;
 };
 
 const MODERN_DIGIT_PATHS: Record<string, string> = {
@@ -1320,16 +1321,20 @@ export async function enqueuePostJobsForPost(userId: string, postId: string, opt
       targetPageIds: [page.pageId]
     });
 
-    const spacingMinutes = options.payloadExtras?.autoPostConfigId || options.payloadExtras?.autoPostAiConfigId
+    const spacingMinutes = options.forceImmediate
+      ? 0
+      : options.payloadExtras?.autoPostConfigId || options.payloadExtras?.autoPostAiConfigId
       ? AUTO_POST_PAGE_SPACING_MINUTES
       : 0;
-    const nextRunAt = options.startAt
+    const nextRunAt = options.forceImmediate
+      ? new Date()
+      : options.startAt
       ? new Date(options.startAt.getTime() + pageIndex * spacingMinutes * 60 * 1000)
       : options.applyRandomDelay === false
         ? new Date()
         : new Date(Date.now() + randomDelayMs(safeSettings.minDelaySeconds, safeSettings.maxDelaySeconds));
 
-    await Job.create({
+    const job = await Job.create({
       userId,
       type: "post",
       scheduleId: options.scheduleId,
@@ -1347,10 +1352,155 @@ export async function enqueuePostJobsForPost(userId: string, postId: string, opt
       status: "queued"
     });
 
+    if (options.payloadExtras?.autoSource === "shopee-affiliate") {
+      const autoPostConfigId = String(options.payloadExtras.autoPostConfigId ?? "");
+      const workflowRunId = String(options.payloadExtras.workflowRunId ?? "");
+      await logAction({
+        userId,
+        type: "queue",
+        level: "info",
+        message: "PAGE_RESULT_CREATED: Shopee page publish task created",
+        metadata: {
+          autoPost: true,
+          autoSource: "shopee-affiliate",
+          autoPostConfigId,
+          workflowRunId,
+          step: "PAGE_RESULT_CREATED",
+          jobId: String(job._id),
+          pageId: page.pageId,
+          pageName: page.name ?? "Facebook Page",
+          status: "queued",
+          nextRunAt: nextRunAt.toISOString(),
+          forceImmediate: Boolean(options.forceImmediate)
+        }
+      });
+      await logAction({
+        userId,
+        type: "queue",
+        level: "info",
+        message: "PAGE_QUEUED: Shopee page publish task queued",
+        metadata: {
+          autoPost: true,
+          autoSource: "shopee-affiliate",
+          autoPostConfigId,
+          workflowRunId,
+          step: "PAGE_QUEUED",
+          jobId: String(job._id),
+          pageId: page.pageId,
+          pageName: page.name ?? "Facebook Page",
+          status: "queued",
+          nextRunAt: nextRunAt.toISOString()
+        }
+      });
+    }
+
     queued += 1;
   }
 
   return queued;
+}
+
+export async function retryPendingShopeePageJobs(userId: string, configId?: string) {
+  const now = new Date();
+  const staleBefore = new Date(now.getTime() - 3 * 60 * 1000);
+  const config = configId
+    ? await AutoPostConfig.findOne({ _id: configId, userId }).lean()
+    : await AutoPostConfig.findOne({ userId, contentSource: "shopee-affiliate" }).sort({ updatedAt: -1 }).lean();
+
+  if (!config) {
+    throw new Error("Shopee Affiliate Auto Post settings not found");
+  }
+
+  const workflowRunId = (config as any).lastWorkflowRunId ? String((config as any).lastWorkflowRunId) : null;
+  const query: Record<string, unknown> = {
+    userId,
+    type: "post",
+    status: { $in: ["queued", "retrying", "rate_limited"] },
+    "payload.autoSource": "shopee-affiliate",
+    "payload.autoPostConfigId": String((config as any)._id),
+    $or: [
+      { nextRunAt: { $gt: now } },
+      { createdAt: { $lte: staleBefore } },
+      { nextRunAt: { $lte: now } }
+    ]
+  };
+  if (workflowRunId) {
+    query["payload.workflowRunId"] = workflowRunId;
+  }
+
+  const stuckJobs = (await Job.find(query)
+    .sort({ nextRunAt: 1 })
+    .limit(20)
+    .select("_id targetPageId payload nextRunAt createdAt status")
+    .lean()) as Array<Record<string, any>>;
+
+  if (!stuckJobs.length) {
+    return {
+      requeued: 0,
+      processed: 0,
+      message: "No pending Shopee page jobs found"
+    };
+  }
+
+  const jobIds = stuckJobs.map((job) => job._id);
+  await Job.updateMany(
+    { _id: { $in: jobIds } },
+    {
+      $set: {
+        status: "queued",
+        nextRunAt: now,
+        nextRetryAt: null,
+        lockExpiresAt: null,
+        lockedAt: null,
+        lastError: null,
+        failureReason: null,
+        errorCode: null
+      }
+    }
+  );
+
+  for (const job of stuckJobs) {
+    const payload = (job.payload ?? {}) as Record<string, unknown>;
+    await logAction({
+      userId,
+      type: "queue",
+      level: "warn",
+      message: "PAGE_PENDING_TIMEOUT_REQUEUED: Shopee page publish task was re-queued",
+      metadata: {
+        autoPost: true,
+        autoSource: "shopee-affiliate",
+        autoPostConfigId: String((config as any)._id),
+        workflowRunId: String(payload.workflowRunId ?? workflowRunId ?? ""),
+        step: "PAGE_PENDING_TIMEOUT_REQUEUED",
+        jobId: String(job._id),
+        pageId: String(job.targetPageId ?? ""),
+        previousStatus: String(job.status ?? "queued"),
+        previousNextRunAt: job.nextRunAt ? new Date(job.nextRunAt).toISOString() : null,
+        requeuedAt: now.toISOString()
+      }
+    });
+  }
+
+  await AutoPostConfig.findByIdAndUpdate((config as any)._id, {
+    autoPostStatus: "posting",
+    jobStatus: "pending",
+    lastStatus: "pending",
+    lastError: null
+  });
+
+  await updateAutoPostRecords({
+    configId: String((config as any)._id),
+    autoPostStatus: "posting",
+    currentJobStatus: "pending",
+    message: "Re-queued pending Shopee page publish tasks"
+  });
+
+  const processed = await processQueuedJobs(Math.min(stuckJobs.length, 10), "post");
+
+  return {
+    requeued: stuckJobs.length,
+    processed
+  };
 }
 
 export async function enqueueJobsForDueSchedules() {

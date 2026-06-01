@@ -114,6 +114,7 @@ function normalizePageJobStatus(status?: string) {
   if (status === "failed") return "failed";
   if (status === "duplicate_blocked") return "skipped";
   if (status === "processing") return "publishing";
+  if (status === "queued") return "queued";
   if (status === "retrying" || status === "rate_limited") return "retrying";
   return "pending";
 }
@@ -355,10 +356,10 @@ export async function GET() {
           pageName: pageNameById.get(pageId) ?? "Facebook Page",
           shortAffiliateLink: null,
           status: "pending",
-          rawStatus: "scheduled",
+          rawStatus: "not_created",
           facebookPostId: null,
           errorCode: null,
-          errorMessage: null,
+          errorMessage: "Page publish task has not been created for this run",
           startedAt: null,
           scheduledAt: null,
           finishedAt: null
@@ -487,6 +488,7 @@ export async function GET() {
       currentPublishingPage,
       pageResults,
       lastActivityAt: logs[0]?.createdAt ?? runJobs[0]?.createdAt ?? null,
+      lastWorkerHeartbeat: latestProcessingJob?.processingStartedAt ?? logs[0]?.createdAt ?? runJobs[0]?.createdAt ?? null,
       lastSuccessAt: runJobs.find((job) => job.status === "success")?.completedAt ?? null,
       missingEnv,
       env: {
