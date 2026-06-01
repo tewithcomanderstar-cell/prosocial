@@ -1296,8 +1296,18 @@ function collectShopeeProductFacts(product: ShopeeProductRecord) {
   return rotateShopeeFacts(facts, product).slice(0, Math.min(4, facts.length));
 }
 
+export function normalizeShopeeCaptionLinkLine(caption: string, shopeeShortUrl?: string) {
+  const preferredShortLink = shopeeShortUrl?.trim();
+  return normalizeTextEncoding(caption)
+    .replace(/📍\s*พิกัด\s*\r?\n\s*(https:\/\/s\.shopee\.co\.th\/\S+)/giu, "📍 พิกัด $1")
+    .replace(/📍\s*พิกัด\s+(https:\/\/s\.shopee\.co\.th\/\S+)/giu, "📍 พิกัด $1")
+    .replace(/📍\s*พิกัด\s*$/gimu, preferredShortLink ? `📍 พิกัด ${preferredShortLink}` : "📍 พิกัด")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function formatShopeeShortLinkLine(shopeeShortUrl: string) {
-  return shopeeShortUrl.trim();
+  return `📍 พิกัด ${shopeeShortUrl.trim()}`;
 }
 
 function removeOldShopeeHookLines(lines: string[]) {
@@ -1406,7 +1416,6 @@ function buildShopeeCaptionFromParts(parts: ShopeeCaptionParts) {
     "",
     parts.ctaLine,
     "",
-    "📍 พิกัด",
     parts.shortLink,
     "",
     parts.hashtags.slice(0, SHOPEE_MAX_HASHTAGS).join(" ")
@@ -1429,7 +1438,7 @@ export function buildShopeeFallbackCaption(product: ShopeeProductRecord, shopeeS
 }
 
 export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string, product?: ShopeeProductRecord) {
-  const cleanedInput = normalizeTextEncoding(caption);
+  const cleanedInput = normalizeShopeeCaptionLinkLine(caption, shopeeShortUrl);
   const cleanedCaption = removeMarketplaceMetricLines(removeHardSellPhrases(stripForbiddenAffiliateDisclosure(cleanedInput)))
     .replace(/https?:\/\/prosocial-app-theta\.vercel\.app\/\S+/gi, "")
     .replace(/https?:\/\/[^\s]*\/api\/s\/\S+/gi, "")
@@ -1507,7 +1516,7 @@ export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string, p
   );
 
   if (normalizedCaption.length <= 700 && !containsForbiddenShopeeGenericText(normalizedCaption)) {
-    return normalizedCaption;
+    return normalizeShopeeCaptionLinkLine(normalizedCaption, shopeeShortUrl);
   }
 
   const compactCaption = buildShopeeCaptionFromParts({
@@ -1520,7 +1529,7 @@ export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string, p
     shortLink: formatShopeeShortLinkLine(shopeeShortUrl),
     hashtags: safeHashtags
   });
-  return assertValidTextEncoding(normalizeTextEncoding(compactCaption), "Shopee compact caption");
+  return assertValidTextEncoding(normalizeShopeeCaptionLinkLine(compactCaption, shopeeShortUrl), "Shopee compact caption");
 }
 export async function createOrReuseAffiliateShortLink(input: {
   userId: string;
@@ -1909,8 +1918,7 @@ export async function generateShopeeCaption(input: {
     "",
     "🛒 {CTA ธรรมชาติ: ใครกำลังมองหา[ประโยชน์ของสินค้า] ลองกดดูรายละเอียดเพิ่มเติมได้เลย หรือ ผมแปะพิกัดไว้ให้แล้ว ลองเข้าไปดูรีวิวเพิ่มเติมได้ครับ}",
     "",
-    "📍 พิกัด",
-    `${input.affiliateLink}`,
+    `📍 พิกัด ${input.affiliateLink}`,
     "",
     "{hashtags 3-5 อัน เกี่ยวข้องกับแบรนด์ ประเภทสินค้า หมวดสินค้า หรือ Shopee เท่านั้น}",
     "",
@@ -1920,7 +1928,7 @@ export async function generateShopeeCaption(input: {
     "- ห้ามซ้ำชื่อสินค้าใน hook, review, bullet, CTA และ hashtag",
     "- ห้ามใช้หัวข้อ ความรู้สึกหลังใช้งาน, ความรู้สึกหลังใช้, เหตุผลที่ซื้อ, จุดเด่นที่ชอบ",
     "- หัวข้อจุดเด่นต้องเป็น: 📌 จุดที่ชอบ",
-    "- CTA ต้องอยู่เหนือพิกัด และลิงก์ต้องอยู่บรรทัดเดี่ยวหลังคำว่า 📍 พิกัด",
+    "- CTA ต้องอยู่เหนือพิกัด และบรรทัดพิกัดต้องเป็นรูปแบบเดียวเท่านั้น: 📍 พิกัด https://s.shopee.co.th/{shortCode}",
     "- ห้ามใช้ category เป็น feature เช่น General, Lifestyle, Beauty, Home",
     "- ห้ามใช้คะแนนร้าน ยอดขาย จำนวนรีวิว bestseller ขายดีอันดับ 1",
     "- ห้ามใช้คำ generic: เลือกจากรายละเอียดสินค้าแล้วดูใช้งานได้จริง, เหมาะสำหรับผู้ใช้งานทั่วไป, เหมาะกับหมวด, เหมาะกับการใช้งานทั่วไป, คุ้มค่ากับราคา, จากข้อมูลสินค้า, จากรายละเอียดสินค้า, ใช้งานได้จริง, คุณสมบัติสินค้า, สินค้าประเภท, ลองเช็กโปรหน้าสินค้าได้เลย",

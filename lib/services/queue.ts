@@ -31,7 +31,7 @@ import { getPageLogoForFacebookPage } from "@/lib/services/page-logo";
 import { checkRateLimits } from "@/lib/services/rate-limit";
 import { getUserSettings, randomDelayMs } from "@/lib/services/settings";
 import { countShopeeProductNameOccurrences } from "@/lib/services/shopee-affiliate-core";
-import { isShopeeShortLink } from "@/lib/services/shopee-affiliate";
+import { isShopeeShortLink, normalizeShopeeCaptionLinkLine } from "@/lib/services/shopee-affiliate";
 import { normalizeTextEncoding, validateTextEncoding } from "@/lib/services/text-encoding";
 import { computeNextRunAt, randomItem } from "@/lib/utils";
 
@@ -923,6 +923,7 @@ async function validateShopeeAffiliatePublishPayload(input: {
   const normalizedMessage = normalizeTextEncoding(input.message);
   const encodingValidation = validateTextEncoding(normalizedMessage, "Shopee publish caption");
   const shopeeLinkMatch = normalizedMessage.match(/https:\/\/s\.shopee\.co\.th\/\S+/);
+  const shopeePinLinkMatch = normalizedMessage.match(/📍\s*พิกัด\s+https:\/\/s\.shopee\.co\.th\/\S+/);
   const payloadAffiliateLink = typeof input.job.payload?.affiliateLink === "string" ? input.job.payload.affiliateLink : "";
   const payloadProductName = typeof input.job.payload?.shopeeProductName === "string" ? input.job.payload.shopeeProductName.trim() : "";
   const hardSellPatterns = [
@@ -976,6 +977,12 @@ async function validateShopeeAffiliatePublishPayload(input: {
   }
   if (!shopeeLinkMatch || !isShopeeShortLink(shopeeLinkMatch[0])) {
     reasons.push("Caption must include a valid Shopee short link starting with https://s.shopee.co.th/");
+  }
+  if (!shopeePinLinkMatch) {
+    reasons.push("Shopee short link must be on the same line as 📍 พิกัด");
+  }
+  if (/📍\s*พิกัด\s*\r?\n\s*https:\/\/s\.shopee\.co\.th\//iu.test(normalizedMessage)) {
+    reasons.push("Caption uses old two-line Shopee link format");
   }
   if (payloadAffiliateLink && !isShopeeShortLink(payloadAffiliateLink)) {
     reasons.push("Queued affiliate link is not a Shopee short link");
@@ -1794,7 +1801,12 @@ async function executePostJob(job: JobExecution) {
   const chosenVariant = post.randomizeCaption ? randomItem(variants) : variants[0];
   const rawMessage = buildPublishMessage(chosenVariant.caption, chosenVariant.hashtags);
   const message = isShopeeAffiliateJob(job)
-    ? normalizeShopeePublishHashtags(normalizeTextEncoding(rawMessage))
+    ? normalizeShopeePublishHashtags(
+        normalizeShopeeCaptionLinkLine(
+          normalizeTextEncoding(rawMessage),
+          typeof job.payload?.affiliateLink === "string" ? job.payload.affiliateLink : undefined
+        )
+      )
     : rawMessage;
   const repairedImageRefs = await ensureShopeeAffiliateImageRefs(job, post);
   const imageRefs = post.randomizeImages && repairedImageRefs.length > 0 ? [randomItem(repairedImageRefs)] : repairedImageRefs;
