@@ -94,9 +94,14 @@ type ShopeeSelectedProduct = Awaited<ReturnType<typeof selectShopeeProductsForPa
 type ShopeePostPackageResult = Awaited<ReturnType<typeof buildShopeePostPackage>>;
 type AutoPostErrorClassification = "retry_with_next_product" | "retry_same_product" | "job_failed";
 
-const AUTO_POST_BATCH_PAGE_SPACING_MINUTES = Number(process.env.AUTO_POST_PAGE_SPACING_MINUTES ?? "10");
+const AUTO_POST_BATCH_PAGE_SPACING_MINUTES = Number(
+  process.env.AUTO_POST_PAGE_INTERVAL_MINUTES ?? process.env.AUTO_POST_PAGE_SPACING_MINUTES ?? "10"
+);
 const AUTO_POST_JOB_TIMEOUT_MS = Number(process.env.AUTO_POST_JOB_TIMEOUT_MS ?? "300000");
-const AUTO_POST_MAX_PRODUCT_ATTEMPTS = Math.max(1, Number(process.env.AUTO_POST_MAX_PRODUCT_ATTEMPTS ?? "5"));
+const AUTO_POST_MAX_PRODUCT_ATTEMPTS = Math.max(
+  1,
+  Number(process.env.AUTO_POST_PRODUCT_ATTEMPTS ?? process.env.AUTO_POST_MAX_PRODUCT_ATTEMPTS ?? "5")
+);
 const AUTO_POST_SAME_PRODUCT_RETRIES = Math.max(1, Number(process.env.AUTO_POST_SAME_PRODUCT_RETRIES ?? "2"));
 const SHOPEE_BATCH_PRODUCT_MODE = process.env.SHOPEE_BATCH_PRODUCT_MODE === "per_page" ? "per_page" : "single";
 const OPEN_AUTO_POST_JOB_STATUSES = ["queued", "processing", "retrying", "rate_limited"] as const;
@@ -1417,6 +1422,7 @@ async function queueShopeeAutoPostsForConfig(
         pageId: selected.pageId,
         product: selected.product,
         postId: String(post._id),
+        jobId: records.workflowRunId,
         scheduledAt: startAt,
         affiliateLink: packageResult.shortAffiliateLink,
         aiGeneratedPostId: packageResult.aiGeneratedPostId,

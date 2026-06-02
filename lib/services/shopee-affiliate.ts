@@ -1808,6 +1808,53 @@ export async function wasProductRecentlyPosted(userId: string, pageId: string, p
   return count > 0;
 }
 
+function getBangkokPostedDate(date = new Date()) {
+  const bangkok = new Date(date.getTime() + 7 * 60 * 60 * 1000);
+  return bangkok.toISOString().slice(0, 10);
+}
+
+function getShopeeProductIdentity(product: Pick<ShopeeProductRecord, "productId" | "shopId" | "itemId">) {
+  const shopId = String(product.shopId ?? "").trim();
+  const itemId = String(product.itemId ?? "").trim();
+  if (shopId && itemId) return `${shopId}:${itemId}`;
+  return String(product.productId ?? "").trim();
+}
+
+async function getShopeeProductLocksForDate(userId: string, postedDate = getBangkokPostedDate()) {
+  const histories = (await ProductPostHistory.find({
+    userId,
+    source: "shopee-affiliate",
+    postedDate,
+    status: { $in: ["queued", "published"] }
+  })
+    .select("productId shopId itemId")
+    .lean()) as Array<{ productId?: string; shopId?: string; itemId?: string }>;
+
+  const productIds = new Set<string>();
+  const identities = new Set<string>();
+  for (const history of histories) {
+    if (history.productId) productIds.add(String(history.productId));
+    const identity = getShopeeProductIdentity({
+      productId: String(history.productId ?? ""),
+      shopId: String(history.shopId ?? ""),
+      itemId: String(history.itemId ?? "")
+    });
+    if (identity) identities.add(identity);
+  }
+
+  return { productIds, identities, postedDate };
+}
+
+function weightedRandomProduct<T extends { score: ProductScore }>(items: T[]) {
+  const total = items.reduce((sum, item) => sum + Math.max(1, item.score.productScore), 0);
+  let cursor = Math.random() * total;
+  for (const item of items) {
+    cursor -= Math.max(1, item.score.productScore);
+    if (cursor <= 0) return item;
+  }
+  return items[items.length - 1];
+}
+
 export async function selectShopeeProductsForPages(input: {
   userId: string;
   pageIds: string[];
@@ -1825,6 +1872,9 @@ export async function selectShopeeProductsForPages(input: {
 }) {
   const provider = getShopeeProductProvider();
   const excludedProductIds = new Set((input.excludedProductIds ?? []).map((productId) => String(productId)).filter(Boolean));
+  const dailyLocks = process.env.AUTO_POST_NO_DUPLICATE_SAME_DAY === "false"
+    ? { productIds: new Set<string>(), identities: new Set<string>(), postedDate: getBangkokPostedDate() }
+    : await getShopeeProductLocksForDate(input.userId);
   const discovered = await provider.fetchProducts({
     sourceTag: input.sourceTag ?? "trending",
     keyword: input.keyword,
@@ -1834,8 +1884,13 @@ export async function selectShopeeProductsForPages(input: {
   await upsertShopeeProducts(discovered);
 
   const selected: Array<{ pageId: string; product: ShopeeProductRecord; score: ProductScore }> = [];
+  const selectedProductIds = new Set<string>();
+  const selectedProductIdentities = new Set<string>();
   const filteredProducts = discovered.filter((product) => {
-    if (excludedProductIds.has(String(product.productId))) return false;
+    const productId = String(product.productId);
+    const identity = getShopeeProductIdentity(product);
+    if (excludedProductIds.has(productId)) return false;
+    if (dailyLocks.productIds.has(productId) || dailyLocks.identities.has(identity)) return false;
     const effectivePrice = product.discountPrice || product.productPrice || 0;
     if ((input.minPrice ?? 0) > 0 && effectivePrice < (input.minPrice ?? 0)) return false;
     if ((input.maxPrice ?? 0) > 0 && effectivePrice > (input.maxPrice ?? 0)) return false;
@@ -1848,6 +1903,9 @@ export async function selectShopeeProductsForPages(input: {
   for (const pageId of input.pageIds) {
     const scored = [];
     for (const product of filteredProducts) {
+      const productId = String(product.productId);
+      const identity = getShopeeProductIdentity(product);
+      if (selectedProductIds.has(productId) || selectedProductIdentities.has(identity)) continue;
       const recentlyPosted = await wasProductRecentlyPosted(input.userId, pageId, product.productId);
       const score = scoreShopeeProduct({
         product,
@@ -1860,14 +1918,15 @@ export async function selectShopeeProductsForPages(input: {
       }
     }
 
-    const best = scored
-      .filter((item) => item.score.productScore >= 35)
-      .sort((left, right) => right.score.productScore - left.score.productScore)[0];
+    const eligibleScored = scored.filter((item) => item.score.productScore >= 35);
+    const best = eligibleScored.length ? weightedRandomProduct(eligibleScored) : null;
 
     if (!best) {
       continue;
     }
 
+    selectedProductIds.add(String(best.product.productId));
+    selectedProductIdentities.add(getShopeeProductIdentity(best.product));
     selected.push({ pageId, product: best.product, score: best.score });
   }
 
@@ -2272,8 +2331,17 @@ export async function recordShopeeQueueItem(input: {
     userId: input.userId,
     pageId: input.pageId,
     productId: input.product.productId,
+    shopId: input.product.shopId ?? "",
+    itemId: input.product.itemId ?? "",
+    productName: input.product.productName ?? "",
+    category: input.product.category ?? "",
+    productSource: input.product.sourceTag ?? "shopee-affiliate",
     postId: input.postId,
     affiliateLink: input.affiliateLink,
+    shortLink: input.affiliateLink,
+    postedDate: getBangkokPostedDate(input.scheduledAt),
+    jobId: input.jobId ?? "",
+    pageIds: [input.pageId],
     postedAt: input.scheduledAt,
     status: "queued"
   });

@@ -35,7 +35,9 @@ import { isShopeeShortLink, normalizeShopeeCaptionLinkLine } from "@/lib/service
 import { normalizeTextEncoding, validateTextEncoding } from "@/lib/services/text-encoding";
 import { computeNextRunAt, randomItem } from "@/lib/utils";
 
-const AUTO_POST_PAGE_SPACING_MINUTES = Number(process.env.AUTO_POST_PAGE_SPACING_MINUTES ?? "10");
+const AUTO_POST_PAGE_SPACING_MINUTES = Number(
+  process.env.AUTO_POST_PAGE_INTERVAL_MINUTES ?? process.env.AUTO_POST_PAGE_SPACING_MINUTES ?? "10"
+);
 const FACEBOOK_RATE_LIMIT_COOLDOWN_MINUTES = Number(process.env.FACEBOOK_RATE_LIMIT_COOLDOWN_MINUTES ?? "60");
 const COMMENT_REPLY_RATE_LIMIT_COOLDOWN_MINUTES = Number(process.env.COMMENT_REPLY_RATE_LIMIT_COOLDOWN_MINUTES ?? "30");
 const COMMENT_REPLY_IMMEDIATE_BATCH_SIZE = Number(process.env.COMMENT_REPLY_IMMEDIATE_BATCH_SIZE ?? "5");
@@ -1219,6 +1221,29 @@ async function acquireNextRunnableJob(jobType?: JobType): Promise<Record<string,
   const now = new Date();
   const lockExpiresAt = new Date(now.getTime() + USER_JOB_LOCK_WINDOW_MS);
   const correlationId = randomUUID();
+
+  await Job.updateMany(
+    {
+      ...(jobType ? { type: jobType } : {}),
+      status: "processing",
+      lockExpiresAt: { $lte: now }
+    },
+    {
+      $set: {
+        status: "retrying",
+        nextRunAt: now,
+        nextRetryAt: now,
+        lastError: "Job lock expired before completion; re-queued automatically",
+        failureReason: "Job lock expired before completion; re-queued automatically",
+        errorCode: "job_lock_expired"
+      },
+      $unset: {
+        lockedAt: "",
+        lockExpiresAt: ""
+      }
+    }
+  );
+
   const busyUserIds = (await Job.distinct("userId", {
     status: "processing",
     lockExpiresAt: { $gt: now }
@@ -1404,6 +1429,27 @@ export async function enqueuePostJobsForPost(userId: string, postId: string, opt
           nextRunAt: nextRunAt.toISOString(),
           pageIndex: pageIndex + 1,
           selectedPagesCount: selectedPages.length,
+          scheduledDelayMinutes: pageIndex * spacingMinutes
+        }
+      });
+      await logAction({
+        userId,
+        type: "queue",
+        level: "info",
+        message: "PAGE_TASK_SCHEDULED: Shopee page publish task scheduled",
+        metadata: {
+          autoPost: true,
+          autoSource: "shopee-affiliate",
+          autoPostConfigId,
+          workflowRunId,
+          step: "PAGE_TASK_SCHEDULED",
+          jobId: String(job._id),
+          pageId: page.pageId,
+          pageName: page.name ?? "Facebook Page",
+          status: "queued",
+          scheduledAt: nextRunAt.toISOString(),
+          pageIndex: pageIndex + 1,
+          selectedPagesCount: Number(options.payloadExtras?.selectedPagesCount ?? selectedPages.length),
           scheduledDelayMinutes: pageIndex * spacingMinutes
         }
       });
