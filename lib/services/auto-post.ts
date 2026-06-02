@@ -119,6 +119,10 @@ function getShopeePackageCacheKey(input: {
   ].join(":");
 }
 
+function resolveShopeeTrackingId(config: Pick<LeanAutoPostConfig, "shopeeTrackingId">) {
+  return config.shopeeTrackingId?.trim() || process.env.SHOPEE_TRACKING_ID?.trim() || "default";
+}
+
 const AUTO_POST_QUOTE_EXPANSION_PROMPT = `คุณคือผู้เชี่ยวชาญด้านการเขียนคอนเทนต์โซเชียลมีเดีย (Facebook/IG) ที่เน้นเพิ่ม Time Spend, Engagement (Like/Comment/Share) และความรู้สึกของผู้อ่าน
 
 หน้าที่ของคุณคือ:
@@ -750,7 +754,7 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
     const productId = String(selected.product.productId);
     const pageIndex = Math.max(0, input.eligiblePageIds.indexOf(selected.pageId));
     const startAt = new Date(input.batchStartAt.getTime() + Math.max(pageIndex, 0) * input.pageSpacingMinutes * 60 * 1000);
-    const trackingId = input.config.shopeeTrackingId?.trim() || `page-${selected.pageId}`;
+    const trackingId = resolveShopeeTrackingId(input.config);
     const packageCacheKey = getShopeePackageCacheKey({
       productId,
       captionStyle: input.config.shopeeCaptionStyle ?? "soft_sell",
@@ -1283,8 +1287,16 @@ async function queueShopeeAutoPostsForConfig(
     const selected = selectedProductsForQueue[index];
     const pageIndex = Math.max(0, eligiblePageIds.indexOf(selected.pageId));
     const startAt = new Date(batchStartAt.getTime() + Math.max(pageIndex, index) * pageSpacingMinutes * 60 * 1000);
-    const trackingId = config.shopeeTrackingId?.trim() || `page-${selected.pageId}`;
+    const trackingId = resolveShopeeTrackingId(config);
     const stepStartedAt = Date.now();
+    console.info("[PAGE]", {
+      pageId: selected.pageId,
+      pageIndex: Math.max(pageIndex, index) + 1,
+      selectedPagesCount: eligiblePageIds.length,
+      productId: selected.product.productId,
+      trackingId,
+      workflowRunId: records.workflowRunId
+    });
     try {
       await logShopeeStep({
         config,
@@ -1433,6 +1445,14 @@ async function queueShopeeAutoPostsForConfig(
             }
           });
 
+      console.info("[TASK CREATED]", {
+        pageId: selected.pageId,
+        pageIndex: Math.max(pageIndex, index) + 1,
+        queuedForPost,
+        postId: String(post._id),
+        workflowRunId: records.workflowRunId
+      });
+
       await recordShopeeQueueItem({
         userId: config.userId,
         pageId: selected.pageId,
@@ -1460,6 +1480,14 @@ async function queueShopeeAutoPostsForConfig(
 
       queued += queuedForPost;
     } catch (error) {
+      console.error("[TASK ERROR]", {
+        pageId: selected.pageId,
+        pageIndex: Math.max(pageIndex, index) + 1,
+        productId: selected.product.productId,
+        workflowRunId: records.workflowRunId,
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
       failedPageCount += 1;
       await createFailedShopeePageJob({
         config,
