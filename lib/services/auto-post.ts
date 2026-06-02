@@ -1240,6 +1240,22 @@ async function queueShopeeAutoPostsForConfig(
     sharedSingleProductPackageKey = prepared.packageCacheKey;
   }
 
+  // A Shopee auto-post run is a page batch: once one product passes selection,
+  // every selected page must receive a publish task. This protects production
+  // from per-page selection/env drift creating only 1 task for 3 selected pages.
+  if (selectedProductsForQueue.length > 0) {
+    const fallbackSelectedProduct = selectedProductsForQueue[0];
+    const selectedPageIds = new Set(selectedProductsForQueue.map((selected) => String(selected.pageId)));
+    for (const pageId of eligiblePageIds) {
+      if (!selectedPageIds.has(pageId)) {
+        selectedProductsForQueue.push({ ...fallbackSelectedProduct, pageId });
+      }
+    }
+    selectedProductsForQueue.sort(
+      (left, right) => eligiblePageIds.indexOf(left.pageId) - eligiblePageIds.indexOf(right.pageId)
+    );
+  }
+
   const selectedProductPageIds = new Set(selectedProductsForQueue.map((selected) => selected.pageId));
   for (let index = 0; index < eligiblePageIds.length; index += 1) {
     const pageId = eligiblePageIds[index];
