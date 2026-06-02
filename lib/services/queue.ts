@@ -1479,6 +1479,147 @@ export async function enqueuePostJobsForPost(userId: string, postId: string, opt
   return queued;
 }
 
+async function repairMissingShopeePageTasks(userId: string, config: Record<string, any>, workflowRunId?: string | null) {
+  const configId = String(config._id ?? "");
+  const targetPageIds = Array.from(
+    new Set(
+      (Array.isArray(config.targetPageIds) ? config.targetPageIds : [])
+        .map((pageId: unknown) => String(pageId ?? "").trim())
+        .filter(Boolean)
+    )
+  );
+
+  if (!configId || targetPageIds.length === 0) {
+    return { created: 0, expected: targetPageIds.length };
+  }
+
+  const runQuery: Record<string, unknown> = {
+    userId,
+    type: "post",
+    "payload.autoSource": "shopee-affiliate",
+    "payload.autoPostConfigId": configId
+  };
+  if (workflowRunId) {
+    runQuery["payload.workflowRunId"] = workflowRunId;
+  }
+
+  const runJobs = (await Job.find(runQuery)
+    .sort({ createdAt: 1 })
+    .select("_id postId targetPageId payload nextRunAt createdAt")
+    .lean()) as Array<Record<string, any>>;
+
+  const existingPageIds = new Set(runJobs.map((job) => String(job.targetPageId ?? "")).filter(Boolean));
+  const missingPageIds = targetPageIds.filter((pageId) => !existingPageIds.has(pageId));
+  if (!missingPageIds.length) {
+    return { created: 0, expected: targetPageIds.length };
+  }
+
+  const templateJob = runJobs.find((job) => job.postId && job.payload?.autoSource === "shopee-affiliate");
+  if (!templateJob?.postId) {
+    await logAction({
+      userId,
+      type: "queue",
+      level: "error",
+      message: "PAGE_TASK_REPAIR_FAILED: No Shopee template post found for missing page tasks",
+      metadata: {
+        autoPost: true,
+        autoSource: "shopee-affiliate",
+        autoPostConfigId: configId,
+        workflowRunId,
+        selectedPagesCount: targetPageIds.length,
+        existingTasksCount: runJobs.length,
+        missingPageIds
+      }
+    });
+    return { created: 0, expected: targetPageIds.length };
+  }
+
+  const templatePost = (await Post.findById(templateJob.postId).lean()) as LeanPost | null;
+  if (!templatePost) {
+    await logAction({
+      userId,
+      type: "queue",
+      level: "error",
+      message: "PAGE_TASK_REPAIR_FAILED: Shopee template post was not found",
+      metadata: {
+        autoPost: true,
+        autoSource: "shopee-affiliate",
+        autoPostConfigId: configId,
+        workflowRunId,
+        postId: String(templateJob.postId),
+        missingPageIds
+      }
+    });
+    return { created: 0, expected: targetPageIds.length };
+  }
+
+  const connection = (await ensureValidFacebookConnection(userId)) as LeanFacebookConnection;
+  const pageNameById = new Map((connection?.pages ?? []).map((page) => [String(page.pageId), page.name ?? "Facebook Page"]));
+  const baseRunAt = runJobs
+    .map((job) => (job.nextRunAt ? new Date(job.nextRunAt) : job.createdAt ? new Date(job.createdAt) : null))
+    .filter((date): date is Date => Boolean(date && !Number.isNaN(date.getTime())))
+    .sort((left, right) => left.getTime() - right.getTime())[0] ?? new Date();
+  const now = new Date();
+  const templatePayload = (templateJob.payload ?? {}) as Record<string, unknown>;
+
+  let created = 0;
+  for (const pageId of missingPageIds) {
+    const pageIndex = Math.max(0, targetPageIds.indexOf(pageId));
+    const scheduledAt = new Date(baseRunAt.getTime() + pageIndex * AUTO_POST_PAGE_SPACING_MINUTES * 60 * 1000);
+    const nextRunAt = scheduledAt.getTime() <= now.getTime() ? now : scheduledAt;
+    const fingerprint = contentFingerprint({
+      content: templatePost.content,
+      hashtags: templatePost.hashtags,
+      imageUrls: templatePost.imageUrls,
+      targetPageIds: [pageId]
+    });
+
+    const job = await Job.create({
+      userId,
+      type: "post",
+      postId: templatePost._id,
+      targetPageId: pageId,
+      fingerprint,
+      payload: {
+        ...templatePayload,
+        selectedPagesCount: targetPageIds.length,
+        pageIndex: pageIndex + 1,
+        scheduledDelayMinutes: pageIndex * AUTO_POST_PAGE_SPACING_MINUTES,
+        repairedMissingPageTask: true,
+        repairedAt: now.toISOString()
+      },
+      nextRunAt,
+      maxAttempts: 3,
+      status: "queued"
+    });
+
+    created += 1;
+    await logAction({
+      userId,
+      type: "queue",
+      level: "warn",
+      message: "PAGE_TASK_REPAIRED: Missing Shopee page publish task created",
+      metadata: {
+        autoPost: true,
+        autoSource: "shopee-affiliate",
+        autoPostConfigId: configId,
+        workflowRunId,
+        step: "PAGE_TASK_REPAIRED",
+        jobId: String(job._id),
+        pageId,
+        pageName: pageNameById.get(pageId) ?? "Facebook Page",
+        status: "queued",
+        scheduledAt: nextRunAt.toISOString(),
+        pageIndex: pageIndex + 1,
+        selectedPagesCount: targetPageIds.length,
+        scheduledDelayMinutes: pageIndex * AUTO_POST_PAGE_SPACING_MINUTES
+      }
+    });
+  }
+
+  return { created, expected: targetPageIds.length };
+}
+
 export async function retryPendingShopeePageJobs(userId: string, configId?: string) {
   const now = new Date();
   const staleBefore = new Date(now.getTime() - 3 * 60 * 1000);
@@ -1491,6 +1632,7 @@ export async function retryPendingShopeePageJobs(userId: string, configId?: stri
   }
 
   const workflowRunId = (config as any).lastWorkflowRunId ? String((config as any).lastWorkflowRunId) : null;
+  const repaired = await repairMissingShopeePageTasks(userId, config as Record<string, any>, workflowRunId);
   const query: Record<string, unknown> = {
     userId,
     type: "post",
@@ -1514,9 +1656,11 @@ export async function retryPendingShopeePageJobs(userId: string, configId?: stri
 
   if (!stuckJobs.length) {
     return {
-      requeued: 0,
+      requeued: repaired.created,
       processed: 0,
-      message: "No pending Shopee page jobs found"
+      message: repaired.created
+        ? `Created ${repaired.created} missing Shopee page task(s)`
+        : "No pending Shopee page jobs found"
     };
   }
 
@@ -1576,7 +1720,7 @@ export async function retryPendingShopeePageJobs(userId: string, configId?: stri
   const processed = await processQueuedJobs(Math.min(stuckJobs.length, 10), "post");
 
   return {
-    requeued: stuckJobs.length,
+    requeued: stuckJobs.length + repaired.created,
     processed
   };
 }
