@@ -68,6 +68,10 @@ type ControlPanelStatus = {
   lastSkippedReason?: string | null;
   selectedPagesCount?: number;
   createdTasksCount?: number;
+  queueHealth?: "ok" | "missing_tasks" | string;
+  missingTasksCount?: number;
+  missingTasksWarning?: string | null;
+  repairedTasksCount?: number;
   publishedPagesCount?: number;
   failedPagesCount?: number;
   pendingPagesCount?: number;
@@ -1148,6 +1152,14 @@ export function AutoPostPanel() {
           <div className="auto-post-metric-card"><span className="muted">Failed / Pending</span><strong>{controlPanel?.failedPagesCount ?? 0} / {controlPanel?.pendingPagesCount ?? 0}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Worker heartbeat</span><strong>{formatDateTime(controlPanel?.lastWorkerHeartbeat ?? undefined)}</strong></div>
         </div>
+        {controlPanel?.queueHealth === "missing_tasks" ? (
+          <div className="composer-message composer-message-error">
+            {sanitizeText(controlPanel.missingTasksWarning || "Missing Tasks Detected")}
+            {typeof controlPanel.repairedTasksCount === "number" && controlPanel.repairedTasksCount > 0
+              ? ` • Repaired ${controlPanel.repairedTasksCount} task(s)`
+              : ""}
+          </div>
+        ) : null}
         {controlPanel?.pageResults?.length ? (
           <div className="stack compact-stack">
             <div className="split compact-row">

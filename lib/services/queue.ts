@@ -1479,7 +1479,7 @@ export async function enqueuePostJobsForPost(userId: string, postId: string, opt
   return queued;
 }
 
-async function repairMissingShopeePageTasks(userId: string, config: Record<string, any>, workflowRunId?: string | null) {
+export async function repairMissingShopeePageTasks(userId: string, config: Record<string, any>, workflowRunId?: string | null) {
   const configId = String(config._id ?? "");
   const targetPageIds = Array.from(
     new Set(

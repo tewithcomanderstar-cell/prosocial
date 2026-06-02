@@ -6,6 +6,7 @@ import { FacebookPostQueue } from "@/models/FacebookPostQueue";
 import { Job } from "@/models/Job";
 import { ShopeeProduct } from "@/models/ShopeeProduct";
 import { getShopeeAffiliateConfigStatus, getShopeeEnvStatus, getShopeeProductProvider } from "@/lib/services/shopee-affiliate";
+import { repairMissingShopeePageTasks } from "@/lib/services/queue";
 import { getStorageStatus, mapStorageQuotaMessage } from "@/lib/services/storage-cleanup";
 import { DEFAULT_SHOPEE_CATEGORY, normalizeShopeeCategory } from "@/lib/shopee-categories";
 
@@ -316,6 +317,21 @@ export async function GET() {
     );
     const targetPageIds = Array.isArray(effectiveConfigDoc?.targetPageIds) ? effectiveConfigDoc.targetPageIds : [];
     const workflowRunId = effectiveConfigDoc?.lastWorkflowRunId ? String(effectiveConfigDoc.lastWorkflowRunId) : null;
+    const shouldAutoRepairMissingTasks =
+      effectiveConfigDoc?._id &&
+      contentSource === "shopee-affiliate" &&
+      targetPageIds.length > 0 &&
+      ["running", "posting", "retrying", "waiting"].includes(String(effectiveConfigDoc.autoPostStatus ?? effectiveConfig?.autoPostStatus ?? ""));
+
+    const repairedTasks = shouldAutoRepairMissingTasks
+      ? await withSoftTimeout(
+          repairMissingShopeePageTasks(userId, effectiveConfigDoc as Record<string, any>, workflowRunId),
+          STATUS_OPTIONAL_TIMEOUT_MS,
+          { created: 0, expected: targetPageIds.length },
+          "repair-missing-shopee-page-tasks"
+        )
+      : { created: 0, expected: targetPageIds.length };
+
     const jobQuery: Record<string, unknown> = {
       userId,
       type: "post",
@@ -404,6 +420,8 @@ export async function GET() {
     const failedPagesCount = pageResults.filter((page) => page.status === "failed" || page.status === "skipped").length;
     const activePagesCount = pageResults.filter((page) => page.status === "publishing" || page.status === "retrying").length;
     const pendingPagesCount = Math.max(0, selectedPagesCount - publishedPagesCount - failedPagesCount - activePagesCount);
+    const createdTasksCount = pageResults.filter((page) => page.jobId).length;
+    const missingTasksCount = Math.max(0, selectedPagesCount - createdTasksCount);
     const currentStep = latestProcessingJob
       ? "PAGE_PUBLISH_STARTED"
       : runJobs.length
@@ -494,7 +512,13 @@ export async function GET() {
         ? sanitizeLegacyMessage(String(latestSkippedMetadata.reason ?? latestSkippedProductLog.message ?? "Product skipped"))
         : null,
       selectedPagesCount,
-      createdTasksCount: runJobs.length,
+      createdTasksCount,
+      queueHealth: missingTasksCount > 0 ? "missing_tasks" : "ok",
+      missingTasksCount,
+      missingTasksWarning: missingTasksCount > 0
+        ? `Missing Tasks Detected. Expected: ${selectedPagesCount}, Created: ${createdTasksCount}`
+        : null,
+      repairedTasksCount: repairedTasks.created,
       publishedPagesCount,
       failedPagesCount,
       pendingPagesCount,
