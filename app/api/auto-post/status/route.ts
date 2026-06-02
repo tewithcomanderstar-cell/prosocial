@@ -11,7 +11,7 @@ import { getStorageStatus, mapStorageQuotaMessage } from "@/lib/services/storage
 import { DEFAULT_SHOPEE_CATEGORY, normalizeShopeeCategory } from "@/lib/shopee-categories";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 10;
+export const maxDuration = 30;
 
 type AutoPostConfigStatusDoc = {
   _id: unknown;
@@ -44,6 +44,7 @@ type LeanJobStatus = {
 const STATUS_FAST_TIMEOUT_MS = Number(process.env.AUTO_POST_STATUS_FAST_TIMEOUT_MS ?? 1200);
 const STATUS_OPTIONAL_TIMEOUT_MS = Number(process.env.AUTO_POST_STATUS_OPTIONAL_TIMEOUT_MS ?? 1500);
 const STATUS_JOB_TIMEOUT_MS = Number(process.env.AUTO_POST_STATUS_JOB_TIMEOUT_MS ?? 1800);
+const STATUS_REPAIR_TIMEOUT_MS = Number(process.env.AUTO_POST_STATUS_REPAIR_TIMEOUT_MS ?? 6000);
 
 function sanitizeLegacyMessage(value?: string | null) {
   if (!value) return value ?? null;
@@ -326,7 +327,7 @@ export async function GET() {
     const repairedTasks = shouldAutoRepairMissingTasks
       ? await withSoftTimeout(
           repairMissingShopeePageTasks(userId, effectiveConfigDoc as Record<string, any>, workflowRunId),
-          STATUS_OPTIONAL_TIMEOUT_MS,
+          STATUS_REPAIR_TIMEOUT_MS,
           { created: 0, expected: targetPageIds.length },
           "repair-missing-shopee-page-tasks"
         )

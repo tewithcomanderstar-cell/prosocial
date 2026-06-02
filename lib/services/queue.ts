@@ -1493,20 +1493,49 @@ export async function repairMissingShopeePageTasks(userId: string, config: Recor
     return { created: 0, expected: targetPageIds.length };
   }
 
-  const runQuery: Record<string, unknown> = {
+  const baseRunQuery: Record<string, unknown> = {
     userId,
     type: "post",
     "payload.autoSource": "shopee-affiliate",
     "payload.autoPostConfigId": configId
   };
+
+  const loadRunJobs = async (query: Record<string, unknown>) =>
+    (await Job.find(query)
+      .sort({ createdAt: 1 })
+      .select("_id postId targetPageId payload nextRunAt createdAt status")
+      .lean()) as Array<Record<string, any>>;
+
+  const runQuery: Record<string, unknown> = { ...baseRunQuery };
   if (workflowRunId) {
     runQuery["payload.workflowRunId"] = workflowRunId;
   }
 
-  const runJobs = (await Job.find(runQuery)
-    .sort({ createdAt: 1 })
-    .select("_id postId targetPageId payload nextRunAt createdAt")
-    .lean()) as Array<Record<string, any>>;
+  let runJobs = await loadRunJobs(runQuery);
+
+  // Production recovery: sometimes the config points at a workflowRunId whose
+  // task creation timed out after the first page. If that query cannot provide
+  // a usable template, fall back to the latest Shopee job for this config so we
+  // can clone the already prepared post/caption/images into the missing pages.
+  if (!runJobs.some((job) => job.postId)) {
+    const latestTemplateJob = (await Job.findOne({
+      ...baseRunQuery,
+      postId: { $exists: true, $ne: null }
+    })
+      .sort({ createdAt: -1 })
+      .select("payload")
+      .lean()) as Record<string, any> | null;
+    const fallbackWorkflowRunId =
+      typeof latestTemplateJob?.payload?.workflowRunId === "string"
+        ? latestTemplateJob.payload.workflowRunId
+        : null;
+    if (fallbackWorkflowRunId && fallbackWorkflowRunId !== workflowRunId) {
+      runJobs = await loadRunJobs({ ...baseRunQuery, "payload.workflowRunId": fallbackWorkflowRunId });
+      workflowRunId = fallbackWorkflowRunId;
+    } else if (!runJobs.length) {
+      runJobs = await loadRunJobs(baseRunQuery);
+    }
+  }
 
   const existingPageIds = new Set(runJobs.map((job) => String(job.targetPageId ?? "")).filter(Boolean));
   const missingPageIds = targetPageIds.filter((pageId) => !existingPageIds.has(pageId));
@@ -1553,14 +1582,16 @@ export async function repairMissingShopeePageTasks(userId: string, config: Recor
     return { created: 0, expected: targetPageIds.length };
   }
 
-  const connection = (await ensureValidFacebookConnection(userId)) as LeanFacebookConnection;
-  const pageNameById = new Map((connection?.pages ?? []).map((page) => [String(page.pageId), page.name ?? "Facebook Page"]));
   const baseRunAt = runJobs
     .map((job) => (job.nextRunAt ? new Date(job.nextRunAt) : job.createdAt ? new Date(job.createdAt) : null))
     .filter((date): date is Date => Boolean(date && !Number.isNaN(date.getTime())))
     .sort((left, right) => left.getTime() - right.getTime())[0] ?? new Date();
   const now = new Date();
   const templatePayload = (templateJob.payload ?? {}) as Record<string, unknown>;
+  const activeWorkflowRunId =
+    workflowRunId ||
+    (typeof templatePayload.workflowRunId === "string" ? templatePayload.workflowRunId : "") ||
+    String(config.lastWorkflowRunId ?? "");
 
   let created = 0;
   for (const pageId of missingPageIds) {
@@ -1582,6 +1613,9 @@ export async function repairMissingShopeePageTasks(userId: string, config: Recor
       fingerprint,
       payload: {
         ...templatePayload,
+        autoPostConfigId: configId,
+        autoSource: "shopee-affiliate",
+        workflowRunId: activeWorkflowRunId,
         selectedPagesCount: targetPageIds.length,
         pageIndex: pageIndex + 1,
         scheduledDelayMinutes: pageIndex * AUTO_POST_PAGE_SPACING_MINUTES,
@@ -1603,11 +1637,11 @@ export async function repairMissingShopeePageTasks(userId: string, config: Recor
         autoPost: true,
         autoSource: "shopee-affiliate",
         autoPostConfigId: configId,
-        workflowRunId,
+        workflowRunId: activeWorkflowRunId,
         step: "PAGE_TASK_REPAIRED",
         jobId: String(job._id),
         pageId,
-        pageName: pageNameById.get(pageId) ?? "Facebook Page",
+        pageName: "Facebook Page",
         status: "queued",
         scheduledAt: nextRunAt.toISOString(),
         pageIndex: pageIndex + 1,
