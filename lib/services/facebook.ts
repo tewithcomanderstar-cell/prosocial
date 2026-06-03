@@ -400,9 +400,27 @@ export async function publishPostToFacebook(params: {
     | { kind: "binary"; fileName: string; bytes: ArrayBuffer; mimeType: string }
   >;
 }) {
-  const attachedMedia = [];
+  const hasImages = params.images.length >= 1;
+  const publishMode = hasImages ? "multi_photo" : "link_preview";
+  const attachedMedia: Array<{ media_fbid: string }> = [];
 
-  for (const image of params.images) {
+  console.info("[FB_PUBLISH_MODE]", {
+    pageId: params.pageId,
+    publishMode,
+    imageCount: params.images.length,
+    hasLink: Boolean(params.link?.trim())
+  });
+  console.info("[UGC_IMAGES_COUNT]", {
+    pageId: params.pageId,
+    count: params.images.length
+  });
+
+  for (const [index, image] of params.images.entries()) {
+    console.info("[FB_PHOTO_UPLOAD_START]", {
+      pageId: params.pageId,
+      imageIndex: index + 1,
+      imageKind: image.kind
+    });
     const uploaded =
       image.kind === "url"
         ? await uploadPhotoByUrl(params.pageId, params.pageAccessToken, image.value)
@@ -414,6 +432,11 @@ export async function publishPostToFacebook(params: {
             image.mimeType
           );
     attachedMedia.push({ media_fbid: uploaded.id });
+    console.info("[FB_PHOTO_UPLOAD_SUCCESS]", {
+      pageId: params.pageId,
+      imageIndex: index + 1,
+      mediaFbid: uploaded.id
+    });
   }
 
   const body = new URLSearchParams({
@@ -422,7 +445,9 @@ export async function publishPostToFacebook(params: {
   });
 
   const attachmentLink = params.link?.trim();
-  if (attachmentLink) {
+  // Facebook may prioritize link preview cards over attached_media when both are present.
+  // For generated UGC images, the Shopee short link stays in the caption only.
+  if (!hasImages && attachmentLink) {
     body.set("link", attachmentLink);
   }
 
@@ -430,10 +455,17 @@ export async function publishPostToFacebook(params: {
     body.append(`attached_media[${index}]`, JSON.stringify(media));
   });
 
+  console.info("[FB_ATTACHED_MEDIA_CREATED]", {
+    pageId: params.pageId,
+    publishMode,
+    attachedMediaCount: attachedMedia.length,
+    linkFieldSent: !hasImages && Boolean(attachmentLink)
+  });
   console.info("[FB_ATTACHMENT]", {
     pageId: params.pageId,
     attachedMediaCount: attachedMedia.length,
-    hasLinkAttachment: Boolean(attachmentLink),
+    hasLinkAttachment: !hasImages && Boolean(attachmentLink),
+    linkSuppressedForUgcImages: hasImages && Boolean(attachmentLink),
     linkHost: attachmentLink ? safeUrlHost(attachmentLink) : null
   });
 
@@ -454,9 +486,16 @@ export async function publishPostToFacebook(params: {
   console.info("[FB_PREVIEW]", {
     pageId: params.pageId,
     postId: typeof payload?.id === "string" ? payload.id : null,
-    linkAttached: Boolean(attachmentLink),
+    linkAttached: !hasImages && Boolean(attachmentLink),
     attachedMediaCount: attachedMedia.length
   });
+  if (hasImages) {
+    console.info("[FB_MULTI_PHOTO_POST_SUCCESS]", {
+      pageId: params.pageId,
+      postId: typeof payload?.id === "string" ? payload.id : null,
+      attachedMediaCount: attachedMedia.length
+    });
+  }
 
   return payload;
 }
