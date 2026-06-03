@@ -1054,6 +1054,20 @@ async function validateShopeeAffiliatePublishPayload(input: {
   throw new Error(`Shopee Affiliate post validation failed: ${reasons.join("; ")}`);
 }
 
+function resolveShopeeFacebookAttachmentLink(job: JobExecution, message: string) {
+  const payloadAffiliateLink = typeof job.payload?.affiliateLink === "string" ? job.payload.affiliateLink.trim() : "";
+  if (payloadAffiliateLink && isShopeeShortLink(payloadAffiliateLink)) {
+    return payloadAffiliateLink;
+  }
+
+  const captionLink = message.match(/https:\/\/s\.shopee\.co\.th\/\S+/)?.[0]?.trim();
+  if (captionLink && isShopeeShortLink(captionLink)) {
+    return captionLink;
+  }
+
+  return undefined;
+}
+
 async function resolveImages(userId: string, imageRefs: string[]): Promise<ResolvedImage[]> {
   if (imageRefs.length === 0) {
     return [];
@@ -2081,6 +2095,10 @@ async function executePostJob(job: JobExecution) {
     });
   }
 
+  const facebookAttachmentLink = isShopeeAffiliateJob(job)
+    ? resolveShopeeFacebookAttachmentLink(job, message)
+    : undefined;
+
   if (hasBoundAutoPostConfig(job)) {
     await updateBoundAutoPostState(
       job,
@@ -2099,6 +2117,36 @@ async function executePostJob(job: JobExecution) {
         imageUsed: typeof job.payload?.selectedImageId === "string" ? job.payload.selectedImageId : undefined
       }
     );
+  }
+
+  if (isShopeeAffiliateJob(job)) {
+    console.info("[FB_LINK]", {
+      jobId: String(job._id),
+      pageId: page.pageId,
+      pageName: page.name,
+      hasAttachmentLink: Boolean(facebookAttachmentLink),
+      linkHost: facebookAttachmentLink ? new URL(facebookAttachmentLink).hostname : null
+    });
+    await logAction({
+      userId: job.userId,
+      type: "queue",
+      level: facebookAttachmentLink ? "info" : "warn",
+      message: facebookAttachmentLink
+        ? "[FB_LINK] Shopee short link will be sent as Facebook link attachment"
+        : "[FB_LINK] Shopee short link attachment missing before Facebook publish",
+      relatedJobId: job._id,
+      relatedPostId: job.postId,
+      relatedScheduleId: job.scheduleId,
+      metadata: {
+        ...getAutoPostLogFlags(job),
+        targetPageId: page.pageId,
+        pageName: page.name,
+        hasAttachmentLink: Boolean(facebookAttachmentLink),
+        linkHost: facebookAttachmentLink ? new URL(facebookAttachmentLink).hostname : null,
+        workflowRunId: job.payload?.workflowRunId,
+        correlationId: job.correlationId
+      }
+    });
   }
 
   await logAction({
@@ -2124,6 +2172,7 @@ async function executePostJob(job: JobExecution) {
     pageId: page.pageId,
     pageAccessToken: page.pageAccessToken,
     message,
+    link: facebookAttachmentLink,
     images
   });
 

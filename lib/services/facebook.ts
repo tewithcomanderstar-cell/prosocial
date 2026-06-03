@@ -197,6 +197,14 @@ function classifyFacebookPublishError(payload: FacebookGraphErrorPayload, fallba
   return new FacebookPublishError(message, "provider_unknown", true, payload.error);
 }
 
+function safeUrlHost(value: string) {
+  try {
+    return new URL(value).hostname;
+  } catch {
+    return "invalid_url";
+  }
+}
+
 export async function exchangeFacebookCode(code: string, redirectUri?: string | null) {
   const effectiveRedirectUri = redirectUri?.trim() || process.env.FACEBOOK_REDIRECT_URI || "";
   const url = new URL("https://graph.facebook.com/v21.0/oauth/access_token");
@@ -386,6 +394,7 @@ export async function publishPostToFacebook(params: {
   pageId: string;
   pageAccessToken: string;
   message: string;
+  link?: string;
   images: Array<
     | { kind: "url"; value: string }
     | { kind: "binary"; fileName: string; bytes: ArrayBuffer; mimeType: string }
@@ -412,8 +421,20 @@ export async function publishPostToFacebook(params: {
     access_token: params.pageAccessToken
   });
 
+  const attachmentLink = params.link?.trim();
+  if (attachmentLink) {
+    body.set("link", attachmentLink);
+  }
+
   attachedMedia.forEach((media, index) => {
     body.append(`attached_media[${index}]`, JSON.stringify(media));
+  });
+
+  console.info("[FB_ATTACHMENT]", {
+    pageId: params.pageId,
+    attachedMediaCount: attachedMedia.length,
+    hasLinkAttachment: Boolean(attachmentLink),
+    linkHost: attachmentLink ? safeUrlHost(attachmentLink) : null
   });
 
   const response = await fetchWithRetry(`https://graph.facebook.com/v21.0/${params.pageId}/feed`, {
@@ -429,7 +450,15 @@ export async function publishPostToFacebook(params: {
     throw classifyFacebookPublishError(payload, "Failed to publish Facebook post");
   }
 
-  return response.json();
+  const payload = await response.json();
+  console.info("[FB_PREVIEW]", {
+    pageId: params.pageId,
+    postId: typeof payload?.id === "string" ? payload.id : null,
+    linkAttached: Boolean(attachmentLink),
+    attachedMediaCount: attachedMedia.length
+  });
+
+  return payload;
 }
 
 export async function replyToFacebookComment(params: {
