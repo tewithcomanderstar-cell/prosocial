@@ -1311,30 +1311,31 @@ function getShopeeShortReviewProductName(productName?: string) {
   const source = normalizeTextEncoding(productName ?? TH.defaultProductName)
     .replace(/^\s*\[[^\]]*\]\s*/g, "")
     .replace(/(?:ส่งฟรี|พร้อมส่ง|ของแท้|แท้|ลดราคา|โปร|sale|deal|รุ่นใหม่ล่าสุด|ใหม่ล่าสุด)/giu, " ")
+    .replace(/\b[A-Z]{1,4}[-_]?\d{2,}\b/giu, " ")
     .replace(/\s+/g, " ")
     .trim();
 
-  const knownProductTypes = [
-    /แก้วเพชร/iu,
-    /โคมไฟ\s*LED/iu,
-    /ถุงเท้ากีฬา/iu,
-    /แก้วเก็บ(?:ความ)?เย็น/iu,
-    /กระติกน้ำ/iu,
-    /โคมไฟ/iu,
-    /พัดลมพกพา/iu,
-    /สมาร์ทวอทช์/iu,
-    /เวย์โปรตีน/iu,
-    /ไหมขัดฟัน/iu,
-    /น้ำยาซักผ้า/iu,
-    /เซรั่ม/iu,
-    /กันแดด/iu,
-    /กระเป๋า/iu,
-    /รองเท้า/iu
+  const haystack = source.toLowerCase();
+  const reviewNameRules: Array<[RegExp, () => string]> = [
+    [/แก้วเพชร/iu, () => /หลอด/.test(haystack) ? "แก้วเพชรเก็บความเย็นพร้อมหลอด" : "แก้วเพชรเก็บความเย็นพกพา"],
+    [/กระติกน้ำ/iu, () => /ใหญ่|จุ|ลิตร/.test(haystack) ? "กระติกน้ำเก็บอุณหภูมิขนาดใหญ่" : "กระติกน้ำเก็บความเย็นพกพา"],
+    [/แก้ว|tumbler|cup/iu, () => /หลอด|straw/.test(haystack) ? "แก้วเก็บอุณหภูมิพร้อมหลอด" : "แก้วน้ำสแตนเลสพกพา"],
+    [/โคมไฟ\s*LED|โคมไฟ|lamp|light/iu, () => /อ่าน|หนังสือ|ถนอม|ตา/.test(haystack) ? "โคมไฟอ่านหนังสือถนอมสายตา" : /ปรับ|ระดับ|แสง/.test(haystack) ? "โคมไฟอ่านหนังสือปรับแสงได้" : "โคมไฟตั้งโต๊ะถนอมสายตา"],
+    [/ถุงเท้า|sock/iu, () => /วิ่ง|running/.test(haystack) ? "ถุงเท้าสำหรับวิ่งและออกกำลังกาย" : "ถุงเท้ากีฬาระบายอากาศ"],
+    [/ต่างหู|earring/iu, () => /โบฮีเมียน|boho|bohemian/.test(haystack) ? "ต่างหูโบฮีเมียนแต่งลาย" : "ต่างหูแฟชั่นสไตล์วินเทจ"],
+    [/พัดลมพกพา|fan/iu, () => "พัดลมพกพาชาร์จ USB"],
+    [/สมาร์ทวอทช์|smart\s*watch|watch/iu, () => "สมาร์ทวอทช์สำหรับออกกำลังกาย"],
+    [/เวย์โปรตีน|whey|protein/iu, () => "เวย์โปรตีนชงดื่มหลังออกกำลังกาย"],
+    [/ไหมขัดฟัน|floss/iu, () => "ไหมขัดฟันด้ามจับใช้ง่าย"],
+    [/น้ำยาซักผ้า|detergent|laundry/iu, () => "น้ำยาซักผ้ากลิ่นหอมติดบ้าน"],
+    [/เซรั่ม|serum/iu, () => "เซรั่มบำรุงผิวใช้ประจำวัน"],
+    [/กันแดด|sunscreen|spf/iu, () => "กันแดดเนื้อบางเบาใช้ทุกวัน"],
+    [/กระเป๋า|bag/iu, () => /คาดอก|crossbody/.test(haystack) ? "กระเป๋าคาดอกจัดของพกพา" : "กระเป๋าพกพาช่องเก็บของเยอะ"],
+    [/รองเท้า|shoe|sneaker/iu, () => "รองเท้าลำลองใส่เดินสบาย"]
   ];
 
-  for (const pattern of knownProductTypes) {
-    const match = source.match(pattern);
-    if (match?.[0]) return compactProductText(match[0], 42);
+  for (const [pattern, buildName] of reviewNameRules) {
+    if (pattern.test(source)) return compactProductText(buildName(), 58);
   }
 
   const firstUsefulChunk = source
@@ -1349,7 +1350,11 @@ function getShopeeShortReviewProductName(productName?: string) {
 
   const words = withoutSpecs.split(/\s+/).filter(Boolean);
   const shortName = words.length > 4 ? words.slice(0, 4).join(" ") : withoutSpecs;
-  return compactProductText(shortName || source || TH.defaultProductName, 48);
+  const genericShortNames = /^(?:กระติกน้ำ|แก้วน้ำ|แก้ว|โคมไฟ|ถุงเท้า|ต่างหู|กระเป๋า|รองเท้า)$/iu;
+  const improvedName = genericShortNames.test(shortName)
+    ? `${shortName}ใช้งานประจำวัน`
+    : shortName;
+  return compactProductText(improvedName || source || TH.defaultProductName, 58);
 }
 
 function normalizeProductNameText(value?: string) {
