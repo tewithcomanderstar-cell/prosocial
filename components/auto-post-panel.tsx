@@ -1141,7 +1141,7 @@ export function AutoPostPanel() {
         <div className="grid cols-2 auto-post-metrics auto-post-metrics-minimal">
           <div className="auto-post-metric-card"><span className="muted">Current job id</span><strong>{controlPanel?.currentJobId ?? "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Current step</span><strong>{controlPanel?.currentStep ?? statusLabel(displayStatus)}</strong></div>
-          <div className="auto-post-metric-card"><span className="muted">Product attempt</span><strong>{controlPanel?.currentAttempt ? `${controlPanel.currentAttempt} / ${controlPanel.maxProductAttempts ?? 5}` : "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Product attempt</span><strong>{controlPanel?.currentAttempt ? `${controlPanel.currentAttempt} / ${controlPanel.maxProductAttempts ?? 10}` : "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Skipped products</span><strong>{controlPanel?.skippedProductsCount ?? 0}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Current product</span><strong>{controlPanel?.currentProduct ? sanitizeText(controlPanel.currentProduct) : "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Last skipped reason</span><strong>{controlPanel?.lastSkippedReason ? sanitizeText(controlPanel.lastSkippedReason) : "-"}</strong></div>

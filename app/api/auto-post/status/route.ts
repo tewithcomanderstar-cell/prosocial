@@ -452,7 +452,7 @@ export async function GET() {
     });
     const latestSkippedProductLog = logs.find((log) => {
       const metadata = (log.metadata ?? {}) as Record<string, unknown>;
-      return metadata.step === "PRODUCT_SKIPPED_SAFETY_REJECTED";
+      return String(metadata.step ?? "").startsWith("PRODUCT_SKIPPED_");
     });
     const latestAttemptMetadata = (latestAttemptLog?.metadata ?? {}) as Record<string, unknown>;
     const latestSkippedMetadata = (latestSkippedProductLog?.metadata ?? {}) as Record<string, unknown>;
@@ -461,13 +461,13 @@ export async function GET() {
     const maxProductAttempts =
       typeof latestAttemptMetadata.maxAttempts === "number"
         ? latestAttemptMetadata.maxAttempts
-        : Number(process.env.AUTO_POST_MAX_PRODUCT_ATTEMPTS ?? 5);
+        : Number(process.env.AUTO_POST_MAX_PRODUCT_ATTEMPTS ?? 10);
     const skippedProductsCount =
       typeof latestAttemptMetadata.skippedProductsCount === "number"
         ? latestAttemptMetadata.skippedProductsCount
         : typeof latestSkippedMetadata.skippedProductsCount === "number"
           ? latestSkippedMetadata.skippedProductsCount
-          : logs.filter((log) => ((log.metadata ?? {}) as Record<string, unknown>).step === "PRODUCT_SKIPPED_SAFETY_REJECTED").length;
+          : logs.filter((log) => String(((log.metadata ?? {}) as Record<string, unknown>).step ?? "").startsWith("PRODUCT_SKIPPED_")).length;
     const affiliateMissingMessage = affiliateStatus.missing.length
       ? `Shopee Affiliate setup required. Missing: ${affiliateStatus.missing.join(", ")}`
       : null;
