@@ -1014,6 +1014,13 @@ const SHOPEE_FORBIDDEN_GENERIC_PHRASES = [
   "เหมาะกับหมวด Beauty",
   "เหมาะกับหมวด",
   "เหมาะกับการใช้งานทั่วไป",
+  "ใช้งานได้ตามวัตถุประสงค์",
+  "รูปแบบสินค้าเข้าใจง่าย",
+  "ขนาดหรือจำนวนระบุชัดเจน",
+  "ขนาดหรือจำนวนระบุไว้ชัด",
+  "ใช้ในสถานการณ์ที่สินค้าออกแบบมา",
+  "เหมาะกับผู้ที่กำลังมองหาสินค้าประเภทนี้",
+  "เหมาะสำหรับการใช้งานในชีวิตประจำวัน",
   "คุ้มค่ากับราคา",
   "จากข้อมูลสินค้า",
   "จากรายละเอียดสินค้า",
@@ -1055,9 +1062,9 @@ const SHOPEE_FORBIDDEN_GENERIC_PHRASES = [
 ];
 
 const SHOPEE_REAL_REVIEW_CTAS = [
-  "🛒 ใครกำลังมองหาแนวนี้ ลองกดดูรายละเอียดเพิ่มเติมได้เลย",
-  "🛒 แปะพิกัดไว้ให้แล้ว ลองเข้าไปดูรีวิวเพิ่มเติมได้ครับ",
-  "🛒 ถ้ากำลังหาไอเทมแบบนี้ ลองดูข้อมูลใน Shopee ได้เลย"
+  "🛒 กดดูรายละเอียดเพิ่มเติม",
+  "🛒 ดูราคาและรายละเอียดเพิ่มเติมได้เลย",
+  "🛒 ใครสนใจลองกดดูรายละเอียดได้ครับ"
 ];
 
 type ShopeeProductInsight = {
@@ -1261,15 +1268,15 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
   }
 
   return {
-    type: "สินค้าทั่วไปจากข้อมูลที่เห็น",
+    type: "สินค้าไลฟ์สไตล์ / ของใช้ทั่วไป",
     recognized: false,
     confidence: "low",
     productCategory: "general",
-    audience: "คนที่กำลังมองหาไอเทมลักษณะนี้และอยากได้ตัวช่วยที่ตรงกับการใช้งานจริง",
-    situation: "ใช้ตามรูปแบบสินค้า แพ็ก ขนาด สี รุ่น หรือจำนวนที่ระบุไว้ในชื่อและรายละเอียด",
-    problem: "ช่วยให้เลือกของที่เข้ากับพื้นที่ใช้งานหรือกิจวัตรประจำวันได้ง่ายขึ้น",
-    angle: "เขียนจากสิ่งที่เห็นจริง เช่น รูปแบบสินค้า แพ็ก ขนาด จำนวน สี รุ่น และรายละเอียดที่ระบุ โดยไม่เดาคุณสมบัติเพิ่ม",
-    fallbackFeatures: ["✅ รูปแบบสินค้าเข้าใจง่าย", "✅ ขนาดหรือจำนวนระบุไว้ชัด", "✅ ใช้กับสถานการณ์ที่สินค้าออกแบบมาได้ตรงจุด"],
+    audience: "คนที่ต้องการไอเทมที่ช่วยให้จัดของ ใช้งาน หรือพกติดตัวได้สะดวกขึ้น",
+    situation: "ใช้กับมุมบ้าน โต๊ะทำงาน การเดินทาง หรือกิจกรรมที่เห็นได้จากชื่อและรูปสินค้า",
+    problem: "ช่วยลดความยุ่งยากเวลาหยิบใช้ จัดเก็บ หรือเตรียมของให้พร้อมขึ้น",
+    angle: "เขียนจากการใช้งานที่เห็นได้จริงในชื่อ รูป และ description โดยไม่ยกจำนวน สี ขนาด หรือน้ำหนักเป็นจุดขายหลักถ้าไม่เกี่ยวกับการใช้งาน",
+    fallbackFeatures: ["✅ หยิบใช้งานได้ง่ายขึ้น", "✅ ช่วยจัดของหรือเตรียมของให้เป็นระเบียบ", "✅ เหมาะกับการใช้งานตามบริบทในรูปสินค้า"],
     forbiddenAngles: ["ห้ามเดาคุณสมบัติที่ไม่มีในชื่อ รูป หรือ description", "ห้ามใช้คำ generic ลอย ๆ โดยไม่มีบริบทสินค้า"]
   };
 }
@@ -1671,9 +1678,9 @@ function buildShopeeReviewFeeling(product: ShopeeProductRecord) {
   const primaryFact = facts[0];
   const templates = primaryFact
     ? [
-        `${primaryFact} จุดนี้น่าจะช่วยให้ใช้งานได้ตรงกับที่ต้องการมากขึ้น`,
-        `${primaryFact} เหมาะกับคนที่ใช้ในบริบทแบบ ${insight.situation}`,
-        `${primaryFact} เป็นรายละเอียดที่เข้ากับการใช้งานในบริบทนี้`
+        `${primaryFact} ช่วยให้หยิบใช้ในสถานการณ์นี้ได้สะดวกขึ้น`,
+        `${primaryFact} เข้ากับการใช้งานแบบ ${insight.situation}`,
+        `${primaryFact} เป็นจุดที่ช่วยให้ใช้งานได้คล่องขึ้น`
       ]
     : [
         insight.problem,
@@ -1723,8 +1730,6 @@ function buildShopeeDetailBullets(product: ShopeeProductRecord) {
 
 type ShopeeCaptionParts = {
   productName: string;
-  hookLine: string;
-  reviewLine: string;
   details: string[];
   priceLine?: string;
   ctaLine: string;
@@ -1733,15 +1738,9 @@ type ShopeeCaptionParts = {
 };
 
 function buildShopeeCaptionFromParts(parts: ShopeeCaptionParts) {
-  const detailLines = parts.details.length ? parts.details : ["✅ รูปแบบสินค้าเข้ากับการใช้งานที่ต้องการ", "✅ รายละเอียดหลักช่วยให้เลือกได้ตรงขึ้น"];
+  const detailLines = parts.details.length ? parts.details : ["✅ หยิบใช้งานได้ง่ายขึ้น", "✅ ช่วยจัดของหรือเตรียมของให้เป็นระเบียบ"];
   return [
     parts.productName,
-    "",
-    parts.hookLine,
-    "",
-    parts.reviewLine,
-    "",
-    "📌 จุดที่ชอบ",
     "",
     ...detailLines.flatMap((line) => [line, ""]).slice(0, -1),
     ...(parts.priceLine ? ["", parts.priceLine] : []),
@@ -1759,8 +1758,6 @@ export function buildShopeeFallbackCaption(product: ShopeeProductRecord, shopeeS
   const productName = getShopeeCaptionProductName(product.productName);
   const caption = buildShopeeCaptionFromParts({
     productName,
-    hookLine: buildShopeeProductHook(product),
-    reviewLine: buildShopeeUsageSituation(product),
     details: buildShopeeDetailBullets(product),
     priceLine: formatShopeePrice(product),
     ctaLine: randomText(SHOPEE_REAL_REVIEW_CTAS),
@@ -1812,12 +1809,6 @@ export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string, p
     .slice(0, 10);
   const isBullet = (line: string) => /^[*•\-✅]/.test(line);
 
-  const aiNarrativeLines = bodyLines.filter((line) => !isBullet(line) && !hasSoftCta(line) && !isBadShopeeFact(line, product) && !isShopeeProductNameDuplicateText(line, productName));
-  const aiFeelingLine = aiNarrativeLines[0];
-  const aiSituationLine = aiNarrativeLines[1];
-  const reviewLine = stripShopeeLeadingEmoji(
-    compactProductText(aiSituationLine || buildShopeeUsageSituation(product ?? ({ productName } as ShopeeProductRecord)), 150)
-  );
   const aiBullets = bodyLines
     .map((line) => (isBullet(line) ? normalizeShopeeBullet(stripShopeeProductNameFromText(line, productName), 86, product) : ""))
     .filter((line): line is string => Boolean(line) && !isShopeeProductNameDuplicateText(line, productName));
@@ -1825,11 +1816,6 @@ export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string, p
   const details = Array.from(new Set([...aiBullets, ...fallbackBullets]))
     .filter((line) => !isShopeeProductNameDuplicateText(line, productName) && !containsForbiddenShopeeGenericText(line, product))
     .slice(0, 4);
-  const fallbackProductForHook = product ?? ({ productName } as ShopeeProductRecord);
-  const rawHookLine = compactProductText(aiFeelingLine || buildShopeeProductHook(fallbackProductForHook), 110);
-  const hookLine = isShopeeProductNameDuplicateText(rawHookLine, productName)
-    ? stripShopeeProductNameFromText(rawHookLine, productName) || buildShopeeProductHook(product ?? ({ productName } as ShopeeProductRecord))
-    : rawHookLine;
   const priceLine = normalizeTextEncoding(formatShopeePrice(product));
   const ctaLine = randomText(SHOPEE_REAL_REVIEW_CTAS);
 
@@ -1837,8 +1823,6 @@ export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string, p
     normalizeTextEncoding(
       buildShopeeCaptionFromParts({
         productName,
-        hookLine: compactProductText(containsForbiddenShopeeGenericText(hookLine, product) ? buildShopeeProductHook(product ?? ({ productName } as ShopeeProductRecord)) : hookLine, 90),
-        reviewLine: compactProductText(containsForbiddenShopeeGenericText(reviewLine, product) ? buildShopeeUsageSituation(product ?? ({ productName } as ShopeeProductRecord)) : reviewLine, 150),
         details,
         priceLine,
         ctaLine,
@@ -1855,8 +1839,6 @@ export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string, p
 
   const compactCaption = buildShopeeCaptionFromParts({
     productName,
-    hookLine: compactProductText(hookLine, 80),
-    reviewLine: compactProductText(reviewLine, 120),
     details: details.slice(0, 3).map((line) => normalizeShopeeBullet(line, 72, product)).filter(Boolean),
     priceLine,
     ctaLine,
@@ -2300,12 +2282,12 @@ export async function generateShopeeCaption(input: {
     "- ห้ามเดาสุ่ม ห้ามสร้างคุณสมบัติใหม่ ห้ามคัดลอกชื่อสินค้ามาวนซ้ำ",
     "- ให้เขียนเหมือนคนที่เข้าใจสินค้าในหมวดนั้น ไม่ใช่ AI สรุปหน้าสินค้า ไม่ใช่โบรชัวร์ และไม่ใช่ภาษาสเปกแข็ง ๆ",
     "",
-    "ก่อนเขียน ต้องวิเคราะห์จากข้อมูลสินค้า รูปภาพ และหมวดหมู่ให้ได้ 5 ข้อนี้:",
-    `1. สินค้านี้คืออะไร: ${productInsight.type}`,
-    `2. สินค้านี้ถูกออกแบบมาเพื่อใคร: ${productInsight.audience}`,
-    `3. สินค้านี้ใช้ในสถานการณ์ใด: ${productInsight.situation}`,
-    `4. จุดเด่นจริงของสินค้านี้คืออะไร: ${insightFeatureLines.join(" | ") || productInsight.angle}`,
-    `5. ลูกค้าซื้อสินค้าไปเพื่อแก้ปัญหาอะไร: ${productInsight.problem}`,
+    "ก่อนเขียน ต้องวิเคราะห์ให้ครบ 5 ข้อนี้ แต่ห้ามพิมพ์หัวข้อวิเคราะห์ออกมาใน caption:",
+    `1. สินค้าคืออะไร: ${productInsight.type}`,
+    `2. ใช้ทำอะไร: ${productInsight.situation}`,
+    `3. ใครคือกลุ่มผู้ใช้หลัก: ${productInsight.audience}`,
+    `4. จุดเด่นจริงของสินค้า: ${insightFeatureLines.join(" | ") || productInsight.angle}`,
+    `5. สถานการณ์การใช้งานจริง: ${productInsight.problem}`,
     "",
     "Product type gate:",
     "- วิเคราะห์ประเภทสินค้าจาก 3 แหล่งหลักเท่านั้น: Product Name / Product Images / Product Description",
@@ -2318,26 +2300,20 @@ export async function generateShopeeCaption(input: {
     "- ถ้าลบชื่อสินค้าออก แล้วคอนเทนท์ยังใช้กับสินค้าอื่นได้อีก 100 ตัว ให้เขียนใหม่ทันที",
     "- ทุกประโยคต้องผูกกับสินค้า หมวดสินค้า หรือจุดเด่นจริง",
     "",
-    "โครงสร้างบังคับ:",
+    "โครงสร้างบังคับ ห้ามเปลี่ยนลำดับและห้ามเพิ่มหัวข้ออื่น:",
     `${captionProductName}`,
     "",
-    "{ฟิลลิ่งหรือมุมใช้งานจริง 1-2 บรรทัด ห้ามอ้างว่าใช้เอง ห้ามพูดชื่อสินค้าซ้ำ ห้ามใส่หัวข้อ}",
+    "✅ {ข้อดีจากการใช้งานจริงข้อ 1 ต้องบอกประโยชน์ที่จับต้องได้ ไม่ใช่ข้อมูลหน้าสินค้า}",
     "",
-    "{สถานการณ์ใช้งานจริงตามประเภทสินค้า 1 บรรทัด ห้ามพูดชื่อสินค้าซ้ำ}",
+    "✅ {ข้อดีจากการใช้งานจริงข้อ 2 ต้องอิงสินค้า/หมวดสินค้า}",
     "",
-    "📌 จุดที่ชอบ",
+    "✅ {ข้อดีจากการใช้งานจริงข้อ 3 ต้องเหมาะกับกลุ่มผู้ใช้หลัก}",
     "",
-    "✅ {feature_1 จาก Product Description / Specification / Attributes / Features / Variants เท่านั้น}",
-    "",
-    "✅ {feature_2 จากข้อมูลสินค้าจริงเท่านั้น}",
-    "",
-    "✅ {feature_3 ถ้ามีข้อมูลจริง}",
-    "",
-    "✅ {feature_4 ถ้ามีข้อมูลจริง}",
+    "✅ {ข้อดีข้อ 4 ถ้ามีข้อมูลจริงเท่านั้น}",
     "",
     `${formatShopeePrice(product) || priceLine}`,
     "",
-    "🛒 {CTA ธรรมชาติ: ใครกำลังมองหา[ประโยชน์ของสินค้า] ลองกดดูรายละเอียดเพิ่มเติมได้เลย หรือ ผมแปะพิกัดไว้ให้แล้ว ลองเข้าไปดูรีวิวเพิ่มเติมได้ครับ}",
+    "🛒 กดดูรายละเอียดเพิ่มเติม",
     "",
     `📍 พิกัด ${input.affiliateLink}`,
     "",
@@ -2347,12 +2323,13 @@ export async function generateShopeeCaption(input: {
     "- บรรทัดแรกต้องเป็นชื่อสินค้าเท่านั้น ห้ามมี emoji หรือคำอื่นก่อนชื่อสินค้า",
     "- Product name must appear exactly once, on the first line only.",
     "- ห้ามซ้ำชื่อสินค้าใน hook, review, bullet, CTA และ hashtag",
-    "- ห้ามใช้หัวข้อ ความรู้สึกหลังใช้งาน, ความรู้สึกหลังใช้, เหตุผลที่ซื้อ, จุดเด่นที่ชอบ",
-    "- หัวข้อจุดเด่นต้องเป็น: 📌 จุดที่ชอบ",
+    "- ห้ามใช้หัวข้อ ความรู้สึกหลังใช้งาน, ความรู้สึกหลังใช้, เหตุผลที่ซื้อ, จุดเด่นที่ชอบ, จุดที่ชอบ",
+    "- ห้ามมีหัวข้อ 📌 จุดที่ชอบ หรือหัวข้อใด ๆ ระหว่างชื่อสินค้าและ bullet",
     "- CTA ต้องอยู่เหนือพิกัด และบรรทัดพิกัดต้องเป็นรูปแบบเดียวเท่านั้น: 📍 พิกัด https://s.shopee.co.th/{shortCode}",
     "- ห้ามใช้ category เป็น feature เช่น General, Lifestyle, Beauty, Home",
+    "- ห้ามรีวิวรายละเอียดสินค้า จำนวนชิ้น สี ขนาด หรือน้ำหนักเป็นจุดขายหลัก ถ้าข้อมูลนั้นไม่ได้ช่วยให้ใช้งานดีขึ้นจริง",
     "- ห้ามใช้คะแนนร้าน ยอดขาย จำนวนรีวิว bestseller ขายดีอันดับ 1",
-    "- ห้ามใช้ข้อความกลาง ๆ ที่ใช้ได้กับทุกสินค้า เช่น ใช้งานได้ดี, สะดวก, คุ้มค่า, เลือกได้ง่าย, เหมาะกับการใช้งาน, ใส่สบายทั้งวัน, ใช้ในชีวิตประจำวัน, เหมาะกับการใช้งานทั่วไป เว้นแต่ต้องอธิบายพร้อมบริบทเฉพาะของสินค้านี้",
+    "- ห้ามใช้ข้อความกลาง ๆ ที่ใช้ได้กับทุกสินค้า เช่น ใช้งานได้ดี, สะดวก, คุ้มค่า, เลือกได้ง่าย, เหมาะกับการใช้งาน, ใช้งานได้ตามวัตถุประสงค์, รูปแบบสินค้าเข้าใจง่าย, ขนาดหรือจำนวนระบุชัดเจน, ใช้ในสถานการณ์ที่สินค้าออกแบบมา, เหมาะกับผู้ที่กำลังมองหาสินค้าประเภทนี้, เหมาะสำหรับการใช้งานในชีวิตประจำวัน",
     "- หมวด Sports ต้องเน้นกีฬา ออกกำลังกาย วิ่ง ฟิตเนส แบดมินตัน เทนนิส ฟุตบอล ความคล่องตัว หรือการซัพพอร์ตการเคลื่อนไหว ห้ามโยงไปงานออฟฟิศ",
     "- หมวดเวย์/โปรตีน/อาหารเสริม ต้องเน้นโปรตีน ฟิตเนส โภชนาการ หรือการเสริมสารอาหาร ห้ามเขียนว่าอร่อยมาก กินแล้วติดใจ ผมกินทุกวัน ลองแล้วชอบ",
     "- หมวดสกินแคร์/ความงาม ต้องเน้นส่วนผสม วิธีใช้ การบำรุง หรือคุณสมบัติที่ระบุ ห้ามอ้างผลลัพธ์เกินจริง",
