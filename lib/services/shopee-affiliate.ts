@@ -1036,6 +1036,8 @@ const SHOPEE_REAL_REVIEW_CTAS = [
 type ShopeeProductInsight = {
   type: string;
   recognized: boolean;
+  confidence?: "high" | "medium" | "low";
+  productCategory?: string;
   audience: string;
   situation: string;
   problem: string;
@@ -1058,10 +1060,9 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
   const haystack = normalizeTextEncoding(
     [
       product.productName,
-      product.category,
       product.productDescription,
-      stringifyShopeeMetadataValue((product as ShopeeProductRecord & Record<string, unknown>).attributes).join(" "),
-      stringifyShopeeMetadataValue((product as ShopeeProductRecord & Record<string, unknown>).specifications).join(" ")
+      product.productImageUrl,
+      ...(product.productImageUrls ?? [])
     ]
       .filter(Boolean)
       .join(" ")
@@ -1071,6 +1072,8 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
     return {
       type: "เวย์โปรตีน / อาหารเสริมโปรตีน",
       recognized: true,
+      confidence: "high",
+      productCategory: "health",
       audience: "คนที่ออกกำลังกายหรืออยากเสริมโปรตีนในแต่ละวัน",
       situation: "ใช้เป็นตัวช่วยจัดโภชนาการหลังออกกำลังกายหรือวันที่กินโปรตีนไม่ถึง",
       problem: "ช่วยให้วางแผนการเสริมโปรตีนได้สะดวกขึ้น",
@@ -1084,6 +1087,8 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
     return {
       type: "สินค้าออกกำลังกาย / กีฬา",
       recognized: true,
+      confidence: "high",
+      productCategory: "sports",
       audience: "คนที่ออกกำลังกาย เล่นกีฬา วิ่ง ฟิตเนส แบดมินตัน เทนนิส หรือฟุตบอล",
       situation: "ใช้ตอนซ้อม ออกกำลังกาย หรือเล่นกีฬาที่ต้องเคลื่อนไหวบ่อย",
       problem: "ช่วยให้แต่งตัวหรือเตรียมอุปกรณ์สำหรับการเคลื่อนไหวได้เหมาะขึ้น",
@@ -1097,6 +1102,8 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
     return {
       type: "สกินแคร์ / ความงาม",
       recognized: true,
+      confidence: "high",
+      productCategory: "beauty",
       audience: "คนที่กำลังเลือกสกินแคร์หรือไอเทมดูแลผิวตามคุณสมบัติที่สินค้าแจ้ง",
       situation: "ใช้ใน routine ดูแลผิวหรือพกไว้ใช้ตามความสะดวก",
       problem: "ช่วยให้เลือกผลิตภัณฑ์ดูแลผิวตามส่วนผสมและวิธีใช้งานได้ง่ายขึ้น",
@@ -1110,6 +1117,8 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
     return {
       type: "ของใช้ในครัว",
       recognized: true,
+      confidence: "high",
+      productCategory: "kitchen",
       audience: "คนที่ทำอาหาร จัดเก็บของกิน หรืออยากให้มุมครัวใช้งานสะดวกขึ้น",
       situation: "ใช้ตอนเตรียมอาหาร จัดเก็บ หรือพกเครื่องดื่ม/อาหาร",
       problem: "ช่วยให้การทำครัวหรือจัดเก็บของกินเป็นระเบียบและสะดวกขึ้น",
@@ -1123,6 +1132,8 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
     return {
       type: "สินค้าเกี่ยวกับสัตว์เลี้ยง",
       recognized: true,
+      confidence: "high",
+      productCategory: "pets",
       audience: "คนเลี้ยงสัตว์ที่ต้องการดูแลความสะอาด อาหาร หรือของใช้ของสัตว์เลี้ยง",
       situation: "ใช้ในบ้านกับสัตว์เลี้ยงเป็นประจำตามประเภทสินค้า",
       problem: "ช่วยให้การดูแลสัตว์เลี้ยงเป็นระบบและสะดวกขึ้น",
@@ -1136,6 +1147,8 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
     return {
       type: "ของใช้ในบ้าน",
       recognized: true,
+      confidence: "high",
+      productCategory: "home_living",
       audience: "คนที่อยากจัดบ้าน ทำความสะอาด หรือแก้ปัญหาของใช้จุกจิกในบ้าน",
       situation: "ใช้ในบ้าน ห้องน้ำ ห้องครัว มุมซักผ้า หรือมุมจัดเก็บของ",
       problem: "ช่วยให้บ้านเป็นระเบียบ สะอาด หรือหยิบใช้งานได้สะดวกขึ้น",
@@ -1149,6 +1162,8 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
     return {
       type: "สมาร์ทวอทช์ / อุปกรณ์ติดตามสุขภาพ",
       recognized: true,
+      confidence: "high",
+      productCategory: "mobile_gadgets",
       audience: "คนที่อยากดูข้อมูลการออกกำลังกาย การแจ้งเตือน หรือการใช้งานบนข้อมือ",
       situation: "ใส่ระหว่างออกกำลังกาย เดินทาง หรือใช้เช็กข้อมูลพื้นฐานระหว่างวัน",
       problem: "ช่วยรวมข้อมูลการใช้งานและการแจ้งเตือนไว้บนข้อมือให้ดูง่ายขึ้น",
@@ -1162,6 +1177,8 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
     return {
       type: /กล่องสุ่ม|blind\s?box/.test(haystack) ? "กล่องสุ่ม / Art Toy" : "Art Toy / ของสะสม",
       recognized: true,
+      confidence: "high",
+      productCategory: "collectibles",
       audience: "คนสะสมฟิกเกอร์ อาร์ตทอย หรือของตกแต่งโต๊ะ/ชั้นโชว์",
       situation: "ใช้สะสม ตั้งโชว์ ถ่ายรูป หรือเติมมุมโต๊ะให้มีคาแรกเตอร์มากขึ้น",
       problem: "ช่วยให้เลือกของสะสมจากซีรีส์ รุ่น หรือดีไซน์ที่ตรงกับสไตล์ได้ชัดขึ้น",
@@ -1175,6 +1192,8 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
     return {
       type: "มือถือและแกดเจ็ต",
       recognized: true,
+      confidence: "high",
+      productCategory: "mobile_gadgets",
       audience: "คนที่ใช้อุปกรณ์ไอทีหรืออยากหาแกดเจ็ตเสริมให้ใช้งานสะดวกขึ้น",
       situation: "ใช้กับมือถือ โต๊ะทำงาน การเดินทาง หรือการชาร์จ/ฟังเสียงตามประเภทสินค้า",
       problem: "ช่วยให้เลือกฟังก์ชัน พอร์ต ขนาด หรือความเข้ากันได้กับอุปกรณ์ได้ตรงขึ้น",
@@ -1188,6 +1207,8 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
     return {
       type: "แฟชั่น / เครื่องแต่งกาย",
       recognized: true,
+      confidence: "high",
+      productCategory: "fashion",
       audience: "คนที่เลือกเสื้อผ้า รองเท้า หรือกระเป๋าตามทรง วัสดุ และโอกาสใช้งาน",
       situation: "ใช้แต่งตัว ออกไปข้างนอก เดินทาง หรือจัดของจำเป็นตามประเภทสินค้า",
       problem: "ช่วยให้เลือกทรง ขนาด ช่องเก็บ หรือดีไซน์ที่เข้ากับการใช้งานได้ง่ายขึ้น",
@@ -1201,6 +1222,8 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
     return {
       type: "อาหาร / ขนม / เครื่องดื่ม",
       recognized: true,
+      confidence: "high",
+      productCategory: "food_beverage",
       audience: "คนที่อยากมีของกิน ของว่าง หรือเครื่องดื่มติดบ้าน/ติดโต๊ะ",
       situation: "เก็บไว้กินเล่น แบ่งกับคนที่บ้าน หรือพกไปกินระหว่างวันตามประเภทสินค้า",
       problem: "ช่วยให้เลือกจากรสชาติ แพ็ก ขนาดบรรจุ หรือวิธีเก็บที่สินค้าแจ้ง",
@@ -1211,34 +1234,21 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
   }
 
   return {
-    type: "unknown",
+    type: "สินค้าทั่วไปจากข้อมูลที่เห็น",
     recognized: false,
-    audience: "",
-    situation: "",
-    problem: "",
-    angle: "",
-    fallbackFeatures: [],
-    forbiddenAngles: ["ห้ามสร้างคอนเทนท์ถ้ายังระบุประเภทสินค้าไม่ได้"]
+    confidence: "low",
+    productCategory: "general",
+    audience: "คนที่กำลังมองหาสินค้าลักษณะนี้และอยากตรวจรายละเอียดจากหน้าสินค้าก่อนตัดสินใจ",
+    situation: "เลือกดูจากชื่อสินค้า รูปสินค้า รายละเอียด ขนาด สี รุ่น จำนวน หรือแพ็กที่ระบุไว้",
+    problem: "ช่วยให้เปรียบเทียบรายละเอียดที่เห็นจริงจากสินค้าได้ง่ายขึ้นโดยไม่ต้องเดาคุณสมบัติเพิ่ม",
+    angle: "ใช้ fallback แบบปลอดภัย: เขียนจากรูปแบบสินค้า การแพ็ก ขนาด จำนวน สี รุ่น และรายละเอียดที่เห็นจริงเท่านั้น",
+    fallbackFeatures: ["✅ ดูรายละเอียดจากชื่อและรูปสินค้าได้", "✅ เลือกจากขนาด สี รุ่น หรือจำนวนที่ระบุ", "✅ เหมาะกับการเช็กรายละเอียดก่อนตัดสินใจ"],
+    forbiddenAngles: ["ห้ามเดาคุณสมบัติที่ไม่มีในชื่อ รูป หรือ description", "ห้ามใช้คำ generic ลอย ๆ โดยไม่มีบริบทสินค้า"]
   };
 }
 
 function assertRecognizedShopeeProductInsight(product: ShopeeProductRecord) {
-  const insight = getShopeeProductInsight(product);
-  if (!insight.recognized) {
-    throw new ShopeeProviderError(
-      "Shopee caption generation stopped: unable to identify product type from product name, category, description, specifications, attributes, variants, or images",
-      422,
-      "shopee_product_type_unknown",
-      "internal_api",
-      JSON.stringify({
-        productId: product.productId,
-        category: product.category,
-        hasDescription: Boolean(product.productDescription?.trim()),
-        imageCount: product.productImageUrls?.length ?? (product.productImageUrl ? 1 : 0)
-      })
-    );
-  }
-  return insight;
+  return getShopeeProductInsight(product);
 }
 
 export function getShopeeCaptionProductName(productName?: string) {
@@ -2266,9 +2276,11 @@ export async function generateShopeeCaption(input: {
     `5. ลูกค้าซื้อสินค้าไปเพื่อแก้ปัญหาอะไร: ${productInsight.problem}`,
     "",
     "Product type gate:",
-    "- ต้องระบุประเภทสินค้าจากชื่อ/หมวด/รายละเอียด/คุณสมบัติ/รูปภาพก่อนเสมอ",
-    "- ถ้าระบุประเภทสินค้าไม่ได้ ห้ามสร้างคอนเทนท์ และให้ถือว่าไม่ผ่าน",
+    "- วิเคราะห์ประเภทสินค้าจาก 3 แหล่งหลักเท่านั้น: Product Name / Product Images / Product Description",
+    "- ถ้าประเภทสินค้าไม่ชัด ห้ามหยุดงานและห้ามสร้าง error ให้ใช้ confidence low แล้วเขียนจากข้อมูลที่เห็นจริงเท่านั้น",
+    "- ห้ามเดาคุณสมบัติใหม่จาก category หรือข้อมูลที่ไม่มีในชื่อ รูป หรือ description",
     "- ประเภทที่วิเคราะห์ได้ในรอบนี้: " + productInsight.type,
+    "- Confidence: " + (productInsight.confidence ?? (productInsight.recognized ? "high" : "low")),
     "",
     "Quality gate ก่อนตอบ:",
     "- ถ้าลบชื่อสินค้าออก แล้วคอนเทนท์ยังใช้กับสินค้าอื่นได้อีก 100 ตัว ให้เขียนใหม่ทันที",
@@ -2330,6 +2342,7 @@ export async function generateShopeeCaption(input: {
     `รายละเอียดสินค้า: ${product.productDescription || "-"}`,
     `รูปภาพสินค้าเพื่อช่วยระบุประเภท: ${(product.productImageUrls?.length ? product.productImageUrls : [product.productImageUrl]).filter(Boolean).slice(0, 4).join(" | ") || "-"}`,
     `Product insight type: ${productInsight.type}`,
+    `Product insight confidence: ${productInsight.confidence ?? (productInsight.recognized ? "high" : "low")}`,
     `Target audience: ${productInsight.audience}`,
     `Usage situation: ${productInsight.situation}`,
     `Problem solved: ${productInsight.problem}`,
