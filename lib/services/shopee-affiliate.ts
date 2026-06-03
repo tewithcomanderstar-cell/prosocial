@@ -916,6 +916,14 @@ const SHOPEE_FORBIDDEN_OPENERS = [
   /^Here are Shopee finds/i
 ];
 
+const SHOPEE_CONTEXTLESS_GENERIC_PHRASES = [
+  "ใช้งานได้ดี",
+  "สะดวก",
+  "คุ้มค่า",
+  "เลือกได้ง่าย",
+  "เหมาะกับการใช้งาน"
+];
+
 const SHOPEE_SOFT_CTAS = [
   "🛒 กดดูรายละเอียดเพิ่มเติม",
   "📌 ดูราคาและโปรล่าสุด",
@@ -1027,6 +1035,7 @@ const SHOPEE_REAL_REVIEW_CTAS = [
 
 type ShopeeProductInsight = {
   type: string;
+  recognized: boolean;
   audience: string;
   situation: string;
   problem: string;
@@ -1061,6 +1070,7 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
   if (/เวย์|whey|protein|โปรตีน/.test(haystack)) {
     return {
       type: "เวย์โปรตีน / อาหารเสริมโปรตีน",
+      recognized: true,
       audience: "คนที่ออกกำลังกายหรืออยากเสริมโปรตีนในแต่ละวัน",
       situation: "ใช้เป็นตัวช่วยจัดโภชนาการหลังออกกำลังกายหรือวันที่กินโปรตีนไม่ถึง",
       problem: "ช่วยให้วางแผนการเสริมโปรตีนได้สะดวกขึ้น",
@@ -1073,6 +1083,7 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
   if (/กีฬา|sports?|ฟิตเนส|วิ่ง|running|แบด|badminton|เทนนิส|tennis|ฟุตบอล|football|yoga|โยคะ|ออกกำลังกาย|ถุงเท้า|กางเกงกีฬา|เสื้อกีฬา/.test(haystack)) {
     return {
       type: "สินค้าออกกำลังกาย / กีฬา",
+      recognized: true,
       audience: "คนที่ออกกำลังกาย เล่นกีฬา วิ่ง ฟิตเนส แบดมินตัน เทนนิส หรือฟุตบอล",
       situation: "ใช้ตอนซ้อม ออกกำลังกาย หรือเล่นกีฬาที่ต้องเคลื่อนไหวบ่อย",
       problem: "ช่วยให้แต่งตัวหรือเตรียมอุปกรณ์สำหรับการเคลื่อนไหวได้เหมาะขึ้น",
@@ -1085,6 +1096,7 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
   if (/สกินแคร์|skincare|serum|เซรั่ม|ครีม|กันแดด|sunscreen|spf|บำรุง|ผิว|beauty|cosmetic|cleanser|โฟมล้างหน้า/.test(haystack)) {
     return {
       type: "สกินแคร์ / ความงาม",
+      recognized: true,
       audience: "คนที่กำลังเลือกสกินแคร์หรือไอเทมดูแลผิวตามคุณสมบัติที่สินค้าแจ้ง",
       situation: "ใช้ใน routine ดูแลผิวหรือพกไว้ใช้ตามความสะดวก",
       problem: "ช่วยให้เลือกผลิตภัณฑ์ดูแลผิวตามส่วนผสมและวิธีใช้งานได้ง่ายขึ้น",
@@ -1097,6 +1109,7 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
   if (/ครัว|kitchen|ทำอาหาร|หม้อ|กระทะ|กล่องอาหาร|ถนอมอาหาร|ช้อน|จาน|แก้ว|ขวดน้ำ|tumbler/.test(haystack)) {
     return {
       type: "ของใช้ในครัว",
+      recognized: true,
       audience: "คนที่ทำอาหาร จัดเก็บของกิน หรืออยากให้มุมครัวใช้งานสะดวกขึ้น",
       situation: "ใช้ตอนเตรียมอาหาร จัดเก็บ หรือพกเครื่องดื่ม/อาหาร",
       problem: "ช่วยให้การทำครัวหรือจัดเก็บของกินเป็นระเบียบและสะดวกขึ้น",
@@ -1109,6 +1122,7 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
   if (/สัตว์|pet|แมว|cat|สุนัข|dog|อาหารสัตว์|ทรายแมว|ปลอกคอ|ขนสัตว์/.test(haystack)) {
     return {
       type: "สินค้าเกี่ยวกับสัตว์เลี้ยง",
+      recognized: true,
       audience: "คนเลี้ยงสัตว์ที่ต้องการดูแลความสะอาด อาหาร หรือของใช้ของสัตว์เลี้ยง",
       situation: "ใช้ในบ้านกับสัตว์เลี้ยงเป็นประจำตามประเภทสินค้า",
       problem: "ช่วยให้การดูแลสัตว์เลี้ยงเป็นระบบและสะดวกขึ้น",
@@ -1121,6 +1135,7 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
   if (/บ้าน|home|จัดระเบียบ|เก็บของ|ทำความสะอาด|ไม้ถู|ถังขยะ|ชั้นวาง|กล่องเก็บ|ซักผ้า|น้ำยาซัก|ปรับผ้านุ่ม|detergent|laundry/.test(haystack)) {
     return {
       type: "ของใช้ในบ้าน",
+      recognized: true,
       audience: "คนที่อยากจัดบ้าน ทำความสะอาด หรือแก้ปัญหาของใช้จุกจิกในบ้าน",
       situation: "ใช้ในบ้าน ห้องน้ำ ห้องครัว มุมซักผ้า หรือมุมจัดเก็บของ",
       problem: "ช่วยให้บ้านเป็นระเบียบ สะอาด หรือหยิบใช้งานได้สะดวกขึ้น",
@@ -1130,15 +1145,100 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
     };
   }
 
+  if (/smart\s?watch|สมาร์ทวอทช์|นาฬิกาอัจฉริยะ|นาฬิกา smart|fitness tracker|tracker/.test(haystack)) {
+    return {
+      type: "สมาร์ทวอทช์ / อุปกรณ์ติดตามสุขภาพ",
+      recognized: true,
+      audience: "คนที่อยากดูข้อมูลการออกกำลังกาย การแจ้งเตือน หรือการใช้งานบนข้อมือ",
+      situation: "ใส่ระหว่างออกกำลังกาย เดินทาง หรือใช้เช็กข้อมูลพื้นฐานระหว่างวัน",
+      problem: "ช่วยรวมข้อมูลการใช้งานและการแจ้งเตือนไว้บนข้อมือให้ดูง่ายขึ้น",
+      angle: "เน้นฟังก์ชันที่ระบุ หน้าจอ แบตเตอรี่ โหมดกีฬา หรือการเชื่อมต่อเท่านั้น",
+      fallbackFeatures: ["✅ ดูข้อมูลบนข้อมือได้สะดวก", "✅ เหมาะกับการใส่ติดตัวระหว่างวัน", "✅ เลือกจากฟังก์ชันที่ระบุในสินค้า"],
+      forbiddenAngles: ["ห้ามเคลมวัดสุขภาพแม่นยำเกินจริง", "ห้ามอ้างฟีเจอร์ที่สินค้าไม่ได้ระบุ"]
+    };
+  }
+
+  if (/art\s?toy|อาร์ตทอย|กล่องสุ่ม|blind\s?box|figure|ฟิกเกอร์|โมเดล|ของสะสม|collectible|ตุ๊กตา/.test(haystack)) {
+    return {
+      type: /กล่องสุ่ม|blind\s?box/.test(haystack) ? "กล่องสุ่ม / Art Toy" : "Art Toy / ของสะสม",
+      recognized: true,
+      audience: "คนสะสมฟิกเกอร์ อาร์ตทอย หรือของตกแต่งโต๊ะ/ชั้นโชว์",
+      situation: "ใช้สะสม ตั้งโชว์ ถ่ายรูป หรือเติมมุมโต๊ะให้มีคาแรกเตอร์มากขึ้น",
+      problem: "ช่วยให้เลือกของสะสมจากซีรีส์ รุ่น หรือดีไซน์ที่ตรงกับสไตล์ได้ชัดขึ้น",
+      angle: "เน้นซีรีส์ ดีไซน์ ขนาด วัสดุ รุ่น และลักษณะกล่อง/ตัวละครที่ระบุ",
+      fallbackFeatures: ["✅ เหมาะกับสายสะสม", "✅ ตั้งโชว์บนโต๊ะหรือชั้นได้", "✅ เลือกจากซีรีส์หรือดีไซน์ที่ชอบ"],
+      forbiddenAngles: ["ห้ามรับประกันตัวลับ", "ห้ามอ้าง rarity ถ้าไม่มีข้อมูล"]
+    };
+  }
+
+  if (/มือถือ|โทรศัพท์|gadget|แกดเจ็ต|หูฟัง|earbud|speaker|ลำโพง|สายชาร์จ|powerbank|พาวเวอร์แบงค์|charger|ชาร์จ|เคส|tablet|แท็บเล็ต/.test(haystack)) {
+    return {
+      type: "มือถือและแกดเจ็ต",
+      recognized: true,
+      audience: "คนที่ใช้อุปกรณ์ไอทีหรืออยากหาแกดเจ็ตเสริมให้ใช้งานสะดวกขึ้น",
+      situation: "ใช้กับมือถือ โต๊ะทำงาน การเดินทาง หรือการชาร์จ/ฟังเสียงตามประเภทสินค้า",
+      problem: "ช่วยให้เลือกฟังก์ชัน พอร์ต ขนาด หรือความเข้ากันได้กับอุปกรณ์ได้ตรงขึ้น",
+      angle: "เน้นสเปก ฟังก์ชัน ความเข้ากันได้ พอร์ต ขนาด และการพกพาที่ระบุ",
+      fallbackFeatures: ["✅ ใช้คู่กับอุปกรณ์ไอทีได้", "✅ ดูสเปกและความเข้ากันได้ก่อนเลือก", "✅ ขนาดเหมาะกับการพกหรือวางบนโต๊ะ"],
+      forbiddenAngles: ["ห้ามอ้างคุณภาพเสียง/แบตเตอรี่เกินข้อมูล", "ห้ามอ้างรองรับรุ่นที่สินค้าไม่ได้ระบุ"]
+    };
+  }
+
+  if (/เสื้อ|กางเกง|เดรส|กระโปรง|แฟชั่น|fashion|รองเท้า|shoe|sneaker|แตะ|หมวก|เข็มขัด|กระเป๋า|bag|เป้|คาดอก|wallet/.test(haystack)) {
+    return {
+      type: "แฟชั่น / เครื่องแต่งกาย",
+      recognized: true,
+      audience: "คนที่เลือกเสื้อผ้า รองเท้า หรือกระเป๋าตามทรง วัสดุ และโอกาสใช้งาน",
+      situation: "ใช้แต่งตัว ออกไปข้างนอก เดินทาง หรือจัดของจำเป็นตามประเภทสินค้า",
+      problem: "ช่วยให้เลือกทรง ขนาด ช่องเก็บ หรือดีไซน์ที่เข้ากับการใช้งานได้ง่ายขึ้น",
+      angle: "เน้นทรง วัสดุ ไซซ์ ช่องเก็บ การแมตช์ชุด หรือโอกาสใช้งานที่สินค้าแจ้ง",
+      fallbackFeatures: ["✅ ทรงและดีไซน์ดูใช้งานง่าย", "✅ เลือกจากขนาดหรือช่องเก็บได้", "✅ เหมาะกับการแต่งตัวหรือพกของตามประเภทสินค้า"],
+      forbiddenAngles: ["ห้ามอ้างใส่สบายทั้งวันถ้าไม่มีข้อมูลวัสดุ/ทรงรองรับ"]
+    };
+  }
+
+  if (/ขนม|snack|อาหาร|food|เครื่องดื่ม|drink|กาแฟ|coffee|ชา|tea|เปี๊ยะ|คุกกี้|เค้ก|น้ำพริก/.test(haystack)) {
+    return {
+      type: "อาหาร / ขนม / เครื่องดื่ม",
+      recognized: true,
+      audience: "คนที่อยากมีของกิน ของว่าง หรือเครื่องดื่มติดบ้าน/ติดโต๊ะ",
+      situation: "เก็บไว้กินเล่น แบ่งกับคนที่บ้าน หรือพกไปกินระหว่างวันตามประเภทสินค้า",
+      problem: "ช่วยให้เลือกจากรสชาติ แพ็ก ขนาดบรรจุ หรือวิธีเก็บที่สินค้าแจ้ง",
+      angle: "เน้นรส/แพ็ก/จำนวน/ขนาด/วิธีเก็บจากข้อมูลสินค้าเท่านั้น ห้ามอ้างว่าอร่อยถ้าไม่มีข้อมูลรีวิวจริง",
+      fallbackFeatures: ["✅ แพ็กเหมาะกับการแบ่งกิน", "✅ ขนาดบรรจุช่วยให้เก็บไว้ได้", "✅ เหมาะกับมีติดบ้านเป็นของว่าง"],
+      forbiddenAngles: ["ห้ามเขียนว่าอร่อยมากถ้าข้อมูลสินค้าไม่ได้ระบุ", "ห้ามอ้างว่ากินแล้วติดใจ"]
+    };
+  }
+
   return {
-    type: "สินค้าเฉพาะตามชื่อและรายละเอียดที่ได้รับ",
-    audience: "คนที่ต้องการตรวจจุดเด่นจริงก่อนตัดสินใจเลือกสินค้า",
-    situation: "ใช้ตามบริบทที่อธิบายไว้ในชื่อ รายละเอียด หรือคุณสมบัติสินค้า",
-    problem: "ช่วยตอบโจทย์การใช้งานที่ระบุไว้ในข้อมูลสินค้าโดยตรง",
-    angle: "เขียนจากข้อเท็จจริงในชื่อ รายละเอียด รูปภาพ และคุณสมบัติเท่านั้น ห้ามใช้ประโยคกลาง ๆ",
-    fallbackFeatures: ["✅ อ่านรายละเอียดหลักก่อนเลือกได้ง่าย", "✅ รูปแบบสินค้าช่วยให้เทียบการใช้งานได้ชัดขึ้น"],
-    forbiddenAngles: ["ห้ามใช้ข้อความกลาง ๆ จนใช้ได้กับสินค้าอื่นอีกหลายตัว"]
+    type: "unknown",
+    recognized: false,
+    audience: "",
+    situation: "",
+    problem: "",
+    angle: "",
+    fallbackFeatures: [],
+    forbiddenAngles: ["ห้ามสร้างคอนเทนท์ถ้ายังระบุประเภทสินค้าไม่ได้"]
   };
+}
+
+function assertRecognizedShopeeProductInsight(product: ShopeeProductRecord) {
+  const insight = getShopeeProductInsight(product);
+  if (!insight.recognized) {
+    throw new ShopeeProviderError(
+      "Shopee caption generation stopped: unable to identify product type from product name, category, description, specifications, attributes, variants, or images",
+      422,
+      "shopee_product_type_unknown",
+      "internal_api",
+      JSON.stringify({
+        productId: product.productId,
+        category: product.category,
+        hasDescription: Boolean(product.productDescription?.trim()),
+        imageCount: product.productImageUrls?.length ?? (product.productImageUrl ? 1 : 0)
+      })
+    );
+  }
+  return insight;
 }
 
 export function getShopeeCaptionProductName(productName?: string) {
@@ -1265,16 +1365,66 @@ function removeHardSellPhrases(caption: string) {
     .trim();
 }
 
-function containsForbiddenShopeeGenericText(value?: string) {
+function hasShopeeProductSpecificContext(value: string, product?: ShopeeProductRecord) {
+  const normalized = normalizeTextEncoding(value).toLowerCase();
+  const productText = normalizeTextEncoding(
+    [
+      product?.productName,
+      product?.productDescription,
+      product?.category,
+      stringifyShopeeMetadataValue((product as ShopeeProductRecord & Record<string, unknown> | undefined)?.attributes).join(" "),
+      stringifyShopeeMetadataValue((product as ShopeeProductRecord & Record<string, unknown> | undefined)?.specifications).join(" ")
+    ]
+      .filter(Boolean)
+      .join(" ")
+  ).toLowerCase();
+  const productTokens = productText
+    .split(/\s+/)
+    .map((token) => token.replace(/[^\p{L}\p{N}]/gu, "").trim())
+    .filter((token) => token.length >= 3 && !isGenericShopeeCategoryText(token));
+  const matchedProductTokens = productTokens.filter((token) => normalized.includes(token)).length;
+  const contextWords = [
+    "กีฬา",
+    "ฟิตเนส",
+    "โปรตีน",
+    "ผิว",
+    "ครัว",
+    "สัตว์เลี้ยง",
+    "ซักผ้า",
+    "ช่องเก็บ",
+    "วัสดุ",
+    "ขนาด",
+    "ความจุ",
+    "กลิ่น",
+    "ไซซ์",
+    "สาย",
+    "ซิป",
+    "แบต",
+    "พอร์ต",
+    "ฟังก์ชัน",
+    "แพ็ก",
+    "รุ่น",
+    "ซีรีส์"
+  ];
+  return matchedProductTokens >= 1 || contextWords.some((word) => normalized.includes(word));
+}
+
+function containsForbiddenShopeeGenericText(value?: string, product?: ShopeeProductRecord) {
   const normalized = normalizeTextEncoding(value ?? "").toLowerCase();
   if (!normalized) return false;
-  return SHOPEE_FORBIDDEN_GENERIC_PHRASES.some((phrase) => normalized.includes(phrase.toLowerCase()));
+  if (SHOPEE_FORBIDDEN_GENERIC_PHRASES.some((phrase) => normalized.includes(phrase.toLowerCase()))) {
+    return true;
+  }
+  return SHOPEE_CONTEXTLESS_GENERIC_PHRASES.some((phrase) => {
+    if (!normalized.includes(phrase.toLowerCase())) return false;
+    return !hasShopeeProductSpecificContext(normalized, product);
+  });
 }
 
 function isBadShopeeFact(value?: string, product?: ShopeeProductRecord) {
   const normalized = normalizeTextEncoding(value ?? "").trim();
   if (!normalized) return true;
-  if (containsForbiddenShopeeGenericText(normalized)) return true;
+  if (containsForbiddenShopeeGenericText(normalized, product)) return true;
   if (SHOPEE_MARKETPLACE_METRIC_PATTERNS.some((pattern) => pattern.test(normalized))) return true;
   if (isCategoryLikeShopeeFeature(normalized, product)) return true;
   if (isSimilarToShopeeProductName(normalized, product?.productName, 0.7)) return true;
@@ -1490,7 +1640,7 @@ function buildShopeeReviewFeeling(product: ShopeeProductRecord) {
         insight.angle
       ];
   const selected = compactProductText(randomText(templates), 170);
-  return containsForbiddenShopeeGenericText(selected) ? compactProductText(insight.problem, 170) : selected;
+  return containsForbiddenShopeeGenericText(selected, product) ? compactProductText(insight.problem, 170) : selected;
 }
 
 function buildShopeeUsageSituation(product: ShopeeProductRecord) {
@@ -1510,7 +1660,7 @@ function buildShopeeUsageSituation(product: ShopeeProductRecord) {
     return [insight.situation];
   })();
   const selected = compactProductText(randomText(options), 150);
-  return containsForbiddenShopeeGenericText(selected) ? compactProductText(insight.situation, 150) : selected;
+  return containsForbiddenShopeeGenericText(selected, product) ? compactProductText(insight.situation, 150) : selected;
 }
 
 function buildShopeeDetailBullets(product: ShopeeProductRecord) {
@@ -1526,7 +1676,7 @@ function buildShopeeDetailBullets(product: ShopeeProductRecord) {
   if (/สกินแคร์|skincare|serum|เซรั่ม|ครีม|กันแดด|sunscreen|spf|บำรุง|ผิว|beauty/.test(haystack)) fallbackFacts.push("✅ ดูส่วนผสมและวิธีใช้ได้จากหน้าสินค้า", "✅ เหมาะกับ routine ดูแลผิว", "✅ ขนาดหรือรูปแบบใช้งานสะดวก");
   if (/ขนม|snack|เปี๊ยะ|อาหาร/.test(haystack)) fallbackFacts.push("✅ แพ็กแบ่งกินง่าย", "✅ ขนาดกำลังดีสำหรับเก็บเป็นของว่าง", "✅ เหมาะกับแบ่งไว้กินหลายรอบ");
   if (/แก้ว|tumbler|ขวดน้ำ/.test(haystack)) fallbackFacts.push("✅ ความจุใช้ได้ทั้งวัน", "✅ จับถนัดมือ", "✅ พกออกไปข้างนอกสะดวก");
-  const fallbackFromInsight = insight.fallbackFeatures.filter((line) => !containsForbiddenShopeeGenericText(line));
+  const fallbackFromInsight = insight.fallbackFeatures.filter((line) => !containsForbiddenShopeeGenericText(line, product));
   return Array.from(new Set([...facts, ...fallbackFacts, ...fallbackFromInsight].filter((line) => !isBadShopeeFact(stripShopeeLeadingEmoji(line), product)))).slice(0, 4);
 }
 
@@ -1564,6 +1714,7 @@ function buildShopeeCaptionFromParts(parts: ShopeeCaptionParts) {
 }
 
 export function buildShopeeFallbackCaption(product: ShopeeProductRecord, shopeeShortUrl: string) {
+  assertRecognizedShopeeProductInsight(product);
   const productName = getShopeeCaptionProductName(product.productName);
   const caption = buildShopeeCaptionFromParts({
     productName,
@@ -1604,7 +1755,7 @@ export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string, p
       if (/^📌\s*จุดที่ชอบ/i.test(line)) return false;
       if (/^🛒\s*/i.test(line)) return false;
       if (/^(?:💰\s*)?ราคา(โปร)?\s*/i.test(line)) return false;
-      if (containsForbiddenShopeeGenericText(line)) return false;
+      if (containsForbiddenShopeeGenericText(line, product)) return false;
       return true;
     });
 
@@ -1616,7 +1767,7 @@ export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string, p
     .filter((tag) => !isShopeeProductNameDuplicateText(tag.replace(/^#/, ""), productName))
     .slice(0, SHOPEE_MAX_HASHTAGS);
   const bodyLines = deDuplicatedContentLines
-    .filter((line) => line !== productName && !isShopeeProductNameDuplicateText(line, productName) && !containsForbiddenShopeeGenericText(line))
+    .filter((line) => line !== productName && !isShopeeProductNameDuplicateText(line, productName) && !containsForbiddenShopeeGenericText(line, product))
     .slice(0, 10);
   const isBullet = (line: string) => /^[*•\-✅]/.test(line);
 
@@ -1631,7 +1782,7 @@ export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string, p
     .filter((line): line is string => Boolean(line) && !isShopeeProductNameDuplicateText(line, productName));
   const fallbackBullets = product ? buildShopeeDetailBullets(product).filter((line) => !isShopeeProductNameDuplicateText(line, productName)) : [];
   const details = Array.from(new Set([...aiBullets, ...fallbackBullets]))
-    .filter((line) => !isShopeeProductNameDuplicateText(line, productName) && !containsForbiddenShopeeGenericText(line))
+    .filter((line) => !isShopeeProductNameDuplicateText(line, productName) && !containsForbiddenShopeeGenericText(line, product))
     .slice(0, 4);
   const fallbackProductForHook = product ?? ({ productName } as ShopeeProductRecord);
   const rawHookLine = compactProductText(aiFeelingLine || buildShopeeProductHook(fallbackProductForHook), 110);
@@ -1645,8 +1796,8 @@ export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string, p
     normalizeTextEncoding(
       buildShopeeCaptionFromParts({
         productName,
-        hookLine: compactProductText(containsForbiddenShopeeGenericText(hookLine) ? buildShopeeProductHook(product ?? ({ productName } as ShopeeProductRecord)) : hookLine, 90),
-        reviewLine: compactProductText(containsForbiddenShopeeGenericText(reviewLine) ? buildShopeeUsageSituation(product ?? ({ productName } as ShopeeProductRecord)) : reviewLine, 150),
+        hookLine: compactProductText(containsForbiddenShopeeGenericText(hookLine, product) ? buildShopeeProductHook(product ?? ({ productName } as ShopeeProductRecord)) : hookLine, 90),
+        reviewLine: compactProductText(containsForbiddenShopeeGenericText(reviewLine, product) ? buildShopeeUsageSituation(product ?? ({ productName } as ShopeeProductRecord)) : reviewLine, 150),
         details,
         priceLine,
         ctaLine,
@@ -1657,7 +1808,7 @@ export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string, p
     "Shopee caption"
   );
 
-  if (normalizedCaption.length <= 700 && !containsForbiddenShopeeGenericText(normalizedCaption)) {
+  if (normalizedCaption.length <= 700 && !containsForbiddenShopeeGenericText(normalizedCaption, product)) {
     return normalizeShopeeCaptionLinkLine(normalizedCaption, shopeeShortUrl);
   }
 
@@ -2083,6 +2234,7 @@ export async function generateShopeeCaption(input: {
   disclosureText?: string;
 }) {
   const { product } = input;
+  const productInsight = assertRecognizedShopeeProductInsight(product);
   const priceLine = product.discountPrice
     ? `\u0e23\u0e32\u0e04\u0e32\u0e42\u0e1b\u0e23: ${product.discountPrice.toLocaleString("th-TH")} \u0e1a\u0e32\u0e17${product.discountPercent ? ` \u0e25\u0e14\u0e1b\u0e23\u0e30\u0e21\u0e32\u0e13 ${product.discountPercent}%` : ""}`
     : product.productPrice
@@ -2094,7 +2246,6 @@ export async function generateShopeeCaption(input: {
   );
   const captionProductName = getShopeeCaptionProductName(product.productName);
   const productFactLines = collectShopeeProductFacts(product).map((line) => stripShopeeLeadingEmoji(line));
-  const productInsight = getShopeeProductInsight(product);
   const insightFeatureLines = productFactLines.length
     ? productFactLines
     : productInsight.fallbackFeatures.map((line) => stripShopeeLeadingEmoji(line));
@@ -2113,6 +2264,11 @@ export async function generateShopeeCaption(input: {
     `3. สินค้านี้ใช้ในสถานการณ์ใด: ${productInsight.situation}`,
     `4. จุดเด่นจริงของสินค้านี้คืออะไร: ${insightFeatureLines.join(" | ") || productInsight.angle}`,
     `5. ลูกค้าซื้อสินค้าไปเพื่อแก้ปัญหาอะไร: ${productInsight.problem}`,
+    "",
+    "Product type gate:",
+    "- ต้องระบุประเภทสินค้าจากชื่อ/หมวด/รายละเอียด/คุณสมบัติ/รูปภาพก่อนเสมอ",
+    "- ถ้าระบุประเภทสินค้าไม่ได้ ห้ามสร้างคอนเทนท์ และให้ถือว่าไม่ผ่าน",
+    "- ประเภทที่วิเคราะห์ได้ในรอบนี้: " + productInsight.type,
     "",
     "Quality gate ก่อนตอบ:",
     "- ถ้าลบชื่อสินค้าออก แล้วคอนเทนท์ยังใช้กับสินค้าอื่นได้อีก 100 ตัว ให้เขียนใหม่ทันที",
@@ -2152,7 +2308,7 @@ export async function generateShopeeCaption(input: {
     "- CTA ต้องอยู่เหนือพิกัด และบรรทัดพิกัดต้องเป็นรูปแบบเดียวเท่านั้น: 📍 พิกัด https://s.shopee.co.th/{shortCode}",
     "- ห้ามใช้ category เป็น feature เช่น General, Lifestyle, Beauty, Home",
     "- ห้ามใช้คะแนนร้าน ยอดขาย จำนวนรีวิว bestseller ขายดีอันดับ 1",
-    "- ห้ามใช้ข้อความกลาง ๆ ที่ใช้ได้กับทุกสินค้า เช่น ใส่สบายทั้งวัน, ใช้ในชีวิตประจำวัน, เหมาะกับการใช้งานทั่วไป",
+    "- ห้ามใช้ข้อความกลาง ๆ ที่ใช้ได้กับทุกสินค้า เช่น ใช้งานได้ดี, สะดวก, คุ้มค่า, เลือกได้ง่าย, เหมาะกับการใช้งาน, ใส่สบายทั้งวัน, ใช้ในชีวิตประจำวัน, เหมาะกับการใช้งานทั่วไป เว้นแต่ต้องอธิบายพร้อมบริบทเฉพาะของสินค้านี้",
     "- หมวด Sports ต้องเน้นกีฬา ออกกำลังกาย วิ่ง ฟิตเนส แบดมินตัน เทนนิส ฟุตบอล ความคล่องตัว หรือการซัพพอร์ตการเคลื่อนไหว ห้ามโยงไปงานออฟฟิศ",
     "- หมวดเวย์/โปรตีน/อาหารเสริม ต้องเน้นโปรตีน ฟิตเนส โภชนาการ หรือการเสริมสารอาหาร ห้ามเขียนว่าอร่อยมาก กินแล้วติดใจ ผมกินทุกวัน ลองแล้วชอบ",
     "- หมวดสกินแคร์/ความงาม ต้องเน้นส่วนผสม วิธีใช้ การบำรุง หรือคุณสมบัติที่ระบุ ห้ามอ้างผลลัพธ์เกินจริง",
@@ -2172,6 +2328,7 @@ export async function generateShopeeCaption(input: {
     `ชื่อที่ใช้ขึ้นบรรทัดแรก: ${captionProductName}`,
     `หมวดหมู่ใช้เป็นบริบทเท่านั้น ห้ามแสดงเป็น feature: ${product.category || "-"}`,
     `รายละเอียดสินค้า: ${product.productDescription || "-"}`,
+    `รูปภาพสินค้าเพื่อช่วยระบุประเภท: ${(product.productImageUrls?.length ? product.productImageUrls : [product.productImageUrl]).filter(Boolean).slice(0, 4).join(" | ") || "-"}`,
     `Product insight type: ${productInsight.type}`,
     `Target audience: ${productInsight.audience}`,
     `Usage situation: ${productInsight.situation}`,
