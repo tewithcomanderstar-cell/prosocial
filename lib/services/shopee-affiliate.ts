@@ -1085,6 +1085,10 @@ type ShopeeProductInsight = {
   recognized: boolean;
   confidence?: "high" | "medium" | "low";
   productCategory?: string;
+  sourceMatches?: Record<"images" | "title" | "description" | "category", boolean>;
+  sourceMatchCount?: number;
+  safeCaptionMode?: boolean;
+  skipReason?: string;
   audience: string;
   situation: string;
   problem: string;
@@ -1103,11 +1107,74 @@ function compactProductText(value?: string, max = 92) {
   return normalized.length > max ? normalized.slice(0, max).replace(/\s+\S*$/, "") + "..." : normalized;
 }
 
+function decodeShopeeSourceText(value?: string) {
+  if (!value) return "";
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function getShopeeProductImageSourceText(product: ShopeeProductRecord) {
+  const imageUrls = [product.productImageUrl, ...(product.productImageUrls ?? [])]
+    .filter((url): url is string => Boolean(url?.trim()));
+  return normalizeTextEncoding(
+    imageUrls
+      .map((url) => decodeShopeeSourceText(url)
+        .replace(/^https?:\/\//i, " ")
+        .replace(/[/?#=&._%+-]+/g, " "))
+      .join(" ")
+  );
+}
+
+function getShopeeProductSourceTexts(product: ShopeeProductRecord) {
+  return {
+    images: getShopeeProductImageSourceText(product),
+    title: normalizeTextEncoding(product.productName || ""),
+    description: normalizeTextEncoding(product.productDescription || ""),
+    category: normalizeTextEncoding(getShopeeCategoryLabel(product.category || "") || product.category || "")
+  };
+}
+
+function getShopeeProductSourceEvidence(product: ShopeeProductRecord, pattern: RegExp) {
+  const sourceTexts = getShopeeProductSourceTexts(product);
+  const title = pattern.test(sourceTexts.title.toLowerCase());
+  const description = pattern.test(sourceTexts.description.toLowerCase());
+  const category = pattern.test(sourceTexts.category.toLowerCase());
+  const imageTextMatch = pattern.test(sourceTexts.images.toLowerCase());
+  const hasImage = Boolean(product.productImageUrl || product.productImageUrls?.length);
+  const images = imageTextMatch || (hasImage && (title || description));
+  const sourceMatches = { images, title, description, category };
+  const sourceMatchCount = Object.values(sourceMatches).filter(Boolean).length;
+  const confidence: ShopeeProductInsight["confidence"] =
+    sourceMatchCount >= 4 ? "high" : sourceMatchCount >= 3 ? "medium" : "low";
+  return { sourceMatches, sourceMatchCount, confidence };
+}
+
+function withShopeeProductEvidence(
+  product: ShopeeProductRecord,
+  insight: ShopeeProductInsight,
+  pattern: RegExp
+): ShopeeProductInsight {
+  const evidence = getShopeeProductSourceEvidence(product, pattern);
+  return {
+    ...insight,
+    recognized: insight.recognized && evidence.sourceMatchCount >= 2,
+    confidence: evidence.confidence,
+    sourceMatches: evidence.sourceMatches,
+    sourceMatchCount: evidence.sourceMatchCount,
+    safeCaptionMode: evidence.sourceMatchCount === 2,
+    skipReason: evidence.sourceMatchCount < 2 ? "SKIP_PRODUCT_AND_FETCH_NEW_PRODUCT: product context too weak" : undefined
+  };
+}
+
 function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductInsight {
   const haystack = normalizeTextEncoding(
     [
       product.productName,
       product.productDescription,
+      product.category,
       product.productImageUrl,
       ...(product.productImageUrls ?? [])
     ]
@@ -1116,10 +1183,9 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
   ).toLowerCase();
 
   if (/เวย์|whey|protein|โปรตีน/.test(haystack)) {
-    return {
+    return withShopeeProductEvidence(product, {
       type: "เวย์โปรตีน / อาหารเสริมโปรตีน",
       recognized: true,
-      confidence: "high",
       productCategory: "health",
       audience: "คนที่ออกกำลังกายหรืออยากเสริมโปรตีนในแต่ละวัน",
       situation: "ใช้เป็นตัวช่วยจัดโภชนาการหลังออกกำลังกายหรือวันที่กินโปรตีนไม่ถึง",
@@ -1127,14 +1193,15 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
       angle: "เน้นโปรตีน โภชนาการ ฟิตเนส และความสะดวกในการชง/พกพา โดยไม่อ้างรสชาติหรือผลลัพธ์เกินจริง",
       fallbackFeatures: ["✅ เหมาะกับคนออกกำลังกาย", "✅ ใช้เสริมโปรตีนระหว่างวัน", "✅ ชงดื่มได้สะดวก", "✅ พกไปฟิตเนสได้ง่าย"],
       forbiddenAngles: ["ห้ามเขียนว่าอร่อยมาก", "ห้ามอ้างว่ากินทุกวัน", "ห้ามอ้างว่าลองแล้วชอบ"]
-    };
+    }, /เวย์|whey|protein|โปรตีน|supplement|อาหารเสริม|ฟิตเนส|fitness/i);
   }
 
-  if (/กีฬา|sports?|ฟิตเนส|วิ่ง|running|แบด|badminton|เทนนิส|tennis|ฟุตบอล|football|yoga|โยคะ|ออกกำลังกาย|ถุงเท้า|กางเกงกีฬา|เสื้อกีฬา/.test(haystack)) {
-    return {
-      type: "สินค้าออกกำลังกาย / กีฬา",
+  if (/กีฬา|sports?|ฟิตเนส|วิ่ง|running|แบด|badminton|เทนนิส|tennis|ฟุตบอล|football|yoga|โยคะ|ออกกำลังกาย|ถุงเท้า|กางเกงกีฬา|เสื้อกีฬา|adidas|adizero|nike|yonex/.test(haystack)) {
+    const isSock = /ถุงเท้า|sock|quarter\s?socks?|yonex/.test(haystack);
+    const isShoe = /รองเท้า|shoe|sneaker|adidas|adizero|nike/.test(haystack);
+    return withShopeeProductEvidence(product, {
+      type: isSock ? "ถุงเท้ากีฬา" : isShoe ? "รองเท้าวิ่ง / รองเท้ากีฬา" : "สินค้าออกกำลังกาย / กีฬา",
       recognized: true,
-      confidence: "high",
       productCategory: "sports",
       audience: "คนที่ออกกำลังกาย เล่นกีฬา วิ่ง ฟิตเนส แบดมินตัน เทนนิส หรือฟุตบอล",
       situation: "ใช้ตอนซ้อม ออกกำลังกาย หรือเล่นกีฬาที่ต้องเคลื่อนไหวบ่อย",
@@ -1142,14 +1209,13 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
       angle: "เน้นความคล่องตัว ความกระชับ การซัพพอร์ตการเคลื่อนไหว และการใช้งานกับกีฬา",
       fallbackFeatures: ["✅ เหมาะกับการออกกำลังกาย", "✅ ช่วยให้เคลื่อนไหวคล่องตัว", "✅ ใช้ได้กับการซ้อมหรือเล่นกีฬา", "✅ ดีไซน์เหมาะกับสายฟิตเนส"],
       forbiddenAngles: ["ห้ามเขียนว่าใส่ทำงานได้ทั้งวัน", "ห้ามเขียนว่าเหมาะกับการนั่งออฟฟิศ"]
-    };
+    }, /กีฬา|sports?|ฟิตเนส|fitness|วิ่ง|running|run|แบด|badminton|เทนนิส|tennis|ฟุตบอล|football|yoga|โยคะ|ออกกำลังกาย|ถุงเท้า|sock|รองเท้า|shoe|sneaker|adidas|adizero|yonex/i);
   }
 
   if (/สกินแคร์|skincare|serum|เซรั่ม|ครีม|กันแดด|sunscreen|spf|บำรุง|ผิว|beauty|cosmetic|cleanser|โฟมล้างหน้า/.test(haystack)) {
-    return {
-      type: "สกินแคร์ / ความงาม",
+    return withShopeeProductEvidence(product, {
+      type: /กันแดด|sunscreen|spf/.test(haystack) ? "กันแดด / สกินแคร์" : /serum|เซรั่ม/.test(haystack) ? "เซรั่ม / สกินแคร์" : "สกินแคร์ / ความงาม",
       recognized: true,
-      confidence: "high",
       productCategory: "beauty",
       audience: "คนที่กำลังเลือกสกินแคร์หรือไอเทมดูแลผิวตามคุณสมบัติที่สินค้าแจ้ง",
       situation: "ใช้ใน routine ดูแลผิวหรือพกไว้ใช้ตามความสะดวก",
@@ -1157,14 +1223,13 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
       angle: "เน้นส่วนผสม วิธีใช้ เนื้อสัมผัส ขนาด และความสะดวก ห้ามอ้างผลลัพธ์เกินจริง",
       fallbackFeatures: ["✅ ใช้เป็นส่วนหนึ่งของ routine ดูแลผิวได้", "✅ ขนาดใช้งานสะดวก", "✅ พกหรือวางไว้ใช้หน้าโต๊ะเครื่องแป้งได้ง่าย", "✅ เลือกตามส่วนผสมและวิธีใช้ที่ระบุได้"],
       forbiddenAngles: ["ห้ามเคลมเห็นผลแน่นอน", "ห้ามเขียนว่าหาย 100%", "ห้ามอ้างผลลัพธ์ส่วนตัว"]
-    };
+    }, /สกินแคร์|skincare|serum|เซรั่ม|ครีม|กันแดด|sunscreen|spf|บำรุง|ผิว|beauty|cosmetic|cleanser|โฟมล้างหน้า|d'alba|dalba/i);
   }
 
-  if (/ครัว|kitchen|ทำอาหาร|หม้อ|กระทะ|กล่องอาหาร|ถนอมอาหาร|ช้อน|จาน|แก้ว|ขวดน้ำ|tumbler/.test(haystack)) {
-    return {
-      type: "ของใช้ในครัว",
+  if (/ครัว|kitchen|ทำอาหาร|หม้อ|กระทะ|กล่องอาหาร|ถนอมอาหาร|ช้อน|จาน|แก้ว|ขวดน้ำ|tumbler|กระติก|เก็บความเย็น|เก็บอุณหภูมิ/.test(haystack)) {
+    return withShopeeProductEvidence(product, {
+      type: /แก้ว|ขวดน้ำ|tumbler|กระติก|เก็บความเย็น|เก็บอุณหภูมิ/.test(haystack) ? "แก้ว/กระติกเก็บอุณหภูมิ" : "ของใช้ในครัว",
       recognized: true,
-      confidence: "high",
       productCategory: "kitchen",
       audience: "คนที่ทำอาหาร จัดเก็บของกิน หรืออยากให้มุมครัวใช้งานสะดวกขึ้น",
       situation: "ใช้ตอนเตรียมอาหาร จัดเก็บ หรือพกเครื่องดื่ม/อาหาร",
@@ -1172,14 +1237,13 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
       angle: "เน้นการประกอบอาหาร การจัดเก็บ ความจุ วัสดุ และความสะดวกในการล้าง/หยิบใช้",
       fallbackFeatures: ["✅ ใช้ในครัวได้สะดวก", "✅ ช่วยจัดเก็บให้เป็นระเบียบ", "✅ ขนาดเข้ากับการเตรียมอาหารหรือจัดเก็บ", "✅ หยิบใช้หรือล้างได้ง่าย"],
       forbiddenAngles: []
-    };
+    }, /ครัว|kitchen|ทำอาหาร|หม้อ|กระทะ|กล่องอาหาร|ถนอมอาหาร|ช้อน|จาน|แก้ว|ขวดน้ำ|tumbler|cup|bottle|กระติก|เก็บความเย็น|เก็บอุณหภูมิ|stainless/i);
   }
 
   if (/สัตว์|pet|แมว|cat|สุนัข|dog|อาหารสัตว์|ทรายแมว|ปลอกคอ|ขนสัตว์/.test(haystack)) {
-    return {
+    return withShopeeProductEvidence(product, {
       type: "สินค้าเกี่ยวกับสัตว์เลี้ยง",
       recognized: true,
-      confidence: "high",
       productCategory: "pets",
       audience: "คนเลี้ยงสัตว์ที่ต้องการดูแลความสะอาด อาหาร หรือของใช้ของสัตว์เลี้ยง",
       situation: "ใช้ในบ้านกับสัตว์เลี้ยงเป็นประจำตามประเภทสินค้า",
@@ -1187,14 +1251,13 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
       angle: "เน้นการดูแลสัตว์เลี้ยง สุขอนามัย อาหาร และความสะดวกในการเลี้ยง",
       fallbackFeatures: ["✅ เหมาะกับบ้านที่มีสัตว์เลี้ยง", "✅ ช่วยดูแลความสะอาดได้สะดวก", "✅ ใช้งานกับสัตว์เลี้ยงตามประเภทสินค้า", "✅ เก็บหรือหยิบใช้ได้ง่าย"],
       forbiddenAngles: []
-    };
+    }, /สัตว์|pet|แมว|cat|สุนัข|dog|อาหารสัตว์|ทรายแมว|ปลอกคอ|ขนสัตว์/i);
   }
 
   if (/บ้าน|home|จัดระเบียบ|เก็บของ|ทำความสะอาด|ไม้ถู|ถังขยะ|ชั้นวาง|กล่องเก็บ|ซักผ้า|น้ำยาซัก|ปรับผ้านุ่ม|detergent|laundry/.test(haystack)) {
-    return {
+    return withShopeeProductEvidence(product, {
       type: "ของใช้ในบ้าน",
       recognized: true,
-      confidence: "high",
       productCategory: "home_living",
       audience: "คนที่อยากจัดบ้าน ทำความสะอาด หรือแก้ปัญหาของใช้จุกจิกในบ้าน",
       situation: "ใช้ในบ้าน ห้องน้ำ ห้องครัว มุมซักผ้า หรือมุมจัดเก็บของ",
@@ -1202,14 +1265,13 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
       angle: "เน้นการใช้งานจริง ความสะดวก การจัดระเบียบ การทำความสะอาด และปัญหาในบ้าน",
       fallbackFeatures: ["✅ ช่วยให้บ้านเป็นระเบียบขึ้น", "✅ ใช้งานในบ้านได้สะดวก", "✅ เหมาะกับมุมที่ต้องหยิบใช้บ่อย", "✅ ช่วยประหยัดพื้นที่หรือเวลา"],
       forbiddenAngles: []
-    };
+    }, /บ้าน|home|จัดระเบียบ|เก็บของ|ทำความสะอาด|ไม้ถู|ถังขยะ|ชั้นวาง|กล่องเก็บ|ซักผ้า|น้ำยาซัก|ปรับผ้านุ่ม|detergent|laundry|fineline/i);
   }
 
   if (/smart\s?watch|สมาร์ทวอทช์|นาฬิกาอัจฉริยะ|นาฬิกา smart|fitness tracker|tracker/.test(haystack)) {
-    return {
+    return withShopeeProductEvidence(product, {
       type: "สมาร์ทวอทช์ / อุปกรณ์ติดตามสุขภาพ",
       recognized: true,
-      confidence: "high",
       productCategory: "mobile_gadgets",
       audience: "คนที่อยากดูข้อมูลการออกกำลังกาย การแจ้งเตือน หรือการใช้งานบนข้อมือ",
       situation: "ใส่ระหว่างออกกำลังกาย เดินทาง หรือใช้เช็กข้อมูลพื้นฐานระหว่างวัน",
@@ -1217,14 +1279,13 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
       angle: "เน้นฟังก์ชันที่ระบุ หน้าจอ แบตเตอรี่ โหมดกีฬา หรือการเชื่อมต่อเท่านั้น",
       fallbackFeatures: ["✅ ดูข้อมูลบนข้อมือได้สะดวก", "✅ เหมาะกับการใส่ติดตัวระหว่างวัน", "✅ เลือกจากฟังก์ชันที่ระบุในสินค้า"],
       forbiddenAngles: ["ห้ามเคลมวัดสุขภาพแม่นยำเกินจริง", "ห้ามอ้างฟีเจอร์ที่สินค้าไม่ได้ระบุ"]
-    };
+    }, /smart\s?watch|สมาร์ทวอทช์|นาฬิกาอัจฉริยะ|นาฬิกา smart|fitness tracker|tracker|awei|h25/i);
   }
 
   if (/art\s?toy|อาร์ตทอย|กล่องสุ่ม|blind\s?box|figure|ฟิกเกอร์|โมเดล|ของสะสม|collectible|ตุ๊กตา/.test(haystack)) {
-    return {
+    return withShopeeProductEvidence(product, {
       type: /กล่องสุ่ม|blind\s?box/.test(haystack) ? "กล่องสุ่ม / Art Toy" : "Art Toy / ของสะสม",
       recognized: true,
-      confidence: "high",
       productCategory: "collectibles",
       audience: "คนสะสมฟิกเกอร์ อาร์ตทอย หรือของตกแต่งโต๊ะ/ชั้นโชว์",
       situation: "ใช้สะสม ตั้งโชว์ ถ่ายรูป หรือเติมมุมโต๊ะให้มีคาแรกเตอร์มากขึ้น",
@@ -1232,14 +1293,13 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
       angle: "เน้นซีรีส์ ดีไซน์ ขนาด วัสดุ รุ่น และลักษณะกล่อง/ตัวละครที่ระบุ",
       fallbackFeatures: ["✅ เหมาะกับสายสะสม", "✅ ตั้งโชว์บนโต๊ะหรือชั้นได้", "✅ เลือกจากซีรีส์หรือดีไซน์ที่ชอบ"],
       forbiddenAngles: ["ห้ามรับประกันตัวลับ", "ห้ามอ้าง rarity ถ้าไม่มีข้อมูล"]
-    };
+    }, /art\s?toy|อาร์ตทอย|กล่องสุ่ม|blind\s?box|figure|ฟิกเกอร์|โมเดล|ของสะสม|collectible|ตุ๊กตา|yumi/i);
   }
 
   if (/มือถือ|โทรศัพท์|gadget|แกดเจ็ต|หูฟัง|earbud|speaker|ลำโพง|สายชาร์จ|powerbank|พาวเวอร์แบงค์|charger|ชาร์จ|เคส|tablet|แท็บเล็ต/.test(haystack)) {
-    return {
-      type: "มือถือและแกดเจ็ต",
+    return withShopeeProductEvidence(product, {
+      type: /หูฟัง|earbud|earphone|headphone/.test(haystack) ? "หูฟัง / แกดเจ็ตเสียง" : "มือถือและแกดเจ็ต",
       recognized: true,
-      confidence: "high",
       productCategory: "mobile_gadgets",
       audience: "คนที่ใช้อุปกรณ์ไอทีหรืออยากหาแกดเจ็ตเสริมให้ใช้งานสะดวกขึ้น",
       situation: "ใช้กับมือถือ โต๊ะทำงาน การเดินทาง หรือการชาร์จ/ฟังเสียงตามประเภทสินค้า",
@@ -1247,14 +1307,13 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
       angle: "เน้นสเปก ฟังก์ชัน ความเข้ากันได้ พอร์ต ขนาด และการพกพาที่ระบุ",
       fallbackFeatures: ["✅ ใช้คู่กับอุปกรณ์ไอทีได้", "✅ ดูสเปกและความเข้ากันได้ก่อนเลือก", "✅ ขนาดเหมาะกับการพกหรือวางบนโต๊ะ"],
       forbiddenAngles: ["ห้ามอ้างคุณภาพเสียง/แบตเตอรี่เกินข้อมูล", "ห้ามอ้างรองรับรุ่นที่สินค้าไม่ได้ระบุ"]
-    };
+    }, /มือถือ|โทรศัพท์|gadget|แกดเจ็ต|หูฟัง|earbud|earphone|headphone|speaker|ลำโพง|สายชาร์จ|powerbank|พาวเวอร์แบงค์|charger|ชาร์จ|เคส|tablet|แท็บเล็ต|bluetooth/i);
   }
 
   if (/เสื้อ|กางเกง|เดรส|กระโปรง|แฟชั่น|fashion|รองเท้า|shoe|sneaker|แตะ|หมวก|เข็มขัด|กระเป๋า|bag|เป้|คาดอก|wallet/.test(haystack)) {
-    return {
-      type: "แฟชั่น / เครื่องแต่งกาย",
+    return withShopeeProductEvidence(product, {
+      type: /กระเป๋า|bag|เป้|คาดอก|wallet/.test(haystack) ? "กระเป๋า / ไอเทมพกพา" : /รองเท้า|shoe|sneaker/.test(haystack) ? "รองเท้า / แฟชั่น" : "แฟชั่น / เครื่องแต่งกาย",
       recognized: true,
-      confidence: "high",
       productCategory: "fashion",
       audience: "คนที่เลือกเสื้อผ้า รองเท้า หรือกระเป๋าตามทรง วัสดุ และโอกาสใช้งาน",
       situation: "ใช้แต่งตัว ออกไปข้างนอก เดินทาง หรือจัดของจำเป็นตามประเภทสินค้า",
@@ -1262,14 +1321,13 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
       angle: "เน้นทรง วัสดุ ไซซ์ ช่องเก็บ การแมตช์ชุด หรือโอกาสใช้งานที่สินค้าแจ้ง",
       fallbackFeatures: ["✅ ทรงและดีไซน์ดูใช้งานง่าย", "✅ เลือกจากขนาดหรือช่องเก็บได้", "✅ เหมาะกับการแต่งตัวหรือพกของตามประเภทสินค้า"],
       forbiddenAngles: ["ห้ามอ้างใส่สบายทั้งวันถ้าไม่มีข้อมูลวัสดุ/ทรงรองรับ"]
-    };
+    }, /เสื้อ|กางเกง|เดรส|กระโปรง|แฟชั่น|fashion|รองเท้า|shoe|sneaker|แตะ|หมวก|เข็มขัด|กระเป๋า|bag|เป้|คาดอก|wallet|crossbody/i);
   }
 
   if (/ขนม|snack|อาหาร|food|เครื่องดื่ม|drink|กาแฟ|coffee|ชา|tea|เปี๊ยะ|คุกกี้|เค้ก|น้ำพริก/.test(haystack)) {
-    return {
+    return withShopeeProductEvidence(product, {
       type: "อาหาร / ขนม / เครื่องดื่ม",
       recognized: true,
-      confidence: "high",
       productCategory: "food_beverage",
       audience: "คนที่อยากมีของกิน ของว่าง หรือเครื่องดื่มติดบ้าน/ติดโต๊ะ",
       situation: "เก็บไว้กินเล่น แบ่งกับคนที่บ้าน หรือพกไปกินระหว่างวันตามประเภทสินค้า",
@@ -1277,13 +1335,12 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
       angle: "เน้นรส/แพ็ก/จำนวน/ขนาด/วิธีเก็บจากข้อมูลสินค้าเท่านั้น ห้ามอ้างว่าอร่อยถ้าไม่มีข้อมูลรีวิวจริง",
       fallbackFeatures: ["✅ แพ็กเหมาะกับการแบ่งกิน", "✅ ขนาดบรรจุช่วยให้เก็บไว้ได้", "✅ เหมาะกับมีติดบ้านเป็นของว่าง"],
       forbiddenAngles: ["ห้ามเขียนว่าอร่อยมากถ้าข้อมูลสินค้าไม่ได้ระบุ", "ห้ามอ้างว่ากินแล้วติดใจ"]
-    };
+    }, /ขนม|snack|อาหาร|food|เครื่องดื่ม|drink|กาแฟ|coffee|ชา|tea|เปี๊ยะ|คุกกี้|เค้ก|น้ำพริก/i);
   }
 
-  return {
+  const genericInsight = withShopeeProductEvidence(product, {
     type: "สินค้าไลฟ์สไตล์ / ของใช้ทั่วไป",
     recognized: false,
-    confidence: "low",
     productCategory: "general",
     audience: "คนที่ต้องการไอเทมที่ช่วยให้จัดของ ใช้งาน หรือพกติดตัวได้สะดวกขึ้น",
     situation: "ใช้กับมุมบ้าน โต๊ะทำงาน การเดินทาง หรือกิจกรรมที่เห็นได้จากชื่อและรูปสินค้า",
@@ -1291,6 +1348,13 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
     angle: "เขียนจากการใช้งานที่เห็นได้จริงในชื่อ รูป และ description โดยไม่ยกจำนวน สี ขนาด หรือน้ำหนักเป็นจุดขายหลักถ้าไม่เกี่ยวกับการใช้งาน",
     fallbackFeatures: ["✅ หยิบใช้งานได้ง่ายขึ้น", "✅ ช่วยจัดของหรือเตรียมของให้เป็นระเบียบ", "✅ เหมาะกับการใช้งานตามบริบทในรูปสินค้า"],
     forbiddenAngles: ["ห้ามเดาคุณสมบัติที่ไม่มีในชื่อ รูป หรือ description", "ห้ามใช้คำ generic ลอย ๆ โดยไม่มีบริบทสินค้า"]
+  }, /ของใช้|ไอเทม|item|use|portable|พก|จัด|เก็บ|บ้าน|home|desk|โต๊ะ|travel|เดินทาง/i);
+  return {
+    ...genericInsight,
+    safeCaptionMode: true,
+    skipReason: genericInsight.sourceMatchCount && genericInsight.sourceMatchCount >= 2
+      ? undefined
+      : "SKIP_PRODUCT_AND_FETCH_NEW_PRODUCT: product context too weak"
   };
 }
 
@@ -1317,21 +1381,21 @@ function getShopeeShortReviewProductName(productName?: string) {
 
   const haystack = source.toLowerCase();
   const reviewNameRules: Array<[RegExp, () => string]> = [
-    [/แก้วเพชร/iu, () => /หลอด/.test(haystack) ? "แก้วเพชรเก็บความเย็นพร้อมหลอด" : "แก้วเพชรเก็บความเย็นพกพา"],
-    [/กระติกน้ำ/iu, () => /ใหญ่|จุ|ลิตร/.test(haystack) ? "กระติกน้ำเก็บอุณหภูมิขนาดใหญ่" : "กระติกน้ำเก็บความเย็นพกพา"],
-    [/แก้ว|tumbler|cup/iu, () => /หลอด|straw/.test(haystack) ? "แก้วเก็บอุณหภูมิพร้อมหลอด" : "แก้วน้ำสแตนเลสพกพา"],
-    [/โคมไฟ\s*LED|โคมไฟ|lamp|light/iu, () => /อ่าน|หนังสือ|ถนอม|ตา/.test(haystack) ? "โคมไฟอ่านหนังสือถนอมสายตา" : /ปรับ|ระดับ|แสง/.test(haystack) ? "โคมไฟอ่านหนังสือปรับแสงได้" : "โคมไฟตั้งโต๊ะถนอมสายตา"],
-    [/ถุงเท้า|sock/iu, () => /วิ่ง|running/.test(haystack) ? "ถุงเท้าสำหรับวิ่งและออกกำลังกาย" : "ถุงเท้ากีฬาระบายอากาศ"],
-    [/ต่างหู|earring/iu, () => /โบฮีเมียน|boho|bohemian/.test(haystack) ? "ต่างหูโบฮีเมียนแต่งลาย" : "ต่างหูแฟชั่นสไตล์วินเทจ"],
-    [/พัดลมพกพา|fan/iu, () => "พัดลมพกพาชาร์จ USB"],
-    [/สมาร์ทวอทช์|smart\s*watch|watch/iu, () => "สมาร์ทวอทช์สำหรับออกกำลังกาย"],
-    [/เวย์โปรตีน|whey|protein/iu, () => "เวย์โปรตีนชงดื่มหลังออกกำลังกาย"],
-    [/ไหมขัดฟัน|floss/iu, () => "ไหมขัดฟันด้ามจับใช้ง่าย"],
-    [/น้ำยาซักผ้า|detergent|laundry/iu, () => "น้ำยาซักผ้ากลิ่นหอมติดบ้าน"],
-    [/เซรั่ม|serum/iu, () => "เซรั่มบำรุงผิวใช้ประจำวัน"],
-    [/กันแดด|sunscreen|spf/iu, () => "กันแดดเนื้อบางเบาใช้ทุกวัน"],
-    [/กระเป๋า|bag/iu, () => /คาดอก|crossbody/.test(haystack) ? "กระเป๋าคาดอกจัดของพกพา" : "กระเป๋าพกพาช่องเก็บของเยอะ"],
-    [/รองเท้า|shoe|sneaker/iu, () => "รองเท้าลำลองใส่เดินสบาย"]
+    [/แก้วเพชร/iu, () => /หลอด/.test(haystack) ? "แก้วเพชรเก็บความเย็นพร้อมหลอด 🥤" : "แก้วเพชรเก็บความเย็นพกพา 🥤"],
+    [/กระติกน้ำ/iu, () => /ใหญ่|จุ|ลิตร/.test(haystack) ? "กระติกน้ำเก็บอุณหภูมิขนาดใหญ่ 🥤" : "กระติกน้ำเก็บความเย็นพกพา 🥤"],
+    [/แก้ว|tumbler|cup/iu, () => /หลอด|straw/.test(haystack) ? "แก้วเก็บอุณหภูมิพร้อมหลอด 🥤" : "แก้วเก็บความเย็นพกพา 🥤"],
+    [/โคมไฟ\s*LED|โคมไฟ|lamp|light/iu, () => /อ่าน|หนังสือ|ถนอม|ตา/.test(haystack) ? "โคมไฟตั้งโต๊ะถนอมสายตา 💡" : /ปรับ|ระดับ|แสง/.test(haystack) ? "โคมไฟอ่านหนังสือปรับแสงได้ 💡" : "โคมไฟอ่านหนังสือถนอมสายตา 💡"],
+    [/ถุงเท้า|sock/iu, () => /yonex/.test(haystack) ? "ถุงเท้ากีฬากระชับเท้า YONEX 🏃" : /วิ่ง|running/.test(haystack) ? "ถุงเท้าสำหรับวิ่งและออกกำลังกาย 🏃" : "ถุงเท้ากีฬาระบายอากาศ 🏃"],
+    [/ต่างหู|earring/iu, () => /โบฮีเมียน|boho|bohemian/.test(haystack) ? "ต่างหูโบฮีเมียนแต่งลาย ✨" : "ต่างหูแฟชั่นสไตล์วินเทจ ✨"],
+    [/พัดลมพกพา|fan/iu, () => "พัดลมพกพาชาร์จ USB 🌀"],
+    [/สมาร์ทวอทช์|smart\s*watch|watch/iu, () => /awei/.test(haystack) ? "สมาร์ทวอทช์ฟังก์ชันครบ Awei ⌚" : "สมาร์ทวอทช์ฟังก์ชันครบ ⌚"],
+    [/เวย์โปรตีน|whey|protein/iu, () => "เวย์โปรตีนชงดื่มหลังออกกำลังกาย 💚"],
+    [/ไหมขัดฟัน|floss/iu, () => "ไหมขัดฟันด้ามจับใช้ง่าย 🦷"],
+    [/น้ำยาซักผ้า|detergent|laundry/iu, () => "น้ำยาซักผ้ากลิ่นหอมติดบ้าน 🏠"],
+    [/เซรั่ม|serum/iu, () => "เซรั่มบำรุงผิวใช้ประจำวัน ✨"],
+    [/กันแดด|sunscreen|spf/iu, () => "กันแดดเนื้อบางเบาใช้ทุกวัน ✨"],
+    [/กระเป๋า|bag/iu, () => /คาดอก|crossbody/.test(haystack) ? "กระเป๋าคาดอกจัดของพกพา 🎒" : "กระเป๋าพกพาช่องเก็บของเยอะ 🎒"],
+    [/รองเท้า|shoe|sneaker|adizero|adidas/iu, () => /adidas|adizero/.test(haystack) ? "รองเท้าวิ่งน้ำหนักเบา Adidas 👟" : /วิ่ง|running|run/.test(haystack) ? "รองเท้าวิ่งน้ำหนักเบา 👟" : "รองเท้ากีฬาใส่เดินสบาย 👟"]
   ];
 
   for (const [pattern, buildName] of reviewNameRules) {
@@ -1352,7 +1416,7 @@ function getShopeeShortReviewProductName(productName?: string) {
   const shortName = words.length > 4 ? words.slice(0, 4).join(" ") : withoutSpecs;
   const genericShortNames = /^(?:กระติกน้ำ|แก้วน้ำ|แก้ว|โคมไฟ|ถุงเท้า|ต่างหู|กระเป๋า|รองเท้า)$/iu;
   const improvedName = genericShortNames.test(shortName)
-    ? `${shortName}ใช้งานประจำวัน`
+    ? `${shortName}ใช้งานประจำวัน ✨`
     : shortName;
   return compactProductText(improvedName || source || TH.defaultProductName, 58);
 }
@@ -2485,6 +2549,14 @@ export async function generateShopeeCaption(input: {
 }) {
   const { product } = input;
   const productInsight = assertRecognizedShopeeProductInsight(product);
+  if ((productInsight.sourceMatchCount ?? 0) < 2) {
+    throw new ShopeeProviderError(
+      `caption generation failed: SKIP_PRODUCT_AND_FETCH_NEW_PRODUCT product context too weak for ${product.productId}`,
+      422,
+      "product_context_too_weak",
+      "internal_api"
+    );
+  }
   const priceLine = product.discountPrice
     ? `\u0e23\u0e32\u0e04\u0e32\u0e42\u0e1b\u0e23: ${product.discountPrice.toLocaleString("th-TH")} \u0e1a\u0e32\u0e17${product.discountPercent ? ` \u0e25\u0e14\u0e1b\u0e23\u0e30\u0e21\u0e32\u0e13 ${product.discountPercent}%` : ""}`
     : product.productPrice
@@ -2499,6 +2571,8 @@ export async function generateShopeeCaption(input: {
   const insightFeatureLines = productFactLines.length
     ? productFactLines
     : productInsight.fallbackFeatures.map((line) => stripShopeeLeadingEmoji(line));
+  const sourceMatches = productInsight.sourceMatches ?? { images: false, title: false, description: false, category: false };
+  const captionMode = productInsight.safeCaptionMode ? "LOW_CONFIDENCE_USE_SAFE_CAPTION" : "NORMAL_CAPTION";
 
   const customPrompt = [
     "ROLE: คุณคือ Content Creator สายรีวิวสินค้า Facebook Affiliate ที่เขียนแบบสั้น กระชับ เหมือนเพจรีวิวสินค้าใช้งานจริง",
@@ -2510,12 +2584,25 @@ export async function generateShopeeCaption(input: {
     "- ห้ามเดาคุณสมบัติใหม่ ห้ามคัดลอกชื่อสินค้ามาวนซ้ำ",
     "- ห้ามสร้าง bullet point, checklist, feature list หรือหัวข้อ 📌 จุดที่ชอบ",
     "",
-    "ก่อนเขียนให้คิดเงียบ ๆ จากมุมคนซื้อ:",
+    "ก่อนเขียนให้วิเคราะห์สินค้าแบบเงียบ ๆ ตาม Priority Sources นี้เท่านั้น:",
+    "1) Product Images เป็นหลัก",
+    "2) Product Title",
+    "3) Product Description",
+    "4) Product Category ใช้เป็นบริบทสุดท้าย ห้ามนำมาเขียนเป็น feature",
+    "",
+    "Product understanding ที่ระบบวิเคราะห์ไว้:",
+    `- Product type: ${productInsight.type}`,
+    `- Confidence: ${productInsight.confidence ?? "low"} (${captionMode})`,
+    `- Source matches: images=${sourceMatches.images ? "yes" : "no"}, title=${sourceMatches.title ? "yes" : "no"}, description=${sourceMatches.description ? "yes" : "no"}, category=${sourceMatches.category ? "yes" : "no"}`,
     `- สินค้านี้ใช้ทำอะไร: ${productInsight.situation}`,
     `- คนซื้อใช้ในสถานการณ์ไหน: ${productInsight.problem}`,
     `- จุดเด่นที่สัมผัสได้จริง: ${insightFeatureLines.join(" | ") || productInsight.angle}`,
     `- เหมาะกับใคร: ${productInsight.audience}`,
     `- ประโยชน์หลัก: ${productInsight.angle}`,
+    "",
+    productInsight.safeCaptionMode
+      ? "SAFE CAPTION MODE: เขียนจากสิ่งที่ชัดเจนที่สุดเพียง 1 บรรทัด ห้ามเดาจุดเด่นเพิ่ม ห้ามใช้ claims ที่ไม่มีในชื่อ/รูป/description"
+      : "NORMAL CAPTION MODE: เขียนรีวิวสั้นที่สัมพันธ์กับประเภทสินค้าและการใช้งานจริงโดยตรง",
     "",
     "โครงสร้างบังคับ ห้ามเปลี่ยนลำดับ:",
     `${captionProductName}`,
@@ -2540,6 +2627,7 @@ export async function generateShopeeCaption(input: {
     "- ถ้าจำเป็นต้องพูดถึงสเปก ให้แปลงเป็นประโยชน์ เช่น เติมน้ำไว้จิบระหว่างวันได้ง่าย หรือปรับแสงให้เหมาะกับอ่านหนังสือ",
     "- CTA ต้องอยู่เหนือพิกัด และบรรทัดพิกัดต้องเป็นรูปแบบเดียวเท่านั้น: 📍 พิกัด https://s.shopee.co.th/{shortCode}",
     "- ห้ามใช้ category เป็น feature เช่น General, Lifestyle, Beauty, Home",
+    "- ห้ามเขียนหลุดประเภทสินค้า เช่น รองเท้าไปเขียนเรื่องจัดบ้าน, แก้วน้ำไปเขียนเรื่องวิ่ง, เครื่องสำอางไปเขียนเรื่องจัดโต๊ะ",
     "- ห้ามใช้คะแนนร้าน ยอดขาย จำนวนรีวิว bestseller ขายดีอันดับ 1",
     "- ห้ามใช้คำ generic หรือภาษาระบบ: เลือกจากรายละเอียดสินค้าแล้วดูใช้งานได้จริง, ดูจากรายละเอียดสินค้า, จากข้อมูลที่ระบุ, จากคำอธิบายสินค้า, ตามข้อมูล, ตามรายละเอียดที่ระบุ, เลือกดูจากชื่อสินค้า, เลือกดูจากรายละเอียดสินค้า, ตามสเปกที่แจ้งไว้, ตามข้อมูลผู้ขาย, จากรูปแบบสินค้า, รูปแบบที่เห็นในภาพ, จากรูปภาพสินค้า, จากภาพสินค้า, อ่านรายละเอียดก่อนเลือกซื้อ, เลือกจากรุ่น สี ขนาด หรือแพ็กที่ระบุไว้, เหมาะสำหรับผู้ใช้งานทั่วไป, เหมาะกับหมวด, เหมาะกับการใช้งานทั่วไป, คุ้มค่ากับราคา, จากข้อมูลสินค้า, จากรายละเอียดสินค้า, ใช้งานได้จริง, คุณสมบัติสินค้า, สินค้าประเภท, ลองเช็กโปรหน้าสินค้าได้เลย",
     "- ห้ามพูดถึงกระบวนการวิเคราะห์ เช่น วิเคราะห์จากรูป, วิเคราะห์จากชื่อสินค้า, ดูจากข้อมูล, ตรวจสเปก, ตรวจรายละเอียด",
@@ -2557,6 +2645,9 @@ export async function generateShopeeCaption(input: {
     `รูปภาพสินค้าเพื่อช่วยระบุประเภท: ${(product.productImageUrls?.length ? product.productImageUrls : [product.productImageUrl]).filter(Boolean).slice(0, 4).join(" | ") || "-"}`,
     `Product insight type: ${productInsight.type}`,
     `Product insight confidence: ${productInsight.confidence ?? (productInsight.recognized ? "high" : "low")}`,
+    `Source match count: ${productInsight.sourceMatchCount ?? 0}/4`,
+    `Source matches: ${JSON.stringify(sourceMatches)}`,
+    `Caption mode: ${captionMode}`,
     `Target audience: ${productInsight.audience}`,
     `Usage situation: ${productInsight.situation}`,
     `Problem solved: ${productInsight.problem}`,
@@ -2576,8 +2667,12 @@ export async function generateShopeeCaption(input: {
       sourceText: normalizeTextEncoding([
         `Product name: ${captionProductName}`,
         `Full product name: ${product.productName}`,
+        `Priority source 1 - Product images: ${(product.productImageUrls?.length ? product.productImageUrls : [product.productImageUrl]).filter(Boolean).slice(0, 4).join(" | ") || "-"}`,
+        `Priority source 2 - Product title: ${product.productName}`,
+        `Priority source 3 - Product description: ${product.productDescription || "-"}`,
+        `Priority source 4 - Product category: ${product.category || "-"}`,
         `Description: ${product.productDescription}`,
-        `Product insight: ${productInsight.type}; ${productInsight.audience}; ${productInsight.situation}; ${productInsight.problem}; ${productInsight.angle}`,
+        `Product insight: ${productInsight.type}; confidence=${productInsight.confidence}; mode=${captionMode}; matches=${JSON.stringify(sourceMatches)}; ${productInsight.audience}; ${productInsight.situation}; ${productInsight.problem}; ${productInsight.angle}`,
         `Extracted facts: ${productFactLines.join(" | ")}`,
         `Fallback category features if facts are limited: ${productInsight.fallbackFeatures.join(" | ")}`,
         priceLine,
