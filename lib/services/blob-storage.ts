@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { del, list, put } from "@vercel/blob";
 import { AiGeneratedImage } from "@/models/AiGeneratedImage";
 import { AiGeneratedPost } from "@/models/AiGeneratedPost";
+import { traceExternalRequest } from "@/lib/services/request-debug";
 
 type BlobKind = "image" | "preview" | "temp";
 
@@ -88,21 +89,47 @@ async function putUniqueBlob(
   }
 ) {
   try {
-    return await put(pathname, body, {
-      access: "public",
-      contentType: options.contentType,
-      addRandomSuffix: true
-    });
+    return await traceExternalRequest(
+      {
+        step: "VERCEL_BLOB_UPLOAD",
+        url: `vercel-blob://${pathname}`,
+        fn: "putUniqueBlob",
+        source: "vercel_blob",
+        metadata: {
+          contentType: options.contentType,
+          bytes: body.byteLength
+        }
+      },
+      () => put(pathname, body, {
+        access: "public",
+        contentType: options.contentType,
+        addRandomSuffix: true
+      })
+    );
   } catch (error) {
     if (!isBlobAlreadyExistsError(error)) {
       throw error;
     }
 
-    return put(options.fallbackPathname(), body, {
-      access: "public",
-      contentType: options.contentType,
-      addRandomSuffix: true
-    });
+    const fallbackPathname = options.fallbackPathname();
+    return traceExternalRequest(
+      {
+        step: "VERCEL_BLOB_UPLOAD_RETRY",
+        url: `vercel-blob://${fallbackPathname}`,
+        fn: "putUniqueBlob",
+        source: "vercel_blob",
+        metadata: {
+          contentType: options.contentType,
+          bytes: body.byteLength,
+          retryReason: "blob_already_exists"
+        }
+      },
+      () => put(fallbackPathname, body, {
+        access: "public",
+        contentType: options.contentType,
+        addRandomSuffix: true
+      })
+    );
   }
 }
 

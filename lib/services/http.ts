@@ -1,3 +1,5 @@
+import { logExternalResponseFailure, traceExternalRequest } from "@/lib/services/request-debug";
+
 function mergeAbortSignals(signals: Array<AbortSignal | null | undefined>) {
   const controller = new AbortController();
 
@@ -37,6 +39,10 @@ export async function fetchWithRetry(
   const timeoutMs = options.timeoutMs ?? 15000;
 
   let lastError: unknown;
+  const requestUrl =
+    typeof input === "string" || input instanceof URL
+      ? input.toString()
+      : input.url;
 
   for (let attempt = 0; attempt <= retries; attempt += 1) {
     const timeoutController = new AbortController();
@@ -49,16 +55,38 @@ export async function fetchWithRetry(
         : null;
 
     try {
-      const response = await fetch(input, {
-        ...init,
-        signal
-      });
+      const requestStartedAt = Date.now();
+      const response = await traceExternalRequest(
+        {
+          step: "FETCH_WITH_RETRY",
+          url: requestUrl,
+          fn: "fetchWithRetry",
+          source: "external_http_request",
+          metadata: { attempt: attempt + 1, retries: retries + 1 }
+        },
+        () => fetch(input, {
+          ...init,
+          signal
+        })
+      );
 
       if (timeoutId) {
         clearTimeout(timeoutId);
       }
 
       if (response.ok || !retryOnStatuses.includes(response.status) || attempt === retries) {
+        if (!response.ok) {
+          await logExternalResponseFailure({
+            step: "FETCH_WITH_RETRY",
+            url: requestUrl,
+            fn: "fetchWithRetry",
+            source: "external_http_request",
+            responseTime: Date.now() - requestStartedAt,
+            status: response.status,
+            errorMessage: `External HTTP request returned ${response.status}`,
+            metadata: { attempt: attempt + 1, retries: retries + 1 }
+          });
+        }
         return response;
       }
 

@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { traceExternalRequest } from "@/lib/services/request-debug";
 
 declare global {
   // eslint-disable-next-line no-var
@@ -32,13 +33,26 @@ export async function connectDb() {
   }
 
   if (!cached.promise) {
-    cached.promise = mongoose.connect(uri, {
-      dbName: "facebook-auto-posting",
-      serverSelectionTimeoutMS: envMs("MONGODB_SERVER_SELECTION_TIMEOUT_MS", 4000),
-      connectTimeoutMS: envMs("MONGODB_CONNECT_TIMEOUT_MS", 4000),
-      socketTimeoutMS: envMs("MONGODB_SOCKET_TIMEOUT_MS", 15000),
-      maxPoolSize: Number(process.env.MONGODB_MAX_POOL_SIZE ?? 8)
-    });
+    cached.promise = traceExternalRequest(
+      {
+        step: "DATABASE_CONNECT",
+        url: "mongodb://[redacted]",
+        fn: "connectDb",
+        source: "database",
+        metadata: {
+          dbName: "facebook-auto-posting",
+          serverSelectionTimeoutMS: envMs("MONGODB_SERVER_SELECTION_TIMEOUT_MS", 4000),
+          connectTimeoutMS: envMs("MONGODB_CONNECT_TIMEOUT_MS", 4000)
+        }
+      },
+      () => mongoose.connect(uri, {
+        dbName: "facebook-auto-posting",
+        serverSelectionTimeoutMS: envMs("MONGODB_SERVER_SELECTION_TIMEOUT_MS", 4000),
+        connectTimeoutMS: envMs("MONGODB_CONNECT_TIMEOUT_MS", 4000),
+        socketTimeoutMS: envMs("MONGODB_SOCKET_TIMEOUT_MS", 15000),
+        maxPoolSize: Number(process.env.MONGODB_MAX_POOL_SIZE ?? 8)
+      })
+    );
   }
 
   try {

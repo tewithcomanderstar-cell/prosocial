@@ -1,5 +1,6 @@
 ﻿import OpenAI, { toFile } from "openai";
 import { getFallbackVariants } from "@/lib/services/fallback-content";
+import { traceExternalRequest } from "@/lib/services/request-debug";
 import { GeneratedVariant } from "@/lib/types";
 
 type PersonaContext = {
@@ -150,15 +151,29 @@ export async function generateProductReferenceImage(input: {
     )));
     const imageInput = productFiles.length === 1 ? productFiles[0] : productFiles;
 
-    const result = await client.images.edit({
-      model: imageModel,
-      image: imageInput,
-      prompt: safePrompt,
-      size: "1024x1024",
-      quality: "medium",
-      background: "opaque",
-      n: 1
-    });
+    const result = await traceExternalRequest(
+      {
+        step: "OPENAI_IMAGE_EDIT",
+        url: "openai://images.edit",
+        fn: "generateProductReferenceImage",
+        source: "openai_image_generation",
+        userId: input.userId,
+        metadata: {
+          model: imageModel,
+          requestedModel: requestedImageModel,
+          referenceImages: productFiles.length
+        }
+      },
+      () => client.images.edit({
+        model: imageModel,
+        image: imageInput,
+        prompt: safePrompt,
+        size: "1024x1024",
+        quality: "medium",
+        background: "opaque",
+        n: 1
+      })
+    );
 
     const b64 = result.data?.[0]?.b64_json;
     if (!b64) {
@@ -218,20 +233,31 @@ export async function generateFacebookContent(keyword: string, options: Generate
   }
 
   try {
-    const result = await client.responses.create({
-      model: getContentModel(),
-      input: [
-        {
-          role: "system",
-          content:
-            "You write Thai Facebook marketing content. Treat the custom prompt like a real ChatGPT instruction from the user and follow it closely. Use the source material when provided, but do not invent facts beyond it. The final caption must always read like a finished public-facing post, never like internal notes. Never mention file names, image IDs, OCR text extraction, source material, or analysis steps. Never output planning language, placeholders, or requests for missing information. Return strict JSON with a variants array of 3 to 5 items. Each item must include caption and hashtags. Keep captions ready to post, natural, audience-aware, and aligned to the requested persona and prompt."
-        },
-        {
-          role: "user",
-          content: buildGenerationPrompt(keyword, options)
-        }
-      ]
-    });
+    const model = getContentModel();
+    const result = await traceExternalRequest(
+      {
+        step: "OPENAI_CAPTION_GENERATION",
+        url: "openai://responses.create",
+        fn: "generateFacebookContent",
+        source: "openai_caption_generation",
+        userId: options.userId,
+        metadata: { model }
+      },
+      () => client.responses.create({
+        model,
+        input: [
+          {
+            role: "system",
+            content:
+              "You write Thai Facebook marketing content. Treat the custom prompt like a real ChatGPT instruction from the user and follow it closely. Use the source material when provided, but do not invent facts beyond it. The final caption must always read like a finished public-facing post, never like internal notes. Never mention file names, image IDs, OCR text extraction, source material, or analysis steps. Never output planning language, placeholders, or requests for missing information. Return strict JSON with a variants array of 3 to 5 items. Each item must include caption and hashtags. Keep captions ready to post, natural, audience-aware, and aligned to the requested persona and prompt."
+          },
+          {
+            role: "user",
+            content: buildGenerationPrompt(keyword, options)
+          }
+        ]
+      })
+    );
 
     const parsed = JSON.parse(extractJson(result.output_text)) as { variants: GeneratedVariant[] };
     return parsed.variants;

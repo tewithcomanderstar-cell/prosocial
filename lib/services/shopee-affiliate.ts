@@ -8,6 +8,7 @@ import {
 import { generateFacebookContent, generateProductReferenceImage } from "@/lib/services/ai";
 import { assertNoLargeMongoFields, uploadAutoPostImage } from "@/lib/services/blob-storage";
 import { logAction } from "@/lib/services/logging";
+import { logExternalResponseFailure, traceExternalRequest } from "@/lib/services/request-debug";
 import { assertValidTextEncoding, normalizeTextEncoding, validateTextEncoding } from "@/lib/services/text-encoding";
 import {
   DEFAULT_SHOPEE_CATEGORY,
@@ -419,13 +420,43 @@ export class ShopeeOfficialApiProvider implements ShopeeProductProvider {
       hasAuthHeaders: authMode === "affiliate_headers"
     });
 
-    const response = await fetch(url, {
-      headers,
-      cache: "no-store"
-    });
+    const requestStartedAt = Date.now();
+    const response = await traceExternalRequest(
+      {
+        step: "SHOPEE_PRODUCT_SEARCH",
+        url: url.toString(),
+        fn: "ShopeeOfficialApiProvider.fetchProducts",
+        source: "shopee_product_search",
+        metadata: {
+          authMode,
+          sourceTag: query.sourceTag ?? "trending",
+          endpointHost: url.host,
+          endpointPath: url.pathname
+        }
+      },
+      () => fetch(url, {
+        headers,
+        cache: "no-store"
+      })
+    );
 
     if (!response.ok) {
       const bodySummary = await summarizeResponse(response);
+      await logExternalResponseFailure({
+        step: "SHOPEE_PRODUCT_SEARCH",
+        url: url.toString(),
+        fn: "ShopeeOfficialApiProvider.fetchProducts",
+        source: "shopee_product_search",
+        responseTime: Date.now() - requestStartedAt,
+        status: response.status,
+        errorMessage: bodySummary,
+        metadata: {
+          authMode,
+          bodySummary,
+          endpointHost: url.host,
+          endpointPath: url.pathname
+        }
+      });
       console.warn("[shopee/provider] external product fetch failed", {
         endpointHost: url.host,
         endpointPath: url.pathname,
@@ -673,18 +704,50 @@ async function fetchShopeeAffiliateGraphqlProductsWithQuery(input: {
     authorizationScheme: "SHA256"
   });
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      Authorization: authorization
+  const requestStartedAt = Date.now();
+  const response = await traceExternalRequest(
+    {
+      step: "SHOPEE_AFFILIATE_GRAPHQL_PRODUCT_OFFER",
+      url: url.toString(),
+      fn: "fetchShopeeAffiliateGraphqlProducts",
+      source: "shopee_affiliate_link",
+      metadata: {
+        authMode: "affiliate_graphql",
+        queryMode: input.queryMode,
+        sourceTag: input.query.sourceTag ?? "trending",
+        endpointHost: url.host,
+        endpointPath: url.pathname
+      }
     },
-    body,
-    cache: "no-store"
-  });
+    () => fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        Authorization: authorization
+      },
+      body,
+      cache: "no-store"
+    })
+  );
 
   if (!response.ok) {
     const bodySummary = await summarizeResponse(response);
+    await logExternalResponseFailure({
+      step: "SHOPEE_AFFILIATE_GRAPHQL_PRODUCT_OFFER",
+      url: url.toString(),
+      fn: "fetchShopeeAffiliateGraphqlProducts",
+      source: "shopee_affiliate_link",
+      responseTime: Date.now() - requestStartedAt,
+      status: response.status,
+      errorMessage: bodySummary,
+      metadata: {
+        authMode: "affiliate_graphql",
+        queryMode: input.queryMode,
+        bodySummary,
+        endpointHost: url.host,
+        endpointPath: url.pathname
+      }
+    });
     console.warn("[shopee/provider] affiliate graphql product fetch failed", {
       endpointHost: url.host,
       endpointPath: url.pathname,
@@ -704,6 +767,22 @@ async function fetchShopeeAffiliateGraphqlProductsWithQuery(input: {
   const payload = (await response.json()) as Record<string, any>;
   if (payload.errors?.length) {
     const summary = JSON.stringify(payload.errors).slice(0, 500);
+    await logExternalResponseFailure({
+      step: "SHOPEE_AFFILIATE_GRAPHQL_PRODUCT_OFFER",
+      url: url.toString(),
+      fn: "fetchShopeeAffiliateGraphqlProducts",
+      source: "shopee_affiliate_link",
+      responseTime: Date.now() - requestStartedAt,
+      status: response.status,
+      errorMessage: summary,
+      metadata: {
+        authMode: "affiliate_graphql",
+        queryMode: input.queryMode,
+        endpointHost: url.host,
+        endpointPath: url.pathname,
+        graphqlErrors: summary
+      }
+    });
     console.warn("[shopee/provider] affiliate graphql returned errors", {
       endpointHost: url.host,
       endpointPath: url.pathname,
@@ -826,8 +905,28 @@ export function isShopeeShortLink(value?: string | null) {
 async function fetchImageForAiEdit(url?: string) {
   if (!url) return null;
   try {
-    const response = await fetch(url, { cache: "no-store" });
-    if (!response.ok) return null;
+    const requestStartedAt = Date.now();
+    const response = await traceExternalRequest(
+      {
+        step: "SHOPEE_PRODUCT_IMAGE_REFERENCE_FETCH",
+        url,
+        fn: "fetchImageForAiEdit",
+        source: "image_generation_reference_fetch"
+      },
+      () => fetch(url, { cache: "no-store" })
+    );
+    if (!response.ok) {
+      await logExternalResponseFailure({
+        step: "SHOPEE_PRODUCT_IMAGE_REFERENCE_FETCH",
+        url,
+        fn: "fetchImageForAiEdit",
+        source: "image_generation_reference_fetch",
+        responseTime: Date.now() - requestStartedAt,
+        status: response.status,
+        errorMessage: `Shopee reference image returned ${response.status}`
+      });
+      return null;
+    }
     const contentType = response.headers.get("content-type") || "image/jpeg";
     if (!contentType.startsWith("image/")) return null;
     return { bytes: await response.arrayBuffer(), mimeType: contentType };
@@ -2962,8 +3061,26 @@ export async function generateShopeeCaption(input: {
   return fallback;
 }
 async function fetchShopeeReferenceImage(url: string) {
-  const response = await fetch(url, { cache: "no-store" });
+  const requestStartedAt = Date.now();
+  const response = await traceExternalRequest(
+    {
+      step: "SHOPEE_REFERENCE_IMAGE_FETCH",
+      url,
+      fn: "fetchShopeeReferenceImage",
+      source: "image_generation_reference_fetch"
+    },
+    () => fetch(url, { cache: "no-store" })
+  );
   if (!response.ok) {
+    await logExternalResponseFailure({
+      step: "SHOPEE_REFERENCE_IMAGE_FETCH",
+      url,
+      fn: "fetchShopeeReferenceImage",
+      source: "image_generation_reference_fetch",
+      responseTime: Date.now() - requestStartedAt,
+      status: response.status,
+      errorMessage: `Unable to fetch Shopee reference image: ${response.status}`
+    });
     throw new ShopeeProviderError(
       `Unable to fetch Shopee reference image: ${response.status}`,
       502,

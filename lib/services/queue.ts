@@ -29,6 +29,7 @@ import { contentFingerprint } from "@/lib/services/fingerprint";
 import { logAction, logAndNotifyError, serializeError } from "@/lib/services/logging";
 import { getPageLogoForFacebookPage } from "@/lib/services/page-logo";
 import { checkRateLimits } from "@/lib/services/rate-limit";
+import { logExternalResponseFailure, traceExternalRequest } from "@/lib/services/request-debug";
 import { getUserSettings, randomDelayMs } from "@/lib/services/settings";
 import { countShopeeProductNameOccurrences } from "@/lib/services/shopee-affiliate-core";
 import { isShopeeShortLink, normalizeShopeeCaptionLinkLine } from "@/lib/services/shopee-affiliate";
@@ -719,8 +720,26 @@ async function fetchRemoteImageBuffer(url: string) {
     return Buffer.from(match[1], "base64");
   }
 
-  const response = await fetch(url, { cache: "no-store" });
+  const requestStartedAt = Date.now();
+  const response = await traceExternalRequest(
+    {
+      step: "FACEBOOK_IMAGE_SOURCE_FETCH",
+      url,
+      fn: "fetchRemoteImageBuffer",
+      source: "facebook_publish_image_fetch"
+    },
+    () => fetch(url, { cache: "no-store" })
+  );
   if (!response.ok) {
+    await logExternalResponseFailure({
+      step: "FACEBOOK_IMAGE_SOURCE_FETCH",
+      url,
+      fn: "fetchRemoteImageBuffer",
+      source: "facebook_publish_image_fetch",
+      responseTime: Date.now() - requestStartedAt,
+      status: response.status,
+      errorMessage: `Unable to fetch Shopee product image: ${response.status}`
+    });
     throw new Error(`Unable to fetch Shopee product image: ${response.status}`);
   }
   return Buffer.from(await response.arrayBuffer());

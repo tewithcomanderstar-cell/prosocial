@@ -1,6 +1,7 @@
 import { jsonError, jsonOk } from "@/lib/api";
 import { logAction, logAndNotifyError } from "@/lib/services/logging";
 import { handleRoleError, requireRole } from "@/lib/services/permissions";
+import { traceExternalRequest } from "@/lib/services/request-debug";
 import { ensureStorageBeforeAutoPost, mapStorageQuotaMessage } from "@/lib/services/storage-cleanup";
 import { normalizeShopeeCategory } from "@/lib/shopee-categories";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
@@ -162,19 +163,32 @@ export async function POST(request: Request) {
       }
 
       const workerUrl = `${getAppUrl(request)}/api/auto-post/process-step`;
-      void fetch(workerUrl, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${workerSecret}`
-        },
-        body: JSON.stringify({
+      void traceExternalRequest(
+        {
+          step: "AUTO_POST_WORKER_TRIGGER",
+          url: workerUrl,
+          fn: "POST /api/auto-post/start",
+          source: "internal_worker_fetch",
           userId,
-          configId: config._id,
-          mode: "both",
-          limit: Math.max(config.targetPageIds.length, 1)
+          metadata: {
+            autoPostConfigId: String(config._id),
+            targetPages: config.targetPageIds.length
+          }
+        },
+        () => fetch(workerUrl, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${workerSecret}`
+          },
+          body: JSON.stringify({
+            userId,
+            configId: config._id,
+            mode: "both",
+            limit: Math.max(config.targetPageIds.length, 1)
+          })
         })
-      }).catch(async (error) => {
+      ).catch(async (error) => {
         await AutoPostConfig.findByIdAndUpdate(config._id, {
           autoPostStatus: "failed",
           jobStatus: "failed",
