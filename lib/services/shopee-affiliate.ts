@@ -1269,18 +1269,27 @@ function getShopeeProductSourceTexts(product: ShopeeProductRecord) {
   };
 }
 
+function hasShopeeProductName(product: ShopeeProductRecord) {
+  return Boolean(normalizeTextEncoding(product.productName || "").trim());
+}
+
+function hasShopeeProductImage(product: ShopeeProductRecord) {
+  return Boolean(product.productImageUrl?.trim() || product.productImageUrls?.some((url) => Boolean(url?.trim())));
+}
+
 function getShopeeProductSourceEvidence(product: ShopeeProductRecord, pattern: RegExp) {
   const sourceTexts = getShopeeProductSourceTexts(product);
   const title = pattern.test(sourceTexts.title.toLowerCase());
   const description = pattern.test(sourceTexts.description.toLowerCase());
-  const category = pattern.test(sourceTexts.category.toLowerCase());
   const imageTextMatch = pattern.test(sourceTexts.images.toLowerCase());
-  const hasImage = Boolean(product.productImageUrl || product.productImageUrls?.length);
+  const hasImage = hasShopeeProductImage(product);
   const images = imageTextMatch || (hasImage && (title || description));
+  // Category is intentionally not used as product-understanding evidence.
+  const category = false;
   const sourceMatches = { images, title, description, category };
   const sourceMatchCount = Object.values(sourceMatches).filter(Boolean).length;
   const confidence: ShopeeProductInsight["confidence"] =
-    sourceMatchCount >= 4 ? "high" : sourceMatchCount >= 3 ? "medium" : "low";
+    sourceMatchCount >= 3 ? "high" : sourceMatchCount >= 2 ? "medium" : "low";
   return { sourceMatches, sourceMatchCount, confidence };
 }
 
@@ -1290,14 +1299,20 @@ function withShopeeProductEvidence(
   pattern: RegExp
 ): ShopeeProductInsight {
   const evidence = getShopeeProductSourceEvidence(product, pattern);
+  const hasName = hasShopeeProductName(product);
+  const hasImage = hasShopeeProductImage(product);
   return {
     ...insight,
-    recognized: insight.recognized && evidence.sourceMatchCount >= 2,
+    recognized: Boolean(hasName && hasImage && insight.recognized),
     confidence: evidence.confidence,
     sourceMatches: evidence.sourceMatches,
     sourceMatchCount: evidence.sourceMatchCount,
-    safeCaptionMode: evidence.sourceMatchCount === 2,
-    skipReason: evidence.sourceMatchCount < 2 ? "SKIP_PRODUCT_AND_FETCH_NEW_PRODUCT: product context too weak" : undefined
+    safeCaptionMode: evidence.confidence === "low",
+    skipReason: !hasName
+      ? "SKIP_PRODUCT_AND_FETCH_NEW_PRODUCT: missing product name"
+      : !hasImage
+        ? "SKIP_PRODUCT_AND_FETCH_NEW_PRODUCT: missing product image"
+        : undefined
   };
 }
 
@@ -1472,7 +1487,7 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
 
   const genericInsight = withShopeeProductEvidence(product, {
     type: "สินค้าไลฟ์สไตล์ / ของใช้ทั่วไป",
-    recognized: false,
+    recognized: true,
     productCategory: "general",
     audience: "คนที่ต้องการไอเทมที่ช่วยให้จัดของ ใช้งาน หรือพกติดตัวได้สะดวกขึ้น",
     situation: "ใช้กับมุมบ้าน โต๊ะทำงาน การเดินทาง หรือกิจกรรมที่เห็นได้จากชื่อและรูปสินค้า",
@@ -1483,10 +1498,7 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
   }, /ของใช้|ไอเทม|item|use|portable|พก|จัด|เก็บ|บ้าน|home|desk|โต๊ะ|travel|เดินทาง/i);
   return {
     ...genericInsight,
-    safeCaptionMode: true,
-    skipReason: genericInsight.sourceMatchCount && genericInsight.sourceMatchCount >= 2
-      ? undefined
-      : "SKIP_PRODUCT_AND_FETCH_NEW_PRODUCT: product context too weak"
+    safeCaptionMode: true
   };
 }
 
@@ -2865,11 +2877,19 @@ export async function generateShopeeCaption(input: {
 }) {
   const { product } = input;
   const productInsight = assertRecognizedShopeeProductInsight(product);
-  if ((productInsight.sourceMatchCount ?? 0) < 2) {
+  if (!hasShopeeProductName(product)) {
     throw new ShopeeProviderError(
-      `caption generation failed: SKIP_PRODUCT_AND_FETCH_NEW_PRODUCT product context too weak for ${product.productId}`,
+      `caption generation failed: SKIP_PRODUCT_AND_FETCH_NEW_PRODUCT missing product name for ${product.productId}`,
       422,
-      "product_context_too_weak",
+      "missing_product_name",
+      "internal_api"
+    );
+  }
+  if (!hasShopeeProductImage(product)) {
+    throw new ShopeeProviderError(
+      `caption generation failed: SKIP_PRODUCT_AND_FETCH_NEW_PRODUCT missing product image for ${product.productId}`,
+      422,
+      "missing_images",
       "internal_api"
     );
   }
@@ -2902,27 +2922,26 @@ export async function generateShopeeCaption(input: {
     "- ห้ามสร้าง bullet point, checklist, feature list หรือหัวข้อ 📌 จุดที่ชอบ",
     "",
     "ก่อนเขียนให้วิเคราะห์สินค้าแบบเงียบ ๆ ตาม Priority Sources นี้เท่านั้น:",
-    "1) Product Images เป็นหลัก และถ้าขัดแย้งกับชื่อสินค้า/description/category ให้เชื่อรูปภาพก่อนเสมอ",
-    "2) Product Title",
-    "3) Product Description",
-    "4) Product Category ใช้เป็นบริบทสุดท้าย ห้ามนำมาเขียนเป็น feature",
+    "1) Product Name / Title เป็นหลัก",
+    "2) Product Images ใช้ช่วยยืนยันว่าสินค้าคืออะไร โดยเฉพาะเมื่อชื่อไม่ชัด",
+    "3) Product Description ใช้เสริมเฉพาะข้อมูลที่เกี่ยวกับการใช้งานจริง",
+    "4) Specification / Attributes ถ้ามี ให้ใช้เฉพาะสิ่งที่ช่วยอธิบายการใช้งาน",
+    "ห้ามพยายามจัดหมวดหมู่สินค้า และห้าม reject สินค้าเพียงเพราะไม่รู้ category หรือ product type แบบละเอียด",
     "",
-    "STEP 1: วิเคราะห์ภาพสินค้า/ภาพอ้างอิงทั้งหมดก่อนเสมอ แล้วตอบในใจให้ครบ 6 ข้อก่อนเขียน:",
+    "STEP 1: ทำความเข้าใจสินค้า แล้วตอบในใจให้ครบ 3 ข้อก่อนเขียน:",
     "1. สินค้าคืออะไร",
-    "2. ใช้งานทำอะไร",
-    "3. ใครคือกลุ่มเป้าหมาย",
-    "4. จุดเด่นที่เห็นจากภาพ",
-    "5. สถานการณ์ใช้งานจริง",
-    "6. สินค้าประเภทใด",
+    "2. ใช้ทำอะไร",
+    "3. จุดเด่นคืออะไร",
     "",
-    "STEP 2: ตรวจชื่อสินค้าเทียบกับภาพ ถ้าชื่อสินค้าและภาพตรงกันให้ใช้ร่วมกัน ถ้าไม่ตรงให้เชื่อภาพสินค้า",
+    "STEP 2: ถ้าชื่อสินค้าเข้าใจได้จากชื่อ + รูปภาพ ให้เขียนต่อทันที ไม่ต้องรอ description/specification",
+    "STEP 2.1: ถ้าชื่อสินค้าไม่ชัด ให้ใช้รูปภาพเป็นหลัก ห้ามเดาเป็นสินค้าประเภทอื่น",
     "STEP 3: สร้างมุมมองคนใช้งานจริง ห้ามพูดเหมือน AI, Catalog, marketplace listing หรือคัดลอก description",
-    "STEP 4: สรุปเฉพาะจุดเด่นที่เห็นได้จริงจากภาพ หรืออ้างอิงได้จากชื่อ/description เท่านั้น ห้ามเดา",
+    "STEP 4: สรุปเฉพาะจุดเด่นที่อ้างอิงได้จากชื่อ รูปภาพ description หรือ specification/attributes เท่านั้น ห้ามเดา",
     "",
     "Product understanding ที่ระบบวิเคราะห์ไว้:",
     `- Product type: ${productInsight.type}`,
     `- Confidence: ${productInsight.confidence ?? "low"} (${captionMode})`,
-    `- Source matches: images=${sourceMatches.images ? "yes" : "no"}, title=${sourceMatches.title ? "yes" : "no"}, description=${sourceMatches.description ? "yes" : "no"}, category=${sourceMatches.category ? "yes" : "no"}`,
+    `- Understanding evidence: title=${sourceMatches.title ? "yes" : "no"}, images=${sourceMatches.images ? "yes" : "no"}, description=${sourceMatches.description ? "yes" : "no"}`,
     `- สินค้านี้ใช้ทำอะไร: ${productInsight.situation}`,
     `- คนซื้อใช้ในสถานการณ์ไหน: ${productInsight.problem}`,
     `- จุดเด่นที่สัมผัสได้จริง: ${insightFeatureLines.join(" | ") || productInsight.angle}`,
@@ -2930,7 +2949,7 @@ export async function generateShopeeCaption(input: {
     `- ประโยชน์หลัก: ${productInsight.angle}`,
     "",
     productInsight.safeCaptionMode
-      ? "SAFE CAPTION MODE: เขียนจากสิ่งที่ชัดเจนที่สุดเพียง 1 บรรทัด ห้ามเดาจุดเด่นเพิ่ม ห้ามใช้ claims ที่ไม่มีในชื่อ/รูป/description"
+      ? "SAFE CAPTION MODE: เขียนจากสิ่งที่ชัดเจนที่สุดจากชื่อสินค้าและรูปภาพเพียง 1 บรรทัด ห้ามเดาจุดเด่นเพิ่ม ห้ามใช้ claims ที่ไม่มีในชื่อ/รูป/description"
       : "NORMAL CAPTION MODE: เขียนรีวิวสั้นที่สัมพันธ์กับประเภทสินค้าและการใช้งานจริงโดยตรง",
     isShopeeHealthSensitiveProduct(product)
       ? "HEALTH PRODUCT SAFETY GUARD: สินค้านี้เป็นอาหารเสริม/วิตามิน/ผลิตภัณฑ์สุขภาพ/เครื่องสำอาง/เวชสำอาง ห้ามใช้คำว่า กินเล่น, ของกินเล่น, ขนม, ของว่าง, กินเพลิน, เคี้ยวเพลิน, ทานเล่น และห้ามทำให้ดูเป็นขนมหรืออาหารทั่วไป ให้ใช้คำว่า อาหารเสริม, วิตามิน, ผลิตภัณฑ์ดูแลสุขภาพ, สูตรที่เลือกใช้ตามความต้องการ, พกพาสะดวก, ขนาดกำลังดี แทน"
@@ -2977,13 +2996,13 @@ export async function generateShopeeCaption(input: {
     "Product data:",
     `ชื่อสินค้าเต็ม: ${product.productName}`,
     `ชื่อที่ใช้ขึ้นบรรทัดแรก: ${captionProductName}`,
-    `หมวดหมู่ใช้เป็นบริบทเท่านั้น ห้ามแสดงเป็น feature: ${product.category || "-"}`,
+    `ข้อมูลหมวดหมู่ (ใช้เป็นบริบทอ่อนเท่านั้น ห้ามใช้เป็นเกณฑ์ผ่าน/ไม่ผ่าน และห้ามแสดงเป็น feature): ${product.category || "-"}`,
     `รายละเอียดสินค้า: ${product.productDescription || "-"}`,
-    `รูปภาพสินค้าเพื่อช่วยระบุประเภท: ${(product.productImageUrls?.length ? product.productImageUrls : [product.productImageUrl]).filter(Boolean).slice(0, 4).join(" | ") || "-"}`,
-    "คำเตือน: รูปภาพสินค้าเป็น Priority 1 ถ้าชื่อ/description/category ขัดกับภาพ ให้ caption ตรงกับสินค้าที่เห็นในภาพเท่านั้น",
+    `รูปภาพสินค้าเพื่อช่วยเข้าใจว่าสินค้าคืออะไร: ${(product.productImageUrls?.length ? product.productImageUrls : [product.productImageUrl]).filter(Boolean).slice(0, 4).join(" | ") || "-"}`,
+    "คำเตือน: เป้าหมายคือเข้าใจสินค้าว่าคืออะไร ใช้ทำอะไร และจุดเด่นคืออะไร ไม่ใช่จัดหมวดหมู่สินค้า",
     `Product insight type: ${productInsight.type}`,
     `Product insight confidence: ${productInsight.confidence ?? (productInsight.recognized ? "high" : "low")}`,
-    `Source match count: ${productInsight.sourceMatchCount ?? 0}/4`,
+    `Understanding evidence count: ${productInsight.sourceMatchCount ?? 0}/3`,
     `Source matches: ${JSON.stringify(sourceMatches)}`,
     `Caption mode: ${captionMode}`,
     `Health safety mode: ${healthSafetyMode}`,
@@ -3002,14 +3021,14 @@ export async function generateShopeeCaption(input: {
     const variants = await generateFacebookContent(captionProductName, {
       userId: input.userId,
       customPrompt: normalizeTextEncoding(customPrompt),
-      sourceLabel: "Shopee product images first, then title, description, and category for UGC review caption",
+      sourceLabel: "Shopee product title, images, description, and available specifications for UGC review caption",
       sourceText: normalizeTextEncoding([
         `Product name: ${captionProductName}`,
         `Full product name: ${product.productName}`,
-        `Priority source 1 - Product images (trust these first if sources conflict): ${(product.productImageUrls?.length ? product.productImageUrls : [product.productImageUrl]).filter(Boolean).slice(0, 4).join(" | ") || "-"}`,
-        `Priority source 2 - Product title: ${product.productName}`,
+        `Priority source 1 - Product title/name: ${product.productName}`,
+        `Priority source 2 - Product images: ${(product.productImageUrls?.length ? product.productImageUrls : [product.productImageUrl]).filter(Boolean).slice(0, 4).join(" | ") || "-"}`,
         `Priority source 3 - Product description: ${product.productDescription || "-"}`,
-        `Priority source 4 - Product category: ${product.category || "-"}`,
+        `Priority source 4 - Specification / attributes: ${product.productDescription || "-"}`,
         `Description: ${product.productDescription}`,
         `Product insight: ${productInsight.type}; confidence=${productInsight.confidence}; mode=${captionMode}; healthSafety=${healthSafetyMode}; matches=${JSON.stringify(sourceMatches)}; ${productInsight.audience}; ${productInsight.situation}; ${productInsight.problem}; ${productInsight.angle}`,
         `Extracted facts: ${productFactLines.join(" | ")}`,
