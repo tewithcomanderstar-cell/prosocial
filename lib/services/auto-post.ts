@@ -571,6 +571,20 @@ function getRetryWithNextProductReason(error: unknown) {
   };
 }
 
+function getShopeeAttemptFailureReason(error: unknown) {
+  const code = getAutoPostErrorCode(error);
+  const message = getAutoPostErrorMessage(error).toLowerCase();
+  if (isShopeeShortLinkFailure(error)) return "short link fail";
+  if (message.includes("duplicate") || message.includes("already posted")) return "duplicate product";
+  if (message.includes("blocked_category") || message.includes("category mismatch")) return "category mismatch";
+  if (message.includes("caption")) return "caption validation fail";
+  if (message.includes("product context") || message.includes("product type") || message.includes("unable to identify")) return "product type ไม่ชัด";
+  if (message.includes("safety") || message.includes("content policy") || message.includes("moderation")) return "policy/safety reject";
+  if (message.includes("image") || message.includes("reference")) return "image generation fail";
+  if (message.includes("missing product description")) return "missing product description";
+  return code || normalizeAutoPostError(error, "unknown");
+}
+
 export function classifyAutoPostError(error: unknown): AutoPostErrorClassification {
   if (isShopeeShortLinkFailure(error)) {
     return "retry_with_next_product";
@@ -796,7 +810,23 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
           });
 
     const selected = selectedProducts[0];
-    if (!selected) break;
+    if (!selected) {
+      await logShopeeStep({
+        config: input.config,
+        step: "PRODUCT_SKIPPED",
+        status: "skipped",
+        message: "Product skipped: no eligible candidate found",
+        metadata: {
+          attempt,
+          maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
+          skipReason: "no eligible candidate found",
+          category: normalizeShopeeCategory(input.config.shopeeCategory),
+          skippedProductsCount: skippedProducts.length,
+          workflowRunId: input.records.workflowRunId
+        }
+      });
+      break;
+    }
 
     const productId = String(selected.product.productId);
     const pageIndex = Math.max(0, input.eligiblePageIds.indexOf(selected.pageId));
@@ -820,6 +850,7 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
         maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
         skippedProductsCount: skippedProducts.length,
         productName: selected.product.productName,
+        category: selected.product.category ?? "",
         score: selected.score.productScore,
         reason: selected.score.reason,
         workflowRunId: input.records.workflowRunId
@@ -830,7 +861,7 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
       autoPostStatus: attempt > 1 ? "retrying" : "running",
       jobStatus: "pending",
       lastStatus: "pending",
-      lastError: attempt > 1 ? `Trying next Shopee product (${attempt}/${AUTO_POST_MAX_PRODUCT_ATTEMPTS})` : null
+      lastError: attempt > 1 ? `Finding valid product (${attempt}/${AUTO_POST_MAX_PRODUCT_ATTEMPTS})` : null
     });
 
     let lastError: unknown = null;
@@ -904,7 +935,9 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
             sameProductAttempt,
             sameProductRetries: AUTO_POST_SAME_PRODUCT_RETRIES,
             classification,
+            reason: getShopeeAttemptFailureReason(error),
             productName: selected.product.productName,
+            category: selected.product.category ?? "",
             workflowRunId: input.records.workflowRunId
           }
         });
@@ -943,12 +976,33 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
           }
 
           skippedProductIds.add(productId);
+          const skipReason = getShopeeAttemptFailureReason(error);
           skippedProducts.push({
             productId,
             shopId: selected.product.shopId,
             productName: selected.product.productName,
-            reason: normalizeAutoPostError(error, "Product skipped"),
+            reason: skipReason,
             classification
+          });
+
+          await logShopeeStep({
+            config: input.config,
+            step: "PRODUCT_SKIPPED",
+            status: "skipped",
+            message: `Product skipped: ${skipReason}`,
+            pageId: selected.pageId,
+            productId,
+            error,
+            metadata: {
+              attempt,
+              maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
+              productId,
+              productName: selected.product.productName,
+              category: selected.product.category ?? "",
+              skipReason,
+              skippedProductsCount: skippedProducts.length,
+              workflowRunId: input.records.workflowRunId
+            }
           });
 
           await logShopeeStep({
@@ -963,8 +1017,10 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
               attempt,
               maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
               reason: skipInfo.reason,
+              skipReason,
               skippedProductsCount: skippedProducts.length,
               productName: selected.product.productName,
+              category: selected.product.category ?? "",
               productId,
               shopId: selected.product.shopId,
               itemId: selected.product.itemId,
@@ -993,7 +1049,7 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
             autoPostStatus: "retrying",
             jobStatus: "pending",
             lastStatus: "pending",
-            lastError: `Product skipped: ${normalizeAutoPostError(error, skipInfo.reason)}`
+            lastError: `Finding valid product (${Math.min(attempt + 1, AUTO_POST_MAX_PRODUCT_ATTEMPTS)}/${AUTO_POST_MAX_PRODUCT_ATTEMPTS})`
           });
 
           break;
@@ -1008,7 +1064,7 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
     }
   }
 
-  const message = `No eligible product could be posted after ${AUTO_POST_MAX_PRODUCT_ATTEMPTS} attempts`;
+  const message = `No valid Shopee product found after attempts`;
   await logShopeeStep({
     config: input.config,
     step: "MAX_PRODUCT_ATTEMPTS_REACHED",
@@ -1335,6 +1391,8 @@ async function queueShopeeAutoPostsForConfig(
     const startAt = new Date(batchStartAt.getTime() + Math.max(pageIndex, index) * pageSpacingMinutes * 60 * 1000);
     const trackingId = resolveShopeeTrackingId(config);
     const stepStartedAt = Date.now();
+    let templatePostId: string | null = null;
+    let packageResult: ShopeePostPackageResult | null = null;
     console.info("[PAGE]", {
       pageId: selected.pageId,
       pageIndex: Math.max(pageIndex, index) + 1,
@@ -1362,10 +1420,10 @@ async function queueShopeeAutoPostsForConfig(
         captionStyle: config.shopeeCaptionStyle ?? "soft_sell",
         trackingId
       });
-      let packageResult =
+      packageResult =
         sharedSingleProductPackageKey === packageCacheKey
-          ? sharedSingleProductPackage
-          : packageCache.get(packageCacheKey);
+          ? sharedSingleProductPackage ?? null
+          : packageCache.get(packageCacheKey) ?? null;
       if (!packageResult) {
         packageResult = await buildShopeePostPackage({
           userId: config.userId,
@@ -1379,6 +1437,20 @@ async function queueShopeeAutoPostsForConfig(
         packageCache.set(packageCacheKey, packageResult);
       }
       packageResult.caption = normalizeTextEncoding(packageResult.caption);
+      await logShopeeStep({
+        config,
+        step: "CAPTION_GENERATION_RESULT",
+        status: "success",
+        message: "Caption generation result: success",
+        pageId: selected.pageId,
+        productId: selected.product.productId,
+        metadata: {
+          success: true,
+          reason: "caption generated and sanitized",
+          captionLength: packageResult.caption.length,
+          workflowRunId: records.workflowRunId
+        }
+      });
       await logShopeeStep({
         config,
         step: "CAPTION_GENERATED",
@@ -1463,7 +1535,23 @@ async function queueShopeeAutoPostsForConfig(
         fingerprint
       });
 
+      templatePostId = String(post._id);
       lastPostId = post._id;
+
+      await logShopeeStep({
+        config,
+        step: "TEMPLATE_POST_RESULT",
+        status: "success",
+        message: "Template post created for Shopee page task",
+        pageId: selected.pageId,
+        productId: selected.product.productId,
+        metadata: {
+          created: true,
+          templatePostId,
+          reason: "template post created before page task enqueue",
+          workflowRunId: records.workflowRunId
+        }
+      });
 
       const queuedForPost = config.approvalMode
         ? 0
@@ -1499,6 +1587,24 @@ async function queueShopeeAutoPostsForConfig(
         workflowRunId: records.workflowRunId
       });
 
+      await logShopeeStep({
+        config,
+        step: "PAGE_TASK_CREATION_RESULT",
+        status: queuedForPost > 0 || config.approvalMode ? "success" : "failed",
+        message: queuedForPost > 0 || config.approvalMode
+          ? `Page task creation result: ${queuedForPost} task(s) created`
+          : "Page task creation result: no page task was created",
+        pageId: selected.pageId,
+        productId: selected.product.productId,
+        metadata: {
+          expectedPages: 1,
+          createdTasks: queuedForPost,
+          templatePostId,
+          reason: templatePostId ? "enqueue completed" : "templatePostId missing",
+          workflowRunId: records.workflowRunId
+        }
+      });
+
       await recordShopeeQueueItem({
         userId: config.userId,
         pageId: selected.pageId,
@@ -1526,6 +1632,51 @@ async function queueShopeeAutoPostsForConfig(
 
       queued += queuedForPost;
     } catch (error) {
+      await logShopeeStep({
+        config,
+        step: "CAPTION_GENERATION_RESULT",
+        status: "failed",
+        message: "Caption/package generation result: failed",
+        pageId: selected.pageId,
+        productId: selected.product.productId,
+        error,
+        metadata: {
+          success: false,
+          reason: getShopeeAttemptFailureReason(error),
+          workflowRunId: records.workflowRunId
+        }
+      });
+      await logShopeeStep({
+        config,
+        step: "TEMPLATE_POST_RESULT",
+        status: templatePostId ? "success" : "failed",
+        message: templatePostId ? "Template post exists but later page preparation failed" : "Template post was not created",
+        pageId: selected.pageId,
+        productId: selected.product.productId,
+        error: templatePostId ? undefined : error,
+        metadata: {
+          created: Boolean(templatePostId),
+          templatePostId,
+          reason: templatePostId ? "template exists" : getShopeeAttemptFailureReason(error),
+          workflowRunId: records.workflowRunId
+        }
+      });
+      await logShopeeStep({
+        config,
+        step: "PAGE_TASK_CREATION_RESULT",
+        status: "failed",
+        message: "Page task creation result: failed",
+        pageId: selected.pageId,
+        productId: selected.product.productId,
+        error,
+        metadata: {
+          expectedPages: 1,
+          createdTasks: 0,
+          templatePostId,
+          reason: templatePostId ? getShopeeAttemptFailureReason(error) : "templatePostId missing",
+          workflowRunId: records.workflowRunId
+        }
+      });
       console.error("[TASK ERROR]", {
         pageId: selected.pageId,
         pageIndex: Math.max(pageIndex, index) + 1,
@@ -1555,6 +1706,21 @@ async function queueShopeeAutoPostsForConfig(
 
   const expectedPreparedPageCount = eligiblePageIds.length;
   const createdPageTaskCount = queued + failedPageCount;
+  await logShopeeStep({
+    config,
+    step: "PAGE_TASK_CREATION_RESULT",
+    status: createdPageTaskCount === expectedPreparedPageCount ? "success" : "failed",
+    message: `Page task creation result: created ${createdPageTaskCount}/${expectedPreparedPageCount}`,
+    metadata: {
+      expectedPages: expectedPreparedPageCount,
+      createdTasks: createdPageTaskCount,
+      queued,
+      failedPageCount,
+      reason: createdPageTaskCount === expectedPreparedPageCount ? "all selected page tasks created" : "page task creation incomplete",
+      workflowRunId: records.workflowRunId
+    }
+  });
+
   if (!config.approvalMode && createdPageTaskCount !== expectedPreparedPageCount) {
     const message = `Page task creation incomplete: created ${createdPageTaskCount}/${expectedPreparedPageCount}`;
     await logShopeeStep({

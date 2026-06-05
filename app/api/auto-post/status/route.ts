@@ -448,11 +448,18 @@ export async function GET() {
       : mapShopeeLastError(sanitizedLastError);
     const latestAttemptLog = logs.find((log) => {
       const metadata = (log.metadata ?? {}) as Record<string, unknown>;
-      return metadata.step === "PRODUCT_ATTEMPT_STARTED" || metadata.step === "PRODUCT_ATTEMPT_FAILED" || metadata.step === "PRODUCT_ATTEMPT_SUCCESS";
+      return (
+        metadata.step === "PRODUCT_ATTEMPT_STARTED" ||
+        metadata.step === "PRODUCT_ATTEMPT_FAILED" ||
+        metadata.step === "PRODUCT_ATTEMPT_SUCCESS" ||
+        metadata.step === "PRODUCT_SKIPPED" ||
+        metadata.step === "RETRYING_WITH_NEXT_PRODUCT"
+      );
     });
     const latestSkippedProductLog = logs.find((log) => {
       const metadata = (log.metadata ?? {}) as Record<string, unknown>;
-      return String(metadata.step ?? "").startsWith("PRODUCT_SKIPPED_");
+      const step = String(metadata.step ?? "");
+      return step === "PRODUCT_SKIPPED" || step.startsWith("PRODUCT_SKIPPED_");
     });
     const latestAttemptMetadata = (latestAttemptLog?.metadata ?? {}) as Record<string, unknown>;
     const latestSkippedMetadata = (latestSkippedProductLog?.metadata ?? {}) as Record<string, unknown>;
@@ -467,7 +474,19 @@ export async function GET() {
         ? latestAttemptMetadata.skippedProductsCount
         : typeof latestSkippedMetadata.skippedProductsCount === "number"
           ? latestSkippedMetadata.skippedProductsCount
-          : logs.filter((log) => String(((log.metadata ?? {}) as Record<string, unknown>).step ?? "").startsWith("PRODUCT_SKIPPED_")).length;
+          : logs.filter((log) => {
+              const step = String(((log.metadata ?? {}) as Record<string, unknown>).step ?? "");
+              return step === "PRODUCT_SKIPPED" || step.startsWith("PRODUCT_SKIPPED_");
+            }).length;
+    const latestAttemptStep = String(latestAttemptMetadata.step ?? "");
+    const isFindingValidProduct =
+      !latestProcessingJob &&
+      missingTasksCount > 0 &&
+      createdTasksCount === 0 &&
+      currentAttempt !== null &&
+      latestAttemptStep !== "PRODUCT_ATTEMPT_SUCCESS" &&
+      latestAttemptStep !== "MAX_PRODUCT_ATTEMPTS_REACHED" &&
+      String(effectiveConfig?.autoPostStatus ?? "").match(/running|retrying/i);
     const affiliateMissingMessage = affiliateStatus.missing.length
       ? `Shopee Affiliate setup required. Missing: ${affiliateStatus.missing.join(", ")}`
       : null;
@@ -504,7 +523,7 @@ export async function GET() {
         name: String(page.name ?? page.pageName ?? "Facebook Page")
       })).filter((page: { pageId: string; name: string }) => page.pageId.length > 0),
       currentJobId: latestProcessingJob ? String(latestProcessingJob._id) : runJobs[0]?._id ? String(runJobs[0]._id) : null,
-      currentStep,
+      currentStep: isFindingValidProduct ? "FINDING_VALID_PRODUCT" : currentStep,
       currentAttempt,
       maxProductAttempts,
       skippedProductsCount,
@@ -514,9 +533,11 @@ export async function GET() {
         : null,
       selectedPagesCount,
       createdTasksCount,
-      queueHealth: missingTasksCount > 0 ? "missing_tasks" : "ok",
-      missingTasksCount,
-      missingTasksWarning: missingTasksCount > 0
+      queueHealth: isFindingValidProduct ? "finding_valid_product" : missingTasksCount > 0 ? "missing_tasks" : "ok",
+      missingTasksCount: isFindingValidProduct ? 0 : missingTasksCount,
+      missingTasksWarning: isFindingValidProduct
+        ? null
+        : missingTasksCount > 0
         ? `Missing Tasks Detected. Expected: ${selectedPagesCount}, Created: ${createdTasksCount}`
         : null,
       repairedTasksCount: repairedTasks.created,
