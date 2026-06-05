@@ -574,15 +574,29 @@ function getRetryWithNextProductReason(error: unknown) {
 function getShopeeAttemptFailureReason(error: unknown) {
   const code = getAutoPostErrorCode(error);
   const message = getAutoPostErrorMessage(error).toLowerCase();
-  if (isShopeeShortLinkFailure(error)) return "short link fail";
-  if (message.includes("duplicate") || message.includes("already posted")) return "duplicate product";
-  if (message.includes("blocked_category") || message.includes("category mismatch")) return "category mismatch";
-  if (message.includes("caption")) return "caption validation fail";
-  if (message.includes("product context") || message.includes("product type") || message.includes("unable to identify")) return "product type ไม่ชัด";
-  if (message.includes("safety") || message.includes("content policy") || message.includes("moderation")) return "policy/safety reject";
-  if (message.includes("image") || message.includes("reference")) return "image generation fail";
-  if (message.includes("missing product description")) return "missing product description";
+  if (isShopeeShortLinkFailure(error)) return "missing_shortlink";
+  if (code === "caption_validation_failed" || message.includes("caption validation failed") || message.includes("invalid generated caption")) return "caption_validation_failed";
+  if (message.includes("caption generation failed") || message.includes("content generation") || message.includes("ai content")) return "content_generation_failed";
+  if (message.includes("duplicate") || message.includes("already posted")) return "duplicate_product";
+  if (message.includes("blocked_category") || message.includes("category mismatch")) return "category_conflict";
+  if (message.includes("title conflict")) return "title_conflict";
+  if (message.includes("product context") || message.includes("product type") || message.includes("unable to identify") || code === "product_context_too_weak") return "product_type_unknown";
+  if (message.includes("description_too_short") || message.includes("missing product description")) return "description_too_short";
+  if (message.includes("safety") || message.includes("content policy") || message.includes("moderation")) return "policy_safety_reject";
+  if (message.includes("image analysis")) return "image_analysis_failed";
+  if (message.includes("missing image") || message.includes("ไม่มีรูป") || message.includes("not enough image")) return "missing_images";
+  if (message.includes("image") || message.includes("reference")) return "image_generation_failed";
   return code || normalizeAutoPostError(error, "unknown");
+}
+
+function summarizeShopeeRejectReasons(
+  skippedProducts: Array<{ reason: string }>
+) {
+  return skippedProducts.reduce<Record<string, number>>((summary, product) => {
+    const reason = product.reason || "unknown";
+    summary[reason] = (summary[reason] ?? 0) + 1;
+    return summary;
+  }, {});
 }
 
 export function classifyAutoPostError(error: unknown): AutoPostErrorClassification {
@@ -813,6 +827,21 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
     if (!selected) {
       await logShopeeStep({
         config: input.config,
+        step: "PRODUCT_REJECTED",
+        status: "failed",
+        message: "Product rejected: no eligible candidate found",
+        metadata: {
+          attempt,
+          maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
+          productId: "",
+          productName: "",
+          category: normalizeShopeeCategory(input.config.shopeeCategory),
+          reason: "no_eligible_candidate",
+          workflowRunId: input.records.workflowRunId
+        }
+      });
+      await logShopeeStep({
+        config: input.config,
         step: "PRODUCT_SKIPPED",
         status: "skipped",
         message: "Product skipped: no eligible candidate found",
@@ -836,6 +865,25 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
       productId,
       captionStyle: input.config.shopeeCaptionStyle ?? "soft_sell",
       trackingId
+    });
+
+    await logShopeeStep({
+      config: input.config,
+      step: "PRODUCT_SELECTED",
+      status: "success",
+      message: `Product selected for attempt ${attempt}/${AUTO_POST_MAX_PRODUCT_ATTEMPTS}`,
+      pageId: selected.pageId,
+      productId,
+      metadata: {
+        attempt,
+        maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
+        productId,
+        productName: selected.product.productName,
+        category: selected.product.category ?? "",
+        score: selected.score.productScore,
+        reason: selected.score.reason,
+        workflowRunId: input.records.workflowRunId
+      }
     });
 
     await logShopeeStep({
@@ -920,6 +968,7 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
       } catch (error) {
         lastError = error;
         const classification = classifyAutoPostError(error);
+        const rejectReason = getShopeeAttemptFailureReason(error);
 
         await logShopeeStep({
           config: input.config,
@@ -935,7 +984,7 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
             sameProductAttempt,
             sameProductRetries: AUTO_POST_SAME_PRODUCT_RETRIES,
             classification,
-            reason: getShopeeAttemptFailureReason(error),
+            reason: rejectReason,
             productName: selected.product.productName,
             category: selected.product.category ?? "",
             workflowRunId: input.records.workflowRunId
@@ -976,13 +1025,33 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
           }
 
           skippedProductIds.add(productId);
-          const skipReason = getShopeeAttemptFailureReason(error);
+          const skipReason = rejectReason;
           skippedProducts.push({
             productId,
             shopId: selected.product.shopId,
             productName: selected.product.productName,
             reason: skipReason,
             classification
+          });
+
+          await logShopeeStep({
+            config: input.config,
+            step: "PRODUCT_REJECTED",
+            status: "failed",
+            message: `Product rejected: ${skipReason}`,
+            pageId: selected.pageId,
+            productId,
+            error,
+            metadata: {
+              attempt,
+              maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
+              productId,
+              productName: selected.product.productName,
+              category: selected.product.category ?? "",
+              reason: skipReason,
+              classification,
+              workflowRunId: input.records.workflowRunId
+            }
           });
 
           await logShopeeStep({
@@ -1055,6 +1124,26 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
           break;
         }
 
+        await logShopeeStep({
+          config: input.config,
+          step: "PRODUCT_REJECTED",
+          status: "failed",
+          message: `Product rejected: ${rejectReason}`,
+          pageId: selected.pageId,
+          productId,
+          error,
+          metadata: {
+            attempt,
+            maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
+            productId,
+            productName: selected.product.productName,
+            category: selected.product.category ?? "",
+            reason: rejectReason,
+            classification,
+            workflowRunId: input.records.workflowRunId
+          }
+        });
+
         throw error;
       }
     }
@@ -1065,6 +1154,23 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
   }
 
   const message = `No valid Shopee product found after attempts`;
+  const rejectReasons = summarizeShopeeRejectReasons(skippedProducts);
+  await logShopeeStep({
+    config: input.config,
+    step: "PRODUCT_FILTER_SUMMARY",
+    status: "failed",
+    message: `VALID_PRODUCTS = 0, REJECTED_PRODUCTS = ${skippedProducts.length}`,
+    error: new Error(message),
+    metadata: {
+      VALID_PRODUCTS: 0,
+      REJECTED_PRODUCTS: skippedProducts.length,
+      REJECT_REASONS: rejectReasons,
+      skippedProducts,
+      maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
+      workflowRunId: input.records.workflowRunId
+    }
+  });
+
   await logShopeeStep({
     config: input.config,
     step: "MAX_PRODUCT_ATTEMPTS_REACHED",
