@@ -102,6 +102,10 @@ const AUTO_POST_MAX_PRODUCT_ATTEMPTS = Math.max(
   1,
   Number(process.env.AUTO_POST_PRODUCT_ATTEMPTS ?? process.env.AUTO_POST_MAX_PRODUCT_ATTEMPTS ?? "10")
 );
+const AUTO_POST_MAX_SEARCH_CYCLES = Math.max(
+  1,
+  Number(process.env.AUTO_POST_MAX_SEARCH_CYCLES ?? process.env.MAX_SEARCH_CYCLES ?? "3")
+);
 const AUTO_POST_SAME_PRODUCT_RETRIES = Math.max(1, Number(process.env.AUTO_POST_SAME_PRODUCT_RETRIES ?? "2"));
 const SHOPEE_BATCH_PRODUCT_MODE = process.env.SHOPEE_BATCH_PRODUCT_MODE === "per_page" ? "per_page" : "single";
 const OPEN_AUTO_POST_JOB_STATUSES = ["queued", "processing", "retrying", "rate_limited"] as const;
@@ -869,9 +873,25 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
     classification: AutoPostErrorClassification;
   }> = [];
 
+  for (let searchCycle = 1; searchCycle <= AUTO_POST_MAX_SEARCH_CYCLES; searchCycle += 1) {
+    await logShopeeStep({
+      config: input.config,
+      step: "SEARCH_CYCLE_STARTED",
+      status: "started",
+      message: `Shopee product search cycle ${searchCycle}/${AUTO_POST_MAX_SEARCH_CYCLES} started`,
+      metadata: {
+        searchCycle,
+        maxSearchCycles: AUTO_POST_MAX_SEARCH_CYCLES,
+        maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
+        skippedProductsCount: skippedProducts.length,
+        excludedProductIds: Array.from(skippedProductIds),
+        workflowRunId: input.records.workflowRunId
+      }
+    });
+
   for (let attempt = 1; attempt <= AUTO_POST_MAX_PRODUCT_ATTEMPTS; attempt += 1) {
     const selectedProducts =
-      attempt === 1 && input.initialSelectedProducts.length
+      searchCycle === 1 && attempt === 1 && input.initialSelectedProducts.length
         ? input.initialSelectedProducts
         : await selectShopeeProductsForPages({
             userId: input.config.userId,
@@ -898,6 +918,8 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
         message: "Product rejected: no eligible candidate found",
         metadata: {
           attempt,
+          searchCycle,
+          maxSearchCycles: AUTO_POST_MAX_SEARCH_CYCLES,
           maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
           productId: "",
           productName: "",
@@ -913,6 +935,8 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
         message: "Product skipped: no eligible candidate found",
         metadata: {
           attempt,
+          searchCycle,
+          maxSearchCycles: AUTO_POST_MAX_SEARCH_CYCLES,
           maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
           skipReason: "no eligible candidate found",
           category: normalizeShopeeCategory(input.config.shopeeCategory),
@@ -1219,8 +1243,64 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
     }
   }
 
-  const message = `No valid Shopee product found after attempts`;
+    await logShopeeStep({
+      config: input.config,
+      step: "SEARCH_CYCLE_COMPLETED",
+      status: "failed",
+      message: `Shopee product search cycle ${searchCycle}/${AUTO_POST_MAX_SEARCH_CYCLES} completed without a valid product`,
+      metadata: {
+        searchCycle,
+        maxSearchCycles: AUTO_POST_MAX_SEARCH_CYCLES,
+        maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
+        skippedProductsCount: skippedProducts.length,
+        workflowRunId: input.records.workflowRunId
+      }
+    });
+
+    if (searchCycle < AUTO_POST_MAX_SEARCH_CYCLES) {
+      await logShopeeStep({
+        config: input.config,
+        step: "SEARCH_CYCLE_RESTARTED",
+        status: "started",
+        message: `No valid Shopee product found in cycle ${searchCycle}; fetching fresh candidates for cycle ${searchCycle + 1}`,
+        metadata: {
+          searchCycle,
+          nextSearchCycle: searchCycle + 1,
+          maxSearchCycles: AUTO_POST_MAX_SEARCH_CYCLES,
+          skippedProductsCount: skippedProducts.length,
+          excludedProductIds: Array.from(skippedProductIds),
+          workflowRunId: input.records.workflowRunId
+        }
+      });
+
+      await updateAutoPostState(input.config._id, {
+        autoPostStatus: "retrying",
+        jobStatus: "pending",
+        lastStatus: "pending",
+        lastError: `Finding valid product (1/${AUTO_POST_MAX_PRODUCT_ATTEMPTS}) • Search cycle ${searchCycle + 1}/${AUTO_POST_MAX_SEARCH_CYCLES}`
+      });
+
+      continue;
+    }
+  }
+
+  const message = `No valid Shopee product found after ${AUTO_POST_MAX_SEARCH_CYCLES} search cycles (${AUTO_POST_MAX_PRODUCT_ATTEMPTS} attempts each)`;
   const rejectReasons = summarizeShopeeRejectReasons(skippedProducts);
+  await logShopeeStep({
+    config: input.config,
+    step: "SEARCH_CYCLE_FAILED",
+    status: "failed",
+    message,
+    error: new Error(message),
+    metadata: {
+      maxSearchCycles: AUTO_POST_MAX_SEARCH_CYCLES,
+      maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
+      skippedProductsCount: skippedProducts.length,
+      skippedProducts,
+      workflowRunId: input.records.workflowRunId
+    }
+  });
+
   await logShopeeStep({
     config: input.config,
     step: "PRODUCT_FILTER_SUMMARY",
@@ -1233,6 +1313,7 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
       REJECT_REASONS: rejectReasons,
       skippedProducts,
       maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
+      maxSearchCycles: AUTO_POST_MAX_SEARCH_CYCLES,
       workflowRunId: input.records.workflowRunId
     }
   });
@@ -1245,6 +1326,7 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
     error: new Error(message),
     metadata: {
       maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
+      maxSearchCycles: AUTO_POST_MAX_SEARCH_CYCLES,
       skippedProducts,
       workflowRunId: input.records.workflowRunId
     }
