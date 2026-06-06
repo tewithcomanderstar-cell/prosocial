@@ -2339,6 +2339,7 @@ function getShopeeStoryboardInputText(product: ShopeeProductRecord) {
 
 function getShopeeStoryboardEmoji(productType: string) {
   if (/ลูกแบด|แบดมินตัน/.test(productType)) return "🏸";
+  if (/กล้องติดรถ|กล้องหน้ารถ|dash\s?cam|บันทึกภาพรถ/i.test(productType)) return "🚗";
   if (/กล้อง|camera|แอคชั่น/i.test(productType)) return "📷";
   if (/อาหารเสริม|วิตามิน|เวย์|โปรตีน/.test(productType)) return "💚";
   if (/เก้าอี้/.test(productType)) return "🪑";
@@ -2386,6 +2387,7 @@ function makeShopeeStoryboard(
 
 function getShopeeStoryboardProductGroup(storyboard: Pick<ShopeeProductStoryboard, "productType" | "mainUseCase" | "usageScene">) {
   const haystack = `${storyboard.productType} ${storyboard.mainUseCase} ${storyboard.usageScene}`;
+  if (/กล้องติดรถ|กล้องหน้ารถ|dash\s?cam|car\s?camera|บันทึกภาพรถ/i.test(haystack)) return "dashcam";
   if (/รถ|จัมป์|จั๊ม|ยาง|สตาร์ท|แบต/i.test(haystack)) return "automotive";
   if (/ลูกแบด|แบด|กีฬา|วิ่ง|ฟิตเนส|รองเท้า|ถุงเท้า/i.test(haystack)) return "sports";
   if (/อาหาร|ขนม|น้ำพริก|กาแฟ|ชา|เครื่องดื่ม/i.test(haystack) && !/อาหารเสริม|วิตามิน|เวย์|โปรตีน/i.test(haystack)) return "food";
@@ -2404,6 +2406,13 @@ function enrichShopeeStoryboardForAffiliateReview(
 ): ShopeeProductStoryboard {
   const group = getShopeeStoryboardProductGroup(storyboard);
   const templates: Record<string, Pick<ShopeeProductStoryboard, "primaryPainPoint" | "problemSolved" | "dailyBenefit" | "emotionalBenefit" | "purchaseReason">> = {
+    dashcam: {
+      primaryPainPoint: "ขับรถแล้วอยากมีหลักฐานเวลาเกิดเหตุ",
+      problemSolved: "ช่วยบันทึกเหตุการณ์ระหว่างขับขี่ไว้ดูย้อนหลังได้",
+      dailyBenefit: "ติดหน้ารถไว้บันทึกเส้นทางและเหตุการณ์บนถนน",
+      emotionalBenefit: "ขับรถแล้วอุ่นใจกว่าเดิมเพราะมีหลักฐานติดไว้",
+      purchaseReason: "เหมาะกับคนใช้รถทุกวันหรือเดินทางบ่อย"
+    },
     automotive: {
       primaryPainPoint: "รถมีปัญหากลางทางแล้วไม่มีตัวช่วย",
       problemSolved: "ช่วยรับมือเหตุฉุกเฉินเกี่ยวกับรถได้สะดวกขึ้น",
@@ -2621,6 +2630,18 @@ const SHOPEE_STORYBOARD_RULES: ShopeeStoryboardRule[] = [
     })
   },
   {
+    pattern: /กล้องติดรถ|กล้องหน้ารถ|dash\s?cam|car\s?camera|drive\s?recorder|บันทึกภาพรถ|กล้องรถ|hp\s*f491|f491x|gps\s*built\s*in/i,
+    build: (product) => makeShopeeStoryboard(product, {
+      productType: "กล้องติดรถยนต์",
+      whatItIs: "กล้องสำหรับบันทึกภาพระหว่างขับขี่และเหตุการณ์บนถนน",
+      mainUseCase: "ติดหน้ารถเพื่อบันทึกเส้นทาง เหตุการณ์ และหลักฐานระหว่างขับขี่",
+      targetUser: "คนใช้รถที่อยากมีหลักฐานและความอุ่นใจเวลาเดินทาง",
+      keySellingPoint: "ช่วยบันทึกเหตุการณ์บนถนนไว้ดูย้อนหลังเมื่อจำเป็น",
+      usageScene: "หน้ารถ ระหว่างขับขี่ หรือจอดรถ",
+      captionAngle: "ติดหน้ารถไว้บันทึกเหตุการณ์ระหว่างขับขี่ ดูย้อนหลังได้เวลาจำเป็นและช่วยให้ขับขี่อุ่นใจขึ้น"
+    })
+  },
+  {
     pattern: /จัมป์สตาร์ท|jump\s?starter|แบตเตอรี่รถ|รถยนต์|automotive|ยางรถ|michelin|bosch/i,
     build: (product, haystack) => makeShopeeStoryboard(product, {
       productType: /ยาง|michelin/i.test(haystack) ? "ยางรถยนต์" : "อุปกรณ์จัมป์สตาร์ทรถยนต์",
@@ -2742,6 +2763,7 @@ function getShopeeStoryboardHashtags(product: ShopeeProductRecord, storyboard: S
 }
 
 function getShopeeStoryboardBenefitEmojis(productType: string) {
+  if (/กล้องติดรถ|กล้องหน้ารถ|dash\s?cam|บันทึกภาพรถ/i.test(productType)) return ["📹", "🛣️", "🚘", "🔎"];
   if (/รถ|จัมป์|จั๊ม|ยาง|แบต/.test(productType)) return ["🔋", "💨", "🔦", "📱"];
   if (/ลูกแบด|กีฬา|วิ่ง|รองเท้า|ถุงเท้า/.test(productType)) return ["🏃", "💪", "🎯", "🏸"];
   if (/อาหาร|ขนม|น้ำพริก/.test(productType) && !/อาหารเสริม|วิตามิน|เวย์|โปรตีน/.test(productType)) return ["🌶️", "🍽️", "😋", "🏠"];
