@@ -2998,6 +2998,17 @@ export async function generateShopeeCaption(input: {
   const sourceMatches = productInsight.sourceMatches ?? { images: false, title: false, description: false, category: false };
   const captionMode = productInsight.safeCaptionMode ? "LOW_CONFIDENCE_USE_SAFE_CAPTION" : "NORMAL_CAPTION";
   const healthSafetyMode = isShopeeHealthSensitiveProduct(product) ? "HEALTH_PRODUCT_SAFETY_GUARD" : "STANDARD_PRODUCT";
+  const productUnderstanding = {
+    product_type: productInsight.type,
+    main_usage: productInsight.situation,
+    target_user: productInsight.audience,
+    key_features: insightFeatureLines.slice(0, 4).map((line) => stripShopeeLeadingEmoji(line)),
+    review_angle: productInsight.angle
+  };
+  const productImageReferences = (product.productImageUrls?.length ? product.productImageUrls : [product.productImageUrl])
+    .filter(Boolean)
+    .slice(0, 4)
+    .join(" | ") || "-";
 
   const customPrompt = [
     "ROLE: คุณคือ Content Creator สายรีวิวสินค้า Facebook Affiliate ที่เขียนแบบสั้น กระชับ เหมือนเพจรีวิวสินค้าใช้งานจริง",
@@ -3009,20 +3020,26 @@ export async function generateShopeeCaption(input: {
     "- ห้ามเดาคุณสมบัติใหม่ ห้ามคัดลอกชื่อสินค้ามาวนซ้ำ",
     "- ห้ามสร้าง bullet point, checklist, feature list หรือหัวข้อ 📌 จุดที่ชอบ",
     "",
-    "ก่อนเขียนให้วิเคราะห์สินค้าแบบเงียบ ๆ ตาม Priority Sources นี้เท่านั้น:",
-    "1) Product Name / Title เป็นหลัก",
-    "2) Product Images ใช้ช่วยยืนยันว่าสินค้าคืออะไร โดยเฉพาะเมื่อชื่อไม่ชัด",
+    "ก่อนเขียน Caption ห้ามเริ่มเขียนทันที ต้องวิเคราะห์สินค้าแบบเงียบ ๆ และสร้าง Product Understanding ภายในก่อนเสมอ",
+    "ใช้ Priority Sources ตามลำดับนี้:",
+    "1) Product Images เป็นหลัก เพื่อดูว่าสินค้าจริงคืออะไร ใช้ทำอะไร และมีจุดเด่นอะไรที่เห็นได้",
+    "2) Product Name / Title ใช้ยืนยันชื่อ ประเภท รุ่น หรือจุดเด่นที่รูปสนับสนุน",
     "3) Product Description ใช้เสริมเฉพาะข้อมูลที่เกี่ยวกับการใช้งานจริง",
     "4) Specification / Attributes ถ้ามี ให้ใช้เฉพาะสิ่งที่ช่วยอธิบายการใช้งาน",
-    "ห้ามพยายามจัดหมวดหมู่สินค้า และห้าม reject สินค้าเพียงเพราะไม่รู้ category หรือ product type แบบละเอียด",
+    "ถ้าชื่อสินค้าและรูปภาพขัดกัน ให้เชื่อรูปภาพเป็นหลัก ห้ามเดาสินค้าขัดกับรูปภาพ",
+    "ห้าม reject สินค้าเพียงเพราะไม่รู้หมวดหมู่หรือ category ถ้าข้อมูลไม่ครบ ให้ใช้ข้อมูลที่มีอยู่สร้าง Product Understanding และดำเนินการต่อ",
     "",
-    "STEP 1: ทำความเข้าใจสินค้า แล้วตอบในใจให้ครบ 3 ข้อก่อนเขียน:",
+    "STEP 1: ทำความเข้าใจสินค้า แล้วตอบในใจให้ครบก่อนเขียน:",
     "1. สินค้าคืออะไร",
     "2. ใช้ทำอะไร",
-    "3. จุดเด่นคืออะไร",
+    "3. ใครคือกลุ่มผู้ใช้หลัก",
+    "4. จุดเด่นที่เห็นได้จากรูปคืออะไร",
+    "5. สถานการณ์ใช้งานจริงคืออะไร",
     "",
-    "STEP 2: ถ้าชื่อสินค้าเข้าใจได้จากชื่อ + รูปภาพ ให้เขียนต่อทันที ไม่ต้องรอ description/specification",
-    "STEP 2.1: ถ้าชื่อสินค้าไม่ชัด ให้ใช้รูปภาพเป็นหลัก ห้ามเดาเป็นสินค้าประเภทอื่น",
+    "STEP 2: สร้าง Product Understanding ภายในตาม schema นี้ ห้ามนำ schema หรือข้อความ Product Understanding ไปแสดงต่อผู้ใช้:",
+    "{ product_type, main_usage, target_user, key_features, review_angle }",
+    "STEP 2.1: ถ้ารูปภาพ + ชื่อสินค้าเข้าใจได้ ให้เขียนต่อทันที ไม่ต้องรอ description/specification",
+    "STEP 2.2: ถ้าชื่อสินค้าไม่ชัด ให้ใช้รูปภาพเป็นหลัก ห้ามเดาเป็นสินค้าประเภทอื่น",
     "STEP 3: สร้างมุมมองคนใช้งานจริง ห้ามพูดเหมือน AI, Catalog, marketplace listing หรือคัดลอก description",
     "STEP 4: สรุปเฉพาะจุดเด่นที่อ้างอิงได้จากชื่อ รูปภาพ description หรือ specification/attributes เท่านั้น ห้ามเดา",
     "STEP 5: ถ้าข้อความที่อ่านได้จากรูปไม่ชัดเจน อ่านไม่ครบ หรือสะกดไม่มั่นใจ ให้ละเว้นทันที ห้ามคัดลอก ห้ามรวมคำที่ไม่สมบูรณ์",
@@ -3037,6 +3054,8 @@ export async function generateShopeeCaption(input: {
     `- จุดเด่นที่สัมผัสได้จริง: ${insightFeatureLines.join(" | ") || productInsight.angle}`,
     `- เหมาะกับใคร: ${productInsight.audience}`,
     `- ประโยชน์หลัก: ${productInsight.angle}`,
+    `- Internal Product Understanding JSON: ${JSON.stringify(productUnderstanding)}`,
+    "- ห้ามแสดง Product Understanding JSON หรืออธิบายขั้นตอนวิเคราะห์ใน caption จริง",
     "",
     productInsight.safeCaptionMode
       ? "SAFE CAPTION MODE: เขียนจากสิ่งที่ชัดเจนที่สุดจากชื่อสินค้าและรูปภาพเพียง 1 บรรทัด ห้ามเดาจุดเด่นเพิ่ม ห้ามใช้ claims ที่ไม่มีในชื่อ/รูป/description"
@@ -3091,8 +3110,8 @@ export async function generateShopeeCaption(input: {
     `ชื่อที่ใช้ขึ้นบรรทัดแรก: ${captionProductName}`,
     `ข้อมูลหมวดหมู่ (ใช้เป็นบริบทอ่อนเท่านั้น ห้ามใช้เป็นเกณฑ์ผ่าน/ไม่ผ่าน และห้ามแสดงเป็น feature): ${product.category || "-"}`,
     `รายละเอียดสินค้า: ${product.productDescription || "-"}`,
-    `รูปภาพสินค้าเพื่อช่วยเข้าใจว่าสินค้าคืออะไร: ${(product.productImageUrls?.length ? product.productImageUrls : [product.productImageUrl]).filter(Boolean).slice(0, 4).join(" | ") || "-"}`,
-    "คำเตือน: เป้าหมายคือเข้าใจสินค้าว่าคืออะไร ใช้ทำอะไร และจุดเด่นคืออะไร ไม่ใช่จัดหมวดหมู่สินค้า",
+    `รูปภาพสินค้า Priority 1 เพื่อเข้าใจว่าสินค้าคืออะไร ใช้ทำอะไร ใครใช้ และจุดเด่นที่เห็นได้: ${productImageReferences}`,
+    "คำเตือน: เป้าหมายคือเข้าใจสินค้าว่าคืออะไร ใช้ทำอะไร ใครใช้ และจุดเด่นคืออะไร ไม่ใช่จัดหมวดหมู่สินค้า",
     `Product insight type: ${productInsight.type}`,
     `Product insight confidence: ${productInsight.confidence ?? (productInsight.recognized ? "high" : "low")}`,
     `Understanding evidence count: ${productInsight.sourceMatchCount ?? 0}/3`,
@@ -3118,10 +3137,11 @@ export async function generateShopeeCaption(input: {
       sourceText: normalizeTextEncoding([
         `Product name: ${captionProductName}`,
         `Full product name: ${product.productName}`,
-        `Priority source 1 - Product title/name: ${product.productName}`,
-        `Priority source 2 - Product images: ${(product.productImageUrls?.length ? product.productImageUrls : [product.productImageUrl]).filter(Boolean).slice(0, 4).join(" | ") || "-"}`,
+        `Priority source 1 - Product images: ${productImageReferences}`,
+        `Priority source 2 - Product title/name: ${product.productName}`,
         `Priority source 3 - Product description: ${product.productDescription || "-"}`,
         `Priority source 4 - Specification / attributes: ${product.productDescription || "-"}`,
+        `Internal Product Understanding: ${JSON.stringify(productUnderstanding)}`,
         `Description: ${product.productDescription}`,
         `Product insight: ${productInsight.type}; confidence=${productInsight.confidence}; mode=${captionMode}; healthSafety=${healthSafetyMode}; matches=${JSON.stringify(sourceMatches)}; ${productInsight.audience}; ${productInsight.situation}; ${productInsight.problem}; ${productInsight.angle}`,
         `Extracted facts: ${productFactLines.join(" | ")}`,
