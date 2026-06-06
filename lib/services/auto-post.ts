@@ -587,6 +587,31 @@ function getAutoPostResponseSummary(error: unknown) {
   return String((error as { responseSummary?: unknown }).responseSummary ?? "");
 }
 
+function getStoryboardCaptionFailedRules(error: unknown) {
+  const summary = getAutoPostResponseSummary(error);
+  if (!summary) return [];
+  try {
+    const parsed = JSON.parse(summary) as { failedRules?: unknown; failedRuleMessages?: unknown };
+    const failedRules = Array.isArray(parsed.failedRules) ? parsed.failedRules.map((rule) => String(rule)) : [];
+    const failedRuleMessages = Array.isArray(parsed.failedRuleMessages)
+      ? parsed.failedRuleMessages.map((message) => String(message))
+      : [];
+    return failedRules.map((rule, index) => ({
+      rule,
+      message: failedRuleMessages[index] ?? rule
+    }));
+  } catch {
+    return [];
+  }
+}
+
+function getStoryboardCaptionFailureReason(error: unknown) {
+  const code = getAutoPostErrorCode(error);
+  if (code !== "storyboard_caption_validation_failed") return "";
+  const firstRule = getStoryboardCaptionFailedRules(error)[0]?.rule;
+  return firstRule ? `storyboard_caption_${firstRule.toLowerCase()}` : "storyboard_caption_validation_failed";
+}
+
 function isShopeeShortLinkFailure(error: unknown) {
   const code = getAutoPostErrorCode(error);
   const message = getAutoPostErrorMessage(error).toLowerCase();
@@ -609,6 +634,14 @@ function getRetryWithNextProductReason(error: unknown) {
 
   const code = getAutoPostErrorCode(error);
   const message = getAutoPostErrorMessage(error).toLowerCase();
+  const storyboardCaptionReason = getStoryboardCaptionFailureReason(error);
+  if (storyboardCaptionReason) {
+    return {
+      reason: storyboardCaptionReason,
+      step: "PRODUCT_SKIPPED_STORYBOARD_CAPTION_FAILED",
+      message: "Skipping product because Storyboard caption validation failed"
+    };
+  }
   if (
     code === "storyboard_generation_failed" ||
     code === "legacy_caption_disabled" ||
@@ -653,10 +686,12 @@ function getRetryWithNextProductReason(error: unknown) {
 function getShopeeAttemptFailureReason(error: unknown) {
   const code = getAutoPostErrorCode(error);
   const message = getAutoPostErrorMessage(error).toLowerCase();
+  const storyboardCaptionReason = getStoryboardCaptionFailureReason(error);
+  if (storyboardCaptionReason) return storyboardCaptionReason;
   if (isShopeeShortLinkFailure(error)) return "missing_shortlink";
   if (code === "storyboard_generation_failed" || message.includes("product_storyboard_failed")) return "storyboard_generation_failed";
   if (code === "legacy_caption_disabled" || message.includes("legacy shopee caption")) return "legacy_caption_path_called";
-  if (code === "caption_validation_failed" || message.includes("caption validation failed") || message.includes("invalid generated caption")) return "caption_validation_failed";
+  if (code === "caption_validation_failed" || message.includes("caption validation failed") || message.includes("invalid generated caption")) return "legacy_caption_validation_failed";
   if (message.includes("caption generation failed") || message.includes("content generation") || message.includes("ai content")) return "content_generation_failed";
   if (message.includes("duplicate") || message.includes("already posted")) return "duplicate_product";
   if (message.includes("blocked_category") || message.includes("category mismatch")) return "category_conflict";
@@ -682,6 +717,10 @@ function summarizeShopeeRejectReasons(
 
 export function classifyAutoPostError(error: unknown): AutoPostErrorClassification {
   if (isShopeeShortLinkFailure(error)) {
+    return "retry_with_next_product";
+  }
+
+  if (getAutoPostErrorCode(error) === "storyboard_caption_validation_failed") {
     return "retry_with_next_product";
   }
 
@@ -1083,6 +1122,7 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
         lastError = error;
         const classification = classifyAutoPostError(error);
         const rejectReason = getShopeeAttemptFailureReason(error);
+        const captionFailedRules = getStoryboardCaptionFailedRules(error);
 
         await logShopeeStep({
           config: input.config,
@@ -1099,6 +1139,8 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
             sameProductRetries: AUTO_POST_SAME_PRODUCT_RETRIES,
             classification,
             reason: rejectReason,
+            failedRules: captionFailedRules.map((item) => item.rule),
+            failedRuleMessages: captionFailedRules.map((item) => item.message),
             productName: selected.product.productName,
             category: selected.product.category ?? "",
             workflowRunId: input.records.workflowRunId
@@ -1163,6 +1205,8 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
               productName: selected.product.productName,
               category: selected.product.category ?? "",
               reason: skipReason,
+              failedRules: captionFailedRules.map((item) => item.rule),
+              failedRuleMessages: captionFailedRules.map((item) => item.message),
               classification,
               workflowRunId: input.records.workflowRunId
             }
@@ -1183,6 +1227,8 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
               productName: selected.product.productName,
               category: selected.product.category ?? "",
               skipReason,
+              failedRules: captionFailedRules.map((item) => item.rule),
+              failedRuleMessages: captionFailedRules.map((item) => item.message),
               skippedProductsCount: skippedProducts.length,
               workflowRunId: input.records.workflowRunId
             }
@@ -1201,6 +1247,8 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
               maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
               reason: skipInfo.reason,
               skipReason,
+              failedRules: captionFailedRules.map((item) => item.rule),
+              failedRuleMessages: captionFailedRules.map((item) => item.message),
               skippedProductsCount: skippedProducts.length,
               productName: selected.product.productName,
               category: selected.product.category ?? "",
@@ -1224,6 +1272,8 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
               skippedProductsCount: skippedProducts.length,
               previousProductId: productId,
               previousFailureReason: skipInfo.reason,
+              failedRules: captionFailedRules.map((item) => item.rule),
+              failedRuleMessages: captionFailedRules.map((item) => item.message),
               workflowRunId: input.records.workflowRunId
             }
           });
@@ -1253,6 +1303,8 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
             productName: selected.product.productName,
             category: selected.product.category ?? "",
             reason: rejectReason,
+            failedRules: captionFailedRules.map((item) => item.rule),
+            failedRuleMessages: captionFailedRules.map((item) => item.message),
             classification,
             workflowRunId: input.records.workflowRunId
           }

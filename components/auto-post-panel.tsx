@@ -277,7 +277,15 @@ function formatSkipReason(value?: string | null) {
 
   const normalized = reason.toLowerCase();
   const reasonMap: Array<[string, string]> = [
-    ["caption_validation_failed", "แคปชั่นไม่ผ่าน validation เช่น ชื่อสินค้าซ้ำ / รูปแบบไม่ตรง / คำต้องห้าม"],
+    ["storyboard_caption_first_line_is_hook", "แคปชั่นไม่ผ่าน: บรรทัดแรกยังไม่ใช่ Hook จาก Storyboard"],
+    ["storyboard_caption_no_forbidden_source_language", "แคปชั่นมีคำต้องห้าม/ภาษาวิเคราะห์ เช่น จากรูปสินค้า หรือจากข้อมูลสินค้า"],
+    ["storyboard_caption_has_cta", "แคปชั่นขาด CTA"],
+    ["storyboard_caption_has_shopee_short_link", "แคปชั่นขาด Shopee short link"],
+    ["storyboard_caption_has_price_when_price_exists", "แคปชั่นขาดบรรทัดราคา"],
+    ["storyboard_caption_max_4_benefit_bullets", "แคปชั่นมี bullet จุดเด่นเกิน 4 ข้อ"],
+    ["storyboard_caption_problem_solution_benefit_cta_flow", "แคปชั่นยังไม่ครบ flow Problem → Solution → Benefit → CTA"],
+    ["storyboard_caption_validation_failed", "แคปชั่นจาก Storyboard ไม่ผ่าน validation"],
+    ["legacy_caption_validation_failed", "แคปชั่นถูกดักโดย validation เก่าหรือรูปแบบเดิมที่ยังหลุดมา"],
     ["caption_generation_failed", "สร้างแคปชั่นไม่สำเร็จ หรือบริบทสินค้าไม่พอสำหรับคอนเทนต์"],
     ["content_generation_failed", "สร้างคอนเทนต์ไม่สำเร็จ"],
     ["missing_shortlink", "Shopee short link ไม่ถูกต้องหรือยังสร้างไม่ได้"],

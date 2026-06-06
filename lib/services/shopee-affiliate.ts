@@ -1734,37 +1734,9 @@ function removeUnclearAndSourceLanguageLines(caption: string, product?: ShopeePr
 }
 
 function assertShopeeCaptionHasNoUnclearOrSourceLanguage(caption: string, product?: ShopeeProductRecord) {
-  const lines = normalizeTextEncoding(caption)
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  for (const line of lines.slice(1)) {
-    if (SHOPEE_PUBLIC_SOURCE_LANGUAGE_PATTERN.test(line)) {
-      throw new ShopeeProviderError(
-        "caption validation failed: Caption references source/analysis language instead of reviewing the product directly",
-        422,
-        "caption_validation_failed",
-        "internal_api"
-      );
-    }
-    if (isUnclearShopeeImageTextLine(line)) {
-      throw new ShopeeProviderError(
-        "caption validation failed: Caption contains unclear or incomplete image text",
-        422,
-        "caption_validation_failed",
-        "internal_api"
-      );
-    }
-    if (containsForbiddenShopeeGenericText(line, product)) {
-      throw new ShopeeProviderError(
-        "caption validation failed: Caption contains generic review text",
-        422,
-        "caption_validation_failed",
-        "internal_api"
-      );
-    }
-  }
-  return caption;
+  // Deprecated legacy guard: Storyboard captions use validateStoryboardAffiliateCaption().
+  // Keep this as a non-throwing sanitizer so old call sites cannot skip products with stale rules.
+  return removeUnclearAndSourceLanguageLines(caption, product);
 }
 
 function hasShopeeProductSpecificContext(value: string, product?: ShopeeProductRecord) {
@@ -2893,25 +2865,204 @@ function repairStoryboardAffiliateCaption(caption: string, affiliateLink: string
   return normalizeShopeeCaptionLinkLine(normalized, affiliateLink).replace(/\n{3,}/g, "\n\n").trim();
 }
 
-function assertStoryboardAffiliateCaption(caption: string, storyboard: ShopeeProductStoryboard, product: ShopeeProductRecord, affiliateLink: string) {
+type StoryboardCaptionFailedRule = {
+  rule: string;
+  message: string;
+  failedLine?: string;
+  expected?: string;
+  actual?: string;
+};
+
+function getStoryboardCaptionDebugPayload(input: {
+  jobId?: string;
+  product: ShopeeProductRecord;
+  storyboard: ShopeeProductStoryboard;
+  affiliateLink: string;
+  caption: string;
+  validatorName?: string;
+}) {
+  return {
+    jobId: input.jobId ?? "",
+    productId: input.product.productId,
+    productName: input.product.productName,
+    shortLink: input.affiliateLink,
+    storyboard: {
+      productSimpleName: input.storyboard.productSimpleName,
+      productType: input.storyboard.productType,
+      mainUseCase: input.storyboard.mainUseCase,
+      captionAngle: input.storyboard.captionAngle,
+      primaryPainPoint: input.storyboard.primaryPainPoint,
+      problemSolved: input.storyboard.problemSolved,
+      dailyBenefit: input.storyboard.dailyBenefit,
+      emotionalBenefit: input.storyboard.emotionalBenefit,
+      realUsageScenario: input.storyboard.realUsageScenario,
+      targetUser: input.storyboard.targetUser,
+      purchaseReason: input.storyboard.purchaseReason
+    },
+    generatedCaption: input.caption,
+    captionPreview: input.caption.slice(0, 500),
+    validatorName: input.validatorName ?? "validateStoryboardAffiliateCaption",
+    validationRulesEnabled: [
+      "NON_EMPTY",
+      "FIRST_LINE_IS_HOOK",
+      "HAS_CTA",
+      "HAS_SHOPEE_SHORT_LINK",
+      "HAS_PRICE_WHEN_PRICE_EXISTS",
+      "NO_FORBIDDEN_SOURCE_LANGUAGE",
+      "MAX_4_BENEFIT_BULLETS",
+      "PROBLEM_SOLUTION_BENEFIT_CTA_FLOW",
+      "STORYBOARD_REQUIRED"
+    ]
+  };
+}
+
+function createStoryboardCaptionValidationError(input: {
+  product: ShopeeProductRecord;
+  storyboard: ShopeeProductStoryboard;
+  affiliateLink: string;
+  caption: string;
+  normalized: string;
+  failedRules: StoryboardCaptionFailedRule[];
+  jobId?: string;
+}) {
+  const failedRuleNames = input.failedRules.map((rule) => rule.rule);
+  const detail = {
+    ...getStoryboardCaptionDebugPayload({
+      jobId: input.jobId,
+      product: input.product,
+      storyboard: input.storyboard,
+      affiliateLink: input.affiliateLink,
+      caption: input.normalized
+    }),
+    failedRules: failedRuleNames,
+    failedRuleMessages: input.failedRules.map((rule) => rule.message),
+    failedLine: input.failedRules.find((rule) => rule.failedLine)?.failedLine ?? "",
+    expected: input.failedRules.find((rule) => rule.expected)?.expected ?? "",
+    actual: input.failedRules.find((rule) => rule.actual)?.actual ?? ""
+  };
+  console.warn("[CAPTION_VALIDATION_FAILED_DETAIL]", detail);
+  return new ShopeeProviderError(
+    `storyboard caption validation failed: ${failedRuleNames.join(", ")}`,
+    422,
+    "storyboard_caption_validation_failed",
+    "internal_api",
+    JSON.stringify(detail)
+  );
+}
+
+function validateStoryboardAffiliateCaption(caption: string, storyboard: ShopeeProductStoryboard, product: ShopeeProductRecord, affiliateLink: string, jobId?: string) {
   const normalized = repairStoryboardAffiliateCaption(caption, affiliateLink);
-  if (!normalized) {
-    throw new ShopeeProviderError("caption validation failed: Caption is empty", 422, "caption_validation_failed", "internal_api");
-  }
+  const failedRules: StoryboardCaptionFailedRule[] = [];
+  const lines = normalized.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const firstLine = lines[0] ?? "";
   const forbidden = /จากรูปสินค้า|จากภาพสินค้า|จากชื่อสินค้า|จากข้อมูลสินค้า|จากข้อมูลที่ระบุ|เห็นได้จากภาพ|ใช้งานได้จากชื่อสินค้า|เหมาะสำหรับจากชื่อสินค้า|จากรายละเอียดสินค้า|จากสเปกสินค้า|ตามข้อมูลสินค้า|ตามภาพสินค้า|ตามข้อมูล|ตามภาพ/iu;
+  console.info("[CAPTION_DEBUG_BEFORE_VALIDATION]", getStoryboardCaptionDebugPayload({
+    jobId,
+    product,
+    storyboard,
+    affiliateLink,
+    caption: normalized
+  }));
+
+  if (!normalized) {
+    failedRules.push({
+      rule: "NON_EMPTY",
+      message: "Caption is empty",
+      expected: "caption has text",
+      actual: "empty caption"
+    });
+  }
+  if (!firstLine || /^(?:💰|🛒|📍|#)/u.test(firstLine)) {
+    failedRules.push({
+      rule: "FIRST_LINE_IS_HOOK",
+      message: "First line must be a Storyboard hook/pain point, not price/CTA/link/hashtag",
+      failedLine: firstLine,
+      expected: "hook from primaryPainPoint/problemSolved",
+      actual: firstLine || "missing first line"
+    });
+  }
   if (forbidden.test(normalized)) {
-    throw new ShopeeProviderError("caption validation failed: Caption contains forbidden legacy/source language", 422, "caption_validation_failed", "internal_api");
+    const failedLine = lines.find((line) => forbidden.test(line)) ?? "";
+    failedRules.push({
+      rule: "NO_FORBIDDEN_SOURCE_LANGUAGE",
+      message: "Caption contains forbidden legacy/source language",
+      failedLine,
+      expected: "review talks about the product directly",
+      actual: failedLine
+    });
   }
   const bulletCount = (normalized.match(/^(?:🔋|💨|🔦|📱|🏃|💪|🎯|🏸|🌶️|🍽️|😋|🏠|✨|💖|🌸|💄|📸|🚶|🎥|🥤|🍳|💧|🎒|✈️|🏕️|🧹|👍|✅)\s/gmu) || []).length;
   if (bulletCount > 4) {
-    throw new ShopeeProviderError("caption validation failed: Caption has more than 4 benefit bullets", 422, "caption_validation_failed", "internal_api");
+    failedRules.push({
+      rule: "MAX_4_BENEFIT_BULLETS",
+      message: "Caption has more than 4 benefit bullets",
+      expected: "4 benefit bullets or fewer",
+      actual: `${bulletCount} bullets`
+    });
   }
   if (!/🛒|กดสั่ง|ลิงก์ด้านล่าง|ดูรายละเอียด/iu.test(normalized)) {
-    throw new ShopeeProviderError("caption validation failed: Caption is missing CTA", 422, "caption_validation_failed", "internal_api");
+    failedRules.push({
+      rule: "HAS_CTA",
+      message: "Caption is missing CTA",
+      expected: "CTA line such as 🛒 กดสั่งได้ที่ลิงก์ด้านล่าง",
+      actual: "CTA not found"
+    });
   }
   if (!normalized.includes(affiliateLink)) {
-    throw new ShopeeProviderError("caption validation failed: Caption is missing Shopee short link", 422, "caption_validation_failed", "internal_api");
+    failedRules.push({
+      rule: "HAS_SHOPEE_SHORT_LINK",
+      message: "Caption is missing Shopee short link",
+      expected: affiliateLink,
+      actual: "short link not found in caption"
+    });
   }
+  if (typeof product.discountPrice === "number" || typeof product.productPrice === "number") {
+    if (!/ราคาโปร|บาท|฿/u.test(normalized)) {
+      failedRules.push({
+        rule: "HAS_PRICE_WHEN_PRICE_EXISTS",
+        message: "Caption is missing price line",
+        expected: "price line with ราคาโปร/บาท",
+        actual: "price line not found"
+      });
+    }
+  }
+  const hasSolution = /✅|ตัวช่วย|สะดวก|อุ่นใจ|ง่าย|เอาอยู่|ช่วย/iu.test(normalized);
+  const hasBenefits = bulletCount >= 1;
+  if (!hasSolution || !hasBenefits) {
+    failedRules.push({
+      rule: "PROBLEM_SOLUTION_BENEFIT_CTA_FLOW",
+      message: "Caption must contain problem → solution → benefit → CTA flow",
+      expected: "hook, solution line, benefit bullets, CTA",
+      actual: `hasSolution=${hasSolution}; bulletCount=${bulletCount}`
+    });
+  }
+  if (!validateShopeeProductStoryboard(storyboard)) {
+    failedRules.push({
+      rule: "STORYBOARD_REQUIRED",
+      message: "Storyboard is missing required fields",
+      expected: "complete Product Storyboard",
+      actual: JSON.stringify(storyboard)
+    });
+  }
+
+  if (failedRules.length > 0) {
+    throw createStoryboardCaptionValidationError({
+      product,
+      storyboard,
+      affiliateLink,
+      caption,
+      normalized,
+      failedRules,
+      jobId
+    });
+  }
+  console.info("[CAPTION_VALIDATION_PASSED]", {
+    jobId: jobId ?? "",
+    productId: product.productId,
+    validatorName: "validateStoryboardAffiliateCaption",
+    captionLength: normalized.length,
+    bulletCount
+  });
   return normalized;
 }
 
@@ -2919,6 +3070,7 @@ function buildShopeeStoryboardCaption(input: {
   product: ShopeeProductRecord;
   storyboard: ShopeeProductStoryboard;
   affiliateLink: string;
+  jobId?: string;
 }) {
   const { product, storyboard, affiliateLink } = input;
   const benefits = buildShopeeStoryboardBenefits(storyboard);
@@ -2940,7 +3092,7 @@ function buildShopeeStoryboardCaption(input: {
     getShopeeStoryboardHashtags(product, storyboard).join(" ")
   ].join("\n").replace(/\n{3,}/g, "\n\n").trim();
   return assertValidTextEncoding(
-    assertStoryboardAffiliateCaption(normalizeShopeeCaptionLinkLine(caption, affiliateLink), storyboard, product, affiliateLink),
+    validateStoryboardAffiliateCaption(normalizeShopeeCaptionLinkLine(caption, affiliateLink), storyboard, product, affiliateLink, input.jobId),
     "Shopee storyboard caption"
   );
 }
@@ -3433,6 +3585,7 @@ export async function generateShopeeCaption(input: {
   affiliateLink: string;
   style?: ShopeeCaptionStyle;
   disclosureText?: string;
+  jobId?: string;
 }) {
   const { product } = input;
   if (!hasShopeeProductName(product)) {
@@ -3452,10 +3605,46 @@ export async function generateShopeeCaption(input: {
     );
   }
   const storyboard = createValidatedShopeeProductStoryboard(product);
-  const storyboardCaption = buildShopeeStoryboardCaption({
-    product,
-    storyboard,
-    affiliateLink: input.affiliateLink
+  let storyboardCaption: string;
+  try {
+    storyboardCaption = buildShopeeStoryboardCaption({
+      product,
+      storyboard,
+      affiliateLink: input.affiliateLink,
+      jobId: input.jobId
+    });
+  } catch (error) {
+    await logShopeeAutomationEvent({
+      userId: input.userId,
+      level: "error",
+      message: "CAPTION_VALIDATION_FAILED_DETAIL",
+      productId: product.productId,
+      metadata: {
+        jobId: input.jobId ?? "",
+        productId: product.productId,
+        productName: product.productName,
+        shortLink: input.affiliateLink,
+        validatorName: "validateStoryboardAffiliateCaption",
+        errorCode: error instanceof ShopeeProviderError ? error.code : "",
+        errorMessage: error instanceof Error ? error.message : String(error),
+        responseSummary: error instanceof ShopeeProviderError ? error.responseSummary ?? "" : ""
+      }
+    });
+    throw error;
+  }
+  await logShopeeAutomationEvent({
+    userId: input.userId,
+    level: "success",
+    message: "CAPTION_VALIDATION_PASSED",
+    productId: product.productId,
+    metadata: {
+      jobId: input.jobId ?? "",
+      productId: product.productId,
+      productName: product.productName,
+      shortLink: input.affiliateLink,
+      validatorName: "validateStoryboardAffiliateCaption",
+      captionPreview: storyboardCaption.slice(0, 240)
+    }
   });
   console.info("[CAPTION_GENERATED_FROM_STORYBOARD]", {
     productId: product.productId,
@@ -3654,7 +3843,8 @@ export async function buildShopeePostPackage(input: {
     userId: input.userId,
     product: input.product,
     affiliateLink: shortAffiliateLink,
-    style: input.captionStyle
+    style: input.captionStyle,
+    jobId: input.jobId
   });
 
   const sourceImageUrls = (input.product.productImageUrls?.length ? input.product.productImageUrls : [input.product.productImageUrl])
