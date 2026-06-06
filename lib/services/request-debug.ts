@@ -86,6 +86,23 @@ async function logFailedRequest(input: RequestDebugInput & {
   }
 }
 
+function createRequestTraceError(input: RequestDebugInput, error: unknown) {
+  const originalMessage = error instanceof Error ? error.message : String(error ?? "request failed");
+  const message = [
+    originalMessage,
+    `at ${input.step}`,
+    `(source=${input.source}, fn=${input.fn}${input.url ? `, url=${safeUrl(input.url)}` : ""})`
+  ].join(" ");
+  const tracedError = new Error(message);
+  tracedError.name = error instanceof Error ? error.name : "RequestTraceError";
+  (tracedError as Error & Record<string, unknown>).cause = error;
+  (tracedError as Error & Record<string, unknown>).source = input.source;
+  (tracedError as Error & Record<string, unknown>).step = input.step;
+  (tracedError as Error & Record<string, unknown>).url = safeUrl(input.url);
+  (tracedError as Error & Record<string, unknown>).fn = input.fn;
+  return tracedError;
+}
+
 export async function traceExternalRequest<T>(
   input: RequestDebugInput,
   run: () => Promise<T>
@@ -113,7 +130,7 @@ export async function traceExternalRequest<T>(
       responseTime: Date.now() - startedAt,
       error
     });
-    throw error;
+    throw createRequestTraceError(input, error);
   }
 }
 

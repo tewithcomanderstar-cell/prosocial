@@ -510,6 +510,64 @@ function normalizeAutoPostError(error: unknown, fallback = "Auto Post failed") {
   return message || fallback;
 }
 
+function getAutoPostErrorStack(error: unknown) {
+  return error instanceof Error ? error.stack?.slice(0, 3000) ?? null : null;
+}
+
+function getAutoPostErrorCause(error: unknown) {
+  if (!error || typeof error !== "object") return null;
+  const cause = (error as { cause?: unknown }).cause;
+  if (!cause) return null;
+  if (cause instanceof Error) {
+    return {
+      name: cause.name,
+      message: cause.message,
+      stack: cause.stack?.slice(0, 1500)
+    };
+  }
+  if (typeof cause === "object") {
+    const record = cause as Record<string, unknown>;
+    return {
+      name: String(record.name ?? "Cause"),
+      message: String(record.message ?? record.code ?? record.errno ?? "Unknown fetch cause"),
+      code: record.code,
+      errno: record.errno,
+      syscall: record.syscall,
+      hostname: record.hostname,
+      port: record.port
+    };
+  }
+  return { message: String(cause) };
+}
+
+function normalizeAutoPostErrorForStep(error: unknown, input: {
+  failedStep?: string;
+  pageId?: string;
+  pageIndex?: number;
+  productId?: string;
+  fallback?: string;
+}) {
+  const message = normalizeAutoPostError(error, input.fallback ?? "Auto Post failed");
+  const rawMessage = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  const cause = getAutoPostErrorCause(error);
+
+  if (/^fetch failed$/i.test(rawMessage.trim()) || /^fetch failed$/i.test(message.trim())) {
+    const causeMessage = cause && typeof cause === "object" && "message" in cause
+      ? String((cause as { message?: unknown }).message ?? "")
+      : "";
+    return [
+      `Network fetch failed${input.failedStep ? ` at ${input.failedStep}` : ""}.`,
+      input.pageId ? `pageId=${input.pageId}` : null,
+      input.pageIndex ? `pageIndex=${input.pageIndex}` : null,
+      input.productId ? `productId=${input.productId}` : null,
+      causeMessage ? `cause=${causeMessage}` : null,
+      "Check Action Logs / Vercel logs for FAILED_REQUEST_SOURCE, FAILED_URL, and FAILED_FUNCTION."
+    ].filter(Boolean).join(" ");
+  }
+
+  return message;
+}
+
 function getAutoPostErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : typeof error === "string" ? error : String(error ?? "");
 }
@@ -715,7 +773,13 @@ async function createFailedShopeePageJob(input: {
   errorCode: string;
   failedStep: string;
 }) {
-  const message = normalizeAutoPostError(input.error, "Shopee page preparation failed");
+  const message = normalizeAutoPostErrorForStep(input.error, {
+    failedStep: input.failedStep,
+    pageId: input.pageId,
+    pageIndex: input.pageIndex,
+    productId: input.productId,
+    fallback: "Shopee page preparation failed"
+  });
   const fingerprint = hashValue({
     source: "shopee-affiliate",
     pageId: input.pageId,
@@ -756,7 +820,9 @@ async function createFailedShopeePageJob(input: {
       failedStep: input.failedStep,
       pageId: input.pageId,
       productId: input.productId,
-      originalMessage: input.error instanceof Error ? input.error.message : String(input.error ?? message)
+      originalMessage: input.error instanceof Error ? input.error.message : String(input.error ?? message),
+      cause: getAutoPostErrorCause(input.error),
+      stack: getAutoPostErrorStack(input.error)
     },
     result: {
       status: "failed",
