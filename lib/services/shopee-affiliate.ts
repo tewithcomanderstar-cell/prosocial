@@ -1020,7 +1020,11 @@ const SHOPEE_CONTEXTLESS_GENERIC_PHRASES = [
   "สะดวก",
   "คุ้มค่า",
   "เลือกได้ง่าย",
-  "เหมาะกับการใช้งาน"
+  "เหมาะกับการใช้งาน",
+  "เหมาะสำหรับ",
+  "ใช้ได้หลายแบบ",
+  "ตามภาพ",
+  "ตามข้อมูล"
 ];
 
 const SHOPEE_SOFT_CTAS = [
@@ -1147,6 +1151,16 @@ const SHOPEE_FORBIDDEN_GENERIC_PHRASES = [
   "วิเคราะห์จากรูป",
   "วิเคราะห์จากชื่อสินค้า",
   "ดูจากข้อมูล",
+  "ชื่อสินค้า",
+  "รูปสินค้า",
+  "ภาพสินค้า",
+  "จากภาพ",
+  "จากชื่อ",
+  "จากข้อมูล",
+  "จากรายละเอียดสินค้า",
+  "จากคำอธิบายสินค้า",
+  "อ้างอิงจาก",
+  "กระบวนการวิเคราะห์",
   "ตรวจสเปก",
   "ตรวจรายละเอียด",
   "จุดเด่นที่ชอบ:",
@@ -1847,6 +1861,73 @@ function removeHardSellPhrases(caption: string) {
     .trim();
 }
 
+const SHOPEE_UNCLEAR_IMAGE_TEXT_PATTERN =
+  /[\uFFFD\u25CC]|(?:[่้๊๋ัิีึืุู็์]\s*){2,}|(?:[ก-๙]{1,2}\s+){3,}[ก-๙]{1,2}/u;
+
+const SHOPEE_PUBLIC_SOURCE_LANGUAGE_PATTERN =
+  /ชื่อสินค้า|รูปสินค้า|ภาพสินค้า|จากภาพ|จากชื่อ|จากข้อมูล|จากรายละเอียดสินค้า|จากคำอธิบายสินค้า|ตามภาพ|ตามข้อมูล|อ้างอิงจาก|กระบวนการวิเคราะห์|วิเคราะห์จาก|ดูจากข้อมูล|ตรวจสเปก|ตรวจรายละเอียด/iu;
+
+function isUnclearShopeeImageTextLine(value?: string) {
+  const normalized = normalizeTextEncoding(value ?? "").trim();
+  if (!normalized) return false;
+  if (SHOPEE_UNCLEAR_IMAGE_TEXT_PATTERN.test(normalized)) return true;
+  const thaiLetterRuns = normalized.match(/[ก-๙]+/gu) ?? [];
+  const tinyRuns = thaiLetterRuns.filter((part) => part.length <= 2).length;
+  return thaiLetterRuns.length >= 4 && tinyRuns / thaiLetterRuns.length > 0.7;
+}
+
+function removeUnclearAndSourceLanguageLines(caption: string, product?: ShopeeProductRecord) {
+  return normalizeTextEncoding(caption)
+    .split(/\r?\n/)
+    .filter((line, index) => {
+      const trimmed = line.trim();
+      if (!trimmed) return true;
+      if (index === 0) return true;
+      if (/^(?:💰|🛒|📍|#)/u.test(trimmed)) return true;
+      if (SHOPEE_PUBLIC_SOURCE_LANGUAGE_PATTERN.test(trimmed)) return false;
+      if (isUnclearShopeeImageTextLine(trimmed)) return false;
+      if (containsForbiddenShopeeGenericText(trimmed, product)) return false;
+      return true;
+    })
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function assertShopeeCaptionHasNoUnclearOrSourceLanguage(caption: string, product?: ShopeeProductRecord) {
+  const lines = normalizeTextEncoding(caption)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  for (const line of lines.slice(1)) {
+    if (SHOPEE_PUBLIC_SOURCE_LANGUAGE_PATTERN.test(line)) {
+      throw new ShopeeProviderError(
+        "caption validation failed: Caption references source/analysis language instead of reviewing the product directly",
+        422,
+        "caption_validation_failed",
+        "internal_api"
+      );
+    }
+    if (isUnclearShopeeImageTextLine(line)) {
+      throw new ShopeeProviderError(
+        "caption validation failed: Caption contains unclear or incomplete image text",
+        422,
+        "caption_validation_failed",
+        "internal_api"
+      );
+    }
+    if (containsForbiddenShopeeGenericText(line, product)) {
+      throw new ShopeeProviderError(
+        "caption validation failed: Caption contains generic review text",
+        422,
+        "caption_validation_failed",
+        "internal_api"
+      );
+    }
+  }
+  return caption;
+}
+
 function hasShopeeProductSpecificContext(value: string, product?: ShopeeProductRecord) {
   const normalized = normalizeTextEncoding(value).toLowerCase();
   const productText = normalizeTextEncoding(
@@ -2369,20 +2450,23 @@ function buildShopeeCaptionFromParts(parts: ShopeeCaptionParts) {
 export function buildShopeeFallbackCaption(product: ShopeeProductRecord, shopeeShortUrl: string) {
   assertRecognizedShopeeProductInsight(product);
   const productName = getShopeeCaptionProductName(product.productName);
-  const caption = enforceAndAssertShopeeCaptionTitleOnce(buildShopeeCaptionFromParts({
+  const caption = assertShopeeCaptionHasNoUnclearOrSourceLanguage(enforceAndAssertShopeeCaptionTitleOnce(buildShopeeCaptionFromParts({
     productName,
     reviewLine: buildShopeeShortReviewLine(product),
     priceLine: formatShopeePrice(product),
     ctaLine: randomText(SHOPEE_REAL_REVIEW_CTAS),
     shortLink: formatShopeeShortLinkLine(shopeeShortUrl),
     hashtags: buildRelevantShopeeHashtags(product).filter((tag) => !isShopeeProductNameDuplicateText(tag.replace(/^#/, ""), productName))
-  }), productName, product.productName);
+  }), productName, product.productName), product);
   return assertValidTextEncoding(normalizeTextEncoding(caption), "Shopee fallback caption");
 }
 
 export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string, product?: ShopeeProductRecord) {
   const cleanedInput = normalizeShopeeCaptionLinkLine(caption, shopeeShortUrl);
-  const cleanedCaption = removeMarketplaceMetricLines(removeHardSellPhrases(stripForbiddenAffiliateDisclosure(cleanedInput)))
+  const cleanedCaption = removeUnclearAndSourceLanguageLines(
+    removeMarketplaceMetricLines(removeHardSellPhrases(stripForbiddenAffiliateDisclosure(cleanedInput))),
+    product
+  )
     .replace(/https?:\/\/prosocial-app-theta\.vercel\.app\/\S+/gi, "")
     .replace(/https?:\/\/[^\s]*\/api\/s\/\S+/gi, "")
     .replace(/(?:━{3,}|[-=]{3,})/g, "")
@@ -2444,6 +2528,7 @@ export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string, p
     ),
     "Shopee caption"
   );
+  assertShopeeCaptionHasNoUnclearOrSourceLanguage(normalizedCaption, product);
 
   if (
     normalizedCaption.length <= 700 &&
@@ -2462,7 +2547,10 @@ export function sanitizeShopeeCaption(caption: string, shopeeShortUrl: string, p
     hashtags: safeHashtags
   });
   return assertValidTextEncoding(
-    normalizeShopeeCaptionLinkLine(enforceAndAssertShopeeCaptionTitleOnce(compactCaption, productName, product?.productName), shopeeShortUrl),
+    assertShopeeCaptionHasNoUnclearOrSourceLanguage(
+      normalizeShopeeCaptionLinkLine(enforceAndAssertShopeeCaptionTitleOnce(compactCaption, productName, product?.productName), shopeeShortUrl),
+      product
+    ),
     "Shopee compact caption"
   );
 }
@@ -2937,6 +3025,8 @@ export async function generateShopeeCaption(input: {
     "STEP 2.1: ถ้าชื่อสินค้าไม่ชัด ให้ใช้รูปภาพเป็นหลัก ห้ามเดาเป็นสินค้าประเภทอื่น",
     "STEP 3: สร้างมุมมองคนใช้งานจริง ห้ามพูดเหมือน AI, Catalog, marketplace listing หรือคัดลอก description",
     "STEP 4: สรุปเฉพาะจุดเด่นที่อ้างอิงได้จากชื่อ รูปภาพ description หรือ specification/attributes เท่านั้น ห้ามเดา",
+    "STEP 5: ถ้าข้อความที่อ่านได้จากรูปไม่ชัดเจน อ่านไม่ครบ หรือสะกดไม่มั่นใจ ให้ละเว้นทันที ห้ามคัดลอก ห้ามรวมคำที่ไม่สมบูรณ์",
+    "STEP 6: ห้ามบอกผู้ใช้ว่าคิดจากแหล่งไหนหรือวิเคราะห์อย่างไร ให้พูดถึงตัวสินค้าโดยตรงเท่านั้น",
     "",
     "Product understanding ที่ระบบวิเคราะห์ไว้:",
     `- Product type: ${productInsight.type}`,
@@ -2981,6 +3071,9 @@ export async function generateShopeeCaption(input: {
     "- ถ้าจำเป็นต้องพูดถึงสเปก ให้แปลงเป็นประโยชน์ เช่น เติมน้ำไว้จิบระหว่างวันได้ง่าย หรือปรับแสงให้เหมาะกับอ่านหนังสือ",
     "- CTA ต้องอยู่เหนือพิกัด และบรรทัดพิกัดต้องเป็นรูปแบบเดียวเท่านั้น: 📍 พิกัด https://s.shopee.co.th/{shortCode}",
     "- ห้ามใช้คำว่า เหมาะกับโต๊ะทำงาน, จัดบ้าน, กินเล่น, ใช้ได้ทุกวัน ถ้ารูปภาพสินค้า/ประเภทสินค้าไม่สนับสนุนโดยตรง",
+    "- ห้ามคัดลอกข้อความจากรูปถ้าอ่านได้ไม่ครบ ไม่ชัด หรือเป็นคำสะกดผิด ถ้าไม่มั่นใจให้ใช้ภาษาธรรมชาติของผู้รีวิวแทน",
+    "- ห้ามใช้คำที่อ้างกระบวนการหรือแหล่งที่มาใน caption จริง เช่น ชื่อสินค้า, รูปสินค้า, ภาพสินค้า, จากภาพ, จากชื่อ, จากข้อมูล, จากรายละเอียดสินค้า, จากคำอธิบายสินค้า, ตามภาพ, ตามข้อมูล",
+    "- ห้ามใช้คำกว้าง ๆ ลอย ๆ เช่น ใช้งานได้ดี, เหมาะสำหรับ, ใช้ได้หลายแบบ, ตามภาพ, ตามข้อมูล",
     "- ห้ามใช้ category เป็น feature เช่น General, Lifestyle, Beauty, Home",
     "- ห้ามเขียนหลุดประเภทสินค้า เช่น รองเท้าไปเขียนเรื่องจัดบ้าน, แก้วน้ำไปเขียนเรื่องวิ่ง, เครื่องสำอางไปเขียนเรื่องจัดโต๊ะ",
     "- ถ้าสินค้าเป็นกลุ่มอาหารเสริม วิตามิน ผลิตภัณฑ์สุขภาพ เครื่องสำอาง หรือเวชสำอาง ห้ามใช้คำว่า กินเล่น, ขนม, ของว่าง, กินเพลิน, เคี้ยวเพลิน, ทานเล่น",
