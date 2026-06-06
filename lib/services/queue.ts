@@ -946,7 +946,6 @@ async function validateShopeeAffiliatePublishPayload(input: {
   const shopeeLinkMatch = normalizedMessage.match(/https:\/\/s\.shopee\.co\.th\/\S+/);
   const shopeePinLinkMatch = normalizedMessage.match(/📍\s*พิกัด\s+https:\/\/s\.shopee\.co\.th\/\S+/);
   const payloadAffiliateLink = typeof input.job.payload?.affiliateLink === "string" ? input.job.payload.affiliateLink : "";
-  const payloadProductName = typeof input.job.payload?.shopeeProductName === "string" ? input.job.payload.shopeeProductName.trim() : "";
   const hardSellPatterns = [
     /สินค้าคุณภาพดี/i,
     /โปรโมชั่นสุดคุ้ม/i,
@@ -1025,12 +1024,6 @@ async function validateShopeeAffiliatePublishPayload(input: {
   }
   if (forbiddenGenericPatterns.some((pattern) => pattern.test(normalizedMessage))) {
     reasons.push("Caption contains forbidden generic AI review wording");
-  }
-  if (payloadProductName && nonEmptyLines[0] !== payloadProductName) {
-    reasons.push("Caption first line must be the Shopee product name");
-  }
-  if (payloadProductName && countShopeeProductNameOccurrences(normalizedMessage, payloadProductName) > 1) {
-    reasons.push("Caption repeats the Shopee product name after the first line");
   }
   if (forbiddenOpeners.some((pattern) => pattern.test(nonEmptyLines[0] ?? ""))) {
     reasons.push("Caption starts with a forbidden old hook style");
