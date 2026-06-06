@@ -56,21 +56,21 @@ export function DashboardData() {
   const primaryStats = [
     { label: t("dashConnectedPages"), value: summary.connectedPages, href: "/connections/facebook" },
     { label: t("dashPendingApprovals"), value: summary.pendingApprovals, href: "/approvals" },
-    { label: t("dashFailedRuns"), value: summary.failedRuns, href: "/runs?status=failed" },
+    { label: t("dashFailedRuns"), value: summary.failedRuns, href: "/auto-post" },
     { label: t("dashTokenWarnings"), value: summary.tokenWarnings, href: "/connections/facebook" }
   ];
 
   const secondaryStats = [
-    { label: t("dashScheduledPosts"), value: summary.scheduledPosts, href: "/planner" },
+    { label: t("dashScheduledPosts"), value: summary.scheduledPosts, href: "/auto-post" },
     { label: t("dashRecurringPosts"), value: summary.recurringPosts, href: "/auto-post" },
-    { label: t("dashOneTimePosts"), value: summary.oneTimePosts, href: "/posts/new" },
-    { label: t("dashTotalPosts"), value: summary.totalPosts, href: "/queue" }
+    { label: t("dashOneTimePosts"), value: summary.oneTimePosts, href: "/auto-post" },
+    { label: t("dashTotalPosts"), value: summary.totalPosts, href: "/auto-post" }
   ];
 
   const recommendedAction = summary.tokenWarnings > 0
     ? { label: t("dashReconnectDestinations"), href: "/connections/facebook" }
     : summary.failedRuns > 0
-      ? { label: t("dashReviewFailedRuns"), href: "/runs?status=failed" }
+      ? { label: t("dashReviewFailedRuns"), href: "/auto-post" }
       : { label: t("dashSystemHealthy"), href: "/dashboard" };
 
   return (

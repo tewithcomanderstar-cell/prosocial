@@ -27,29 +27,14 @@ export function Sidebar() {
       title: t("groupOverview"),
       icon: "dashboard",
       items: [
-        { href: "/dashboard", label: t("navDashboard"), icon: "dashboard" },
-        { href: "/runs", label: t("navRuns"), icon: "logs" },
-        { href: "/notifications", label: t("navAlerts"), icon: "integrations" },
-        { href: "/incidents", label: t("navErrorCenter"), icon: "logs" }
+        { href: "/dashboard", label: t("navDashboard"), icon: "dashboard" }
       ]
     },
     {
       title: t("groupAutomation"),
       icon: "planner",
       items: [
-        { href: "/auto-post", label: t("navWorkflows"), icon: "planner" },
-        { href: "/templates", label: t("navTemplates"), icon: "template" }
-      ]
-    },
-    {
-      title: t("groupContent"),
-      icon: "compose",
-      items: [
-        { href: "/posts/new", label: t("navCompose"), icon: "compose" },
-        { href: "/queue", label: t("navQueue"), icon: "bulk" },
-        { href: "/planner", label: t("navPlanner"), icon: "planner" },
-        { href: "/media-library", label: t("navMediaLibrary"), icon: "media" },
-        { href: "/ai", label: t("navAiTools"), icon: "recommend" }
+        { href: "/auto-post", label: t("navWorkflows"), icon: "planner" }
       ]
     },
     {
@@ -57,9 +42,7 @@ export function Sidebar() {
       icon: "facebook",
       items: [
         { href: "/connected-accounts", label: t("navPages"), icon: "accounts" },
-        { href: "/comments", label: t("navAutoComments"), icon: "integrations" },
-        { href: "/connections/facebook", label: t("navFacebook"), icon: "facebook" },
-        { href: "/connections/google-drive", label: t("navGoogle"), icon: "drive" }
+        { href: "/connections/facebook", label: t("navFacebook"), icon: "facebook" }
       ]
     },
     {

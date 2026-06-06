@@ -13,18 +13,18 @@ export function DashboardHome() {
 
   const categories = [
     {
-      title: isThai ? "สร้างโพสต์" : "Create Post",
-      href: "/posts/new",
+      title: isThai ? "Shopee Affiliate" : "Shopee Affiliate",
+      href: "/auto-post",
       action: isThai ? "เปิด" : "Open",
-      icon: "compose" as const,
-      tooltip: isThai ? "สร้างโพสต์ทันทีหรือบันทึกเข้าโหมดอัตโนมัติ" : "Create, publish now, or save into auto mode"
+      icon: "planner" as const,
+      tooltip: isThai ? "ตั้งค่าและติดตามระบบ Shopee Affiliate Auto Post" : "Configure and monitor Shopee Affiliate Auto Post"
     },
     {
-      title: isThai ? "ปฏิทินโพสต์" : "Planner",
-      href: "/planner",
-      action: isThai ? "ดูคิว" : "View",
-      icon: "planner" as const,
-      tooltip: isThai ? "ดูและเลื่อนคิวโพสต์แบบภาพรวม" : "View and move scheduled posts visually"
+      title: isThai ? "เพจ Facebook" : "Facebook Pages",
+      href: "/connections/facebook",
+      action: isThai ? "เชื่อมต่อ" : "Connect",
+      icon: "facebook" as const,
+      tooltip: isThai ? "เชื่อมต่อและตรวจสอบเพจ Facebook ที่ใช้โพสต์" : "Connect and verify Facebook Pages used for publishing"
     },
     {
       title: isThai ? "Analytics" : "Analytics",

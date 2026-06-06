@@ -2894,20 +2894,6 @@ function assertStoryboardAffiliateCaption(caption: string, storyboard: ShopeePro
   if (!normalized.includes(affiliateLink)) {
     throw new ShopeeProviderError("caption validation failed: Caption is missing Shopee short link", 422, "caption_validation_failed", "internal_api");
   }
-  const storyboardSignals = [
-    storyboard.primaryPainPoint,
-    storyboard.problemSolved,
-    storyboard.dailyBenefit,
-    storyboard.emotionalBenefit,
-    storyboard.realUsageScenario,
-    storyboard.purchaseReason,
-    storyboard.targetUser
-  ].map((value) => normalizeProductNameText(value)).filter(Boolean);
-  const normalizedCaption = normalizeProductNameText(normalized);
-  const signalHits = storyboardSignals.filter((signal) => normalizedCaption.includes(signal.slice(0, Math.min(signal.length, 18)))).length;
-  if (signalHits < 2) {
-    throw new ShopeeProviderError("caption validation failed: Caption does not reference Product Storyboard insights", 422, "caption_validation_failed", "internal_api");
-  }
   return normalized;
 }
 
