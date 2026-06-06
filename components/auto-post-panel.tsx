@@ -238,6 +238,41 @@ function sanitizeText(value?: string | null) {
   return normalized.length > 240 ? normalized.slice(0, 237) + "..." : normalized;
 }
 
+function formatSkipReason(value?: string | null) {
+  const reason = sanitizeText(value);
+  if (!reason) return "";
+
+  const normalized = reason.toLowerCase();
+  const reasonMap: Array<[string, string]> = [
+    ["caption_validation_failed", "แคปชั่นไม่ผ่าน validation เช่น ชื่อสินค้าซ้ำ / รูปแบบไม่ตรง / คำต้องห้าม"],
+    ["caption_generation_failed", "สร้างแคปชั่นไม่สำเร็จ หรือบริบทสินค้าไม่พอสำหรับคอนเทนต์"],
+    ["content_generation_failed", "สร้างคอนเทนต์ไม่สำเร็จ"],
+    ["missing_shortlink", "Shopee short link ไม่ถูกต้องหรือยังสร้างไม่ได้"],
+    ["short_link_invalid", "Shopee short link ไม่ผ่าน validation"],
+    ["image_generation_failed", "สร้างภาพ UGC ไม่สำเร็จหรือภาพไม่ผ่าน validation"],
+    ["policy_safety_reject", "ติด safety / content policy ของระบบสร้างภาพหรือคอนเทนต์"],
+    ["duplicate_product", "สินค้าซ้ำหรือเคยโพสต์แล้วในช่วงที่ล็อกไว้"],
+    ["category_conflict", "สินค้าไม่ตรงหมวดหรือถูกบล็อกตามเงื่อนไข"],
+    ["product_type_unknown", "ระบบเข้าใจสินค้าไม่ชัดพอ"],
+    ["description_too_short", "ข้อมูลสินค้า/รายละเอียดสั้นเกินไป"],
+    ["missing_images", "ไม่มีรูปสินค้าพอหรือรูปสินค้าใช้งานไม่ได้"],
+    ["image_analysis_failed", "วิเคราะห์รูปสินค้าไม่สำเร็จ"],
+    ["title_conflict", "ชื่อสินค้าและข้อมูลสินค้าไม่สอดคล้องกัน"],
+    ["no_eligible_candidate", "ไม่พบสินค้าที่ผ่านเงื่อนไขการค้นหา"]
+  ];
+
+  const matched = reasonMap.find(([key]) => normalized.includes(key));
+  if (matched) return matched[1];
+
+  if (normalized.includes("caption")) return "แคปชั่นไม่ผ่านหรือสร้างแคปชั่นไม่สำเร็จ";
+  if (normalized.includes("short link")) return "Shopee short link ไม่ผ่าน validation";
+  if (normalized.includes("image")) return "ภาพสินค้า/ภาพ UGC ไม่ผ่านหรือสร้างไม่สำเร็จ";
+  if (normalized.includes("safety") || normalized.includes("policy")) return "ติด safety / policy";
+  if (normalized.includes("duplicate")) return "สินค้าซ้ำหรือเคยโพสต์แล้ว";
+
+  return reason;
+}
+
 function sanitizeAutomationError(value?: string | null) {
   if (!value) return "";
 
@@ -1158,6 +1193,14 @@ export function AutoPostPanel() {
             {typeof controlPanel.repairedTasksCount === "number" && controlPanel.repairedTasksCount > 0
               ? ` • Repaired ${controlPanel.repairedTasksCount} task(s)`
               : ""}
+          </div>
+        ) : null}
+        {controlPanel?.queueHealth === "finding_valid_product" ? (
+          <div className="composer-message composer-message-error">
+            กำลังลองสินค้าตัวใหม่
+            {controlPanel.currentAttempt ? ` (${controlPanel.currentAttempt}/${controlPanel.maxProductAttempts ?? 10})` : ""}
+            {controlPanel.currentProduct ? ` • สินค้าล่าสุด: ${sanitizeText(controlPanel.currentProduct)}` : ""}
+            {controlPanel.lastSkippedReason ? ` • เหตุผล: ${formatSkipReason(controlPanel.lastSkippedReason)}` : " • ยังไม่พบเหตุผลใน log ล่าสุด"}
           </div>
         ) : null}
         {controlPanel?.pageResults?.length ? (
