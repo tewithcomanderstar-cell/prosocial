@@ -607,7 +607,23 @@ function getRetryWithNextProductReason(error: unknown) {
     };
   }
 
+  const code = getAutoPostErrorCode(error);
   const message = getAutoPostErrorMessage(error).toLowerCase();
+  if (
+    code === "storyboard_generation_failed" ||
+    code === "legacy_caption_disabled" ||
+    message.includes("product_storyboard_failed") ||
+    message.includes("legacy shopee caption")
+  ) {
+    return {
+      reason: code === "legacy_caption_disabled" ? "legacy_caption_path_called" : "storyboard_generation_failed",
+      step: code === "legacy_caption_disabled" ? "PRODUCT_SKIPPED_LEGACY_CAPTION_PATH" : "PRODUCT_SKIPPED_STORYBOARD_FAILED",
+      message: code === "legacy_caption_disabled"
+        ? "Skipping product because a deprecated caption path was called"
+        : "Skipping product because Product Storyboard could not be generated"
+    };
+  }
+
   if (
     message.includes("unable to identify product type") ||
     message.includes("shopee_product_type_unknown") ||
@@ -638,6 +654,8 @@ function getShopeeAttemptFailureReason(error: unknown) {
   const code = getAutoPostErrorCode(error);
   const message = getAutoPostErrorMessage(error).toLowerCase();
   if (isShopeeShortLinkFailure(error)) return "missing_shortlink";
+  if (code === "storyboard_generation_failed" || message.includes("product_storyboard_failed")) return "storyboard_generation_failed";
+  if (code === "legacy_caption_disabled" || message.includes("legacy shopee caption")) return "legacy_caption_path_called";
   if (code === "caption_validation_failed" || message.includes("caption validation failed") || message.includes("invalid generated caption")) return "caption_validation_failed";
   if (message.includes("caption generation failed") || message.includes("content generation") || message.includes("ai content")) return "content_generation_failed";
   if (message.includes("duplicate") || message.includes("already posted")) return "duplicate_product";
@@ -698,6 +716,8 @@ export function classifyAutoPostError(error: unknown): AutoPostErrorClassificati
   }
 
   if (
+    message.includes("product_storyboard_failed") ||
+    message.includes("legacy shopee caption") ||
     message.includes("safety system") ||
     message.includes("content policy") ||
     message.includes("moderation rejected") ||

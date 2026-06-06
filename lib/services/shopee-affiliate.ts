@@ -2290,7 +2290,7 @@ export function buildShopeeFallbackCaption(_product: ShopeeProductRecord, _shope
   throw new ShopeeProviderError(
     "Legacy Shopee caption generation is disabled. Product Storyboard is required.",
     422,
-    "caption_validation_failed",
+    "legacy_caption_disabled",
     "internal_api"
   );
 }
@@ -2299,7 +2299,7 @@ export function sanitizeShopeeCaption(_caption: string, _shopeeShortUrl: string,
   throw new ShopeeProviderError(
     "Legacy Shopee caption sanitizer is disabled. Product Storyboard caption validation is required.",
     422,
-    "caption_validation_failed",
+    "legacy_caption_disabled",
     "internal_api"
   );
 }
@@ -2875,8 +2875,26 @@ function buildShopeeStoryboardBenefits(storyboard: ShopeeProductStoryboard) {
   return benefits.map((benefit, index) => `${emojis[index] ?? "✅"} ${benefit}`);
 }
 
+function repairStoryboardAffiliateCaption(caption: string, affiliateLink: string) {
+  let normalized = normalizeShopeeCaptionLinkLine(normalizeTextEncoding(caption), affiliateLink)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join("\n\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  if (!/🛒|กดสั่ง|ลิงก์ด้านล่าง|ดูรายละเอียด/iu.test(normalized)) {
+    normalized = `${normalized}\n\n🛒 กดสั่งได้ที่ลิงก์ด้านล่าง`;
+  }
+  if (!normalized.includes(affiliateLink)) {
+    normalized = `${normalized}\n\n${formatShopeeShortLinkLine(affiliateLink)}`;
+  }
+  return normalizeShopeeCaptionLinkLine(normalized, affiliateLink).replace(/\n{3,}/g, "\n\n").trim();
+}
+
 function assertStoryboardAffiliateCaption(caption: string, storyboard: ShopeeProductStoryboard, product: ShopeeProductRecord, affiliateLink: string) {
-  const normalized = normalizeTextEncoding(caption).trim();
+  const normalized = repairStoryboardAffiliateCaption(caption, affiliateLink);
   if (!normalized) {
     throw new ShopeeProviderError("caption validation failed: Caption is empty", 422, "caption_validation_failed", "internal_api");
   }
@@ -2962,9 +2980,9 @@ function createValidatedShopeeProductStoryboard(product: ShopeeProductRecord) {
     hasImage: hasShopeeProductImage(product)
   });
   throw new ShopeeProviderError(
-    `caption generation failed: PRODUCT_STORYBOARD_FAILED for ${product.productId}`,
+    `PRODUCT_STORYBOARD_FAILED for ${product.productId}`,
     422,
-    "caption_validation_failed",
+    "storyboard_generation_failed",
     "internal_api"
   );
 }
