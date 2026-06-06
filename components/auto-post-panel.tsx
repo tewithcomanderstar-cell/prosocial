@@ -5,8 +5,7 @@ import {
   DEFAULT_SHOPEE_CATEGORY,
   SHOPEE_CATEGORY_OPTIONS,
   isValidShopeeCategories,
-  normalizeShopeeCategories,
-  normalizeShopeeCategory
+  normalizeShopeeCategories
 } from "@/lib/shopee-categories";
 
 type AutoPostStatus = "idle" | "running" | "posting" | "success" | "partial_success" | "failed" | "retrying" | "paused" | "waiting";
@@ -185,7 +184,7 @@ const defaults: AutoPostConfig = {
   shopeeSourceTag: "trending",
   shopeeKeyword: "",
   shopeeCategory: DEFAULT_SHOPEE_CATEGORY,
-  shopeeCategories: [DEFAULT_SHOPEE_CATEGORY],
+  shopeeCategories: [],
   shopeeCaptionStyle: "soft_sell",
   shopeeTrackingId: "",
   shopeeBlockedCategories: [],
@@ -226,6 +225,14 @@ function withNormalizedShopeeCategories(config: Partial<AutoPostConfig>): AutoPo
     shopeeCategories,
     shopeeCategory: shopeeCategories[0] ?? DEFAULT_SHOPEE_CATEGORY
   };
+}
+
+function getShopeeCategorySummary(categories: string[]) {
+  if (!categories.length) return "All Categories";
+  const labels = categories.map((category) => SHOPEE_CATEGORY_OPTIONS.find((option) => option.value === category)?.label ?? category);
+  if (labels.length === 1) return labels[0];
+  if (labels.length <= 2) return labels.join(", ");
+  return `${labels.slice(0, 2).join(", ")} +${labels.length - 2}`;
 }
 
 function formatDateTime(value?: string) {
@@ -466,12 +473,25 @@ export function AutoPostPanel() {
   const [clearingStuck, setClearingStuck] = useState(false);
   const [retryingPendingPages, setRetryingPendingPages] = useState(false);
   const [cleaningStorage, setCleaningStorage] = useState(false);
+  const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false);
   const loadStatusInFlightRef = useRef(false);
   const pagesRef = useRef<FacebookPage[]>([]);
+  const categoryDropdownRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     pagesRef.current = pages;
   }, [pages]);
+
+  useEffect(() => {
+    function handlePointerDown(event: MouseEvent) {
+      if (!categoryDropdownRef.current?.contains(event.target as Node)) {
+        setCategoryDropdownOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, []);
 
   const loadStatus = useCallback(async (showLoader = false) => {
     if (loadStatusInFlightRef.current) {
@@ -643,6 +663,20 @@ export function AutoPostPanel() {
       shopeeCategories,
       shopeeCategory: shopeeCategories[0] ?? DEFAULT_SHOPEE_CATEGORY
     }));
+  }
+
+  function toggleShopeeCategory(category: string) {
+    if (category === DEFAULT_SHOPEE_CATEGORY) {
+      updateShopeeCategories([]);
+      return;
+    }
+
+    const currentCategories = getConfigShopeeCategories(config);
+    updateShopeeCategories(
+      currentCategories.includes(category)
+        ? currentCategories.filter((item) => item !== category)
+        : [...currentCategories, category]
+    );
   }
 
   function updateCaptions(value: string) {
@@ -935,41 +969,79 @@ export function AutoPostPanel() {
             />
           </label>
 
-          <label className="label">
+          <div className="label" ref={categoryDropdownRef}>
             Category
-            <select
+            <button
+              type="button"
               className="select"
-              multiple
-              size={6}
-              value={getConfigShopeeCategories(config)}
-              onChange={(event) =>
-                updateShopeeCategories(Array.from(event.target.selectedOptions).map((option) => option.value))
-              }
-              aria-label="Shopee categories"
-              required
+              aria-haspopup="listbox"
+              aria-expanded={categoryDropdownOpen}
+              onClick={() => setCategoryDropdownOpen((open) => !open)}
+              style={{ textAlign: "left", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}
             >
-              {SHOPEE_CATEGORY_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-            <span className="muted">
-              {getConfigShopeeCategories(config).map((category) => SHOPEE_CATEGORY_OPTIONS.find((option) => option.value === category)?.label ?? category).join(", ")}
-            </span>
-            <div className="inline-actions">
-              <button
-                type="button"
-                className="button button-secondary"
-                onClick={() => updateShopeeCategories(SHOPEE_CATEGORY_OPTIONS.filter((option) => option.value !== DEFAULT_SHOPEE_CATEGORY).map((option) => option.value))}
+              <span>{getShopeeCategorySummary(getConfigShopeeCategories(config))}</span>
+              <span aria-hidden="true">⌄</span>
+            </button>
+            {categoryDropdownOpen ? (
+              <div
+                role="listbox"
+                aria-label="Shopee categories"
+                style={{
+                  marginTop: 8,
+                  border: "1px solid rgba(37, 99, 235, 0.18)",
+                  borderRadius: 16,
+                  background: "rgba(255, 255, 255, 0.98)",
+                  boxShadow: "0 18px 45px rgba(15, 23, 42, 0.12)",
+                  padding: 10,
+                  maxHeight: 280,
+                  overflowY: "auto",
+                  zIndex: 20,
+                  position: "relative"
+                }}
               >
-                Select all
-              </button>
-              <button type="button" className="button button-secondary" onClick={() => updateShopeeCategories([DEFAULT_SHOPEE_CATEGORY])}>
-                Clear all
-              </button>
-            </div>
-          </label>
+                {SHOPEE_CATEGORY_OPTIONS.map((option) => {
+                  const selectedCategories = getConfigShopeeCategories(config);
+                  const checked = option.value === DEFAULT_SHOPEE_CATEGORY
+                    ? selectedCategories.length === 0
+                    : selectedCategories.includes(option.value);
+                  return (
+                    <label
+                      key={option.value}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 10,
+                        padding: "8px 10px",
+                        borderRadius: 10,
+                        cursor: "pointer",
+                        color: "#18243d"
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleShopeeCategory(option.value)}
+                      />
+                      <span>{option.label}</span>
+                    </label>
+                  );
+                })}
+                <div className="inline-actions" style={{ marginTop: 8 }}>
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    onClick={() => updateShopeeCategories(SHOPEE_CATEGORY_OPTIONS.filter((option) => option.value !== DEFAULT_SHOPEE_CATEGORY).map((option) => option.value))}
+                  >
+                    Select all
+                  </button>
+                  <button type="button" className="button button-secondary" onClick={() => updateShopeeCategories([])}>
+                    Clear all
+                  </button>
+                </div>
+              </div>
+            ) : null}
+            <span className="muted">{getShopeeCategorySummary(getConfigShopeeCategories(config))}</span>
+          </div>
         </div>
 
         <div className="grid cols-2 auto-post-grid auto-post-grid-minimal">

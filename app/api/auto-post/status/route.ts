@@ -219,7 +219,7 @@ export async function GET() {
       shopeeSourceTag: "trending",
       shopeeKeyword: "",
       shopeeCategory: DEFAULT_SHOPEE_CATEGORY,
-      shopeeCategories: [DEFAULT_SHOPEE_CATEGORY],
+      shopeeCategories: [],
       shopeeCaptionStyle: "soft_sell",
       shopeeTrackingId: "",
       shopeeBlockedCategories: [],

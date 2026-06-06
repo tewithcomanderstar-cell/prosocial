@@ -65,10 +65,8 @@ export function normalizeShopeeCategories(values?: Array<string | null | undefin
     .map((value) => normalizeShopeeCategory(value))
     .filter(Boolean);
   const unique = Array.from(new Set(normalized));
-  if (!unique.length) return [DEFAULT_SHOPEE_CATEGORY];
-  if (unique.length > 1 && unique.includes(DEFAULT_SHOPEE_CATEGORY)) {
-    return unique.filter((value) => value !== DEFAULT_SHOPEE_CATEGORY);
-  }
+  if (!unique.length) return [];
+  if (unique.includes(DEFAULT_SHOPEE_CATEGORY)) return [];
   return unique;
 }
 

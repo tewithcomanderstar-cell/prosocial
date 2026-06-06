@@ -3274,11 +3274,12 @@ export async function selectShopeeProductsForPages(input: {
     ? { productIds: new Set<string>(), identities: new Set<string>(), postedDate: getBangkokPostedDate() }
     : await getShopeeProductLocksForDate(input.userId);
   const categories = normalizeShopeeCategories(input.categories?.length ? input.categories : input.category);
+  const discoveryCategories = categories.length ? categories : [DEFAULT_SHOPEE_CATEGORY];
   const limitPerCategory = Math.max(20, input.pageIds.length * Math.max(5, excludedProductIds.size + 5));
   const effectiveCategoryPriority = input.categoryPriority?.length ? input.categoryPriority : categories;
   const discoveredByCategory: ShopeeProductRecord[][] = [];
   const categoryFetchErrors: string[] = [];
-  for (const category of categories) {
+  for (const category of discoveryCategories) {
     try {
       discoveredByCategory.push(await provider.fetchProducts({
         sourceTag: input.sourceTag ?? "trending",

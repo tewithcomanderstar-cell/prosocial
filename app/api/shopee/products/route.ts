@@ -30,18 +30,30 @@ async function fetchProductsForCategories(input: {
   categories: string[];
   limit: number;
 }) {
-  const products = (
-    await Promise.all(
-      input.categories.map((category) =>
-        input.provider.fetchProducts({
+  const categories = input.categories.length ? input.categories : [DEFAULT_SHOPEE_CATEGORY];
+  const batches = [];
+  const errors: string[] = [];
+
+  for (const category of categories) {
+    try {
+      batches.push(
+        await input.provider.fetchProducts({
           sourceTag: input.sourceTag,
           keyword: input.keyword,
           category,
           limit: input.limit
         })
-      )
-    )
-  ).flat();
+      );
+    } catch (error) {
+      errors.push(`${category}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  if (!batches.length && errors.length) {
+    throw new Error(`Unable to fetch Shopee products for selected categories: ${errors.join(" | ")}`);
+  }
+
+  const products = batches.flat();
   const seen = new Set<string>();
   return products.filter((product) => {
     const key = String(product.productId || `${product.shopId}:${product.itemId}`);

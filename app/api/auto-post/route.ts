@@ -123,7 +123,7 @@ export async function GET() {
           contentSource: "shopee-affiliate",
           shopeeSourceTag: "trending",
           shopeeCategory: DEFAULT_SHOPEE_CATEGORY,
-          shopeeCategories: [DEFAULT_SHOPEE_CATEGORY],
+          shopeeCategories: [],
           shopeeCaptionStyle: "soft_sell",
           approvalMode: false,
           watermarkEnabled: true,

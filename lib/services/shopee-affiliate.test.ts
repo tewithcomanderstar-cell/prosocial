@@ -57,8 +57,9 @@ function testScoringRewardsStrongProducts() {
 function testShopeeCategoryNormalization() {
   assert.equal(normalizeShopeeCategory("Lifestyle, Beauty, Home"), "all");
   assert.equal(normalizeShopeeCategory("Home & Living"), "home_living");
-  assert.deepEqual(normalizeShopeeCategories(["all", "Automotive", "Sports & Outdoors"]), ["automotive", "sports"]);
-  assert.deepEqual(normalizeShopeeCategories([]), ["all"]);
+  assert.deepEqual(normalizeShopeeCategories(["Automotive", "Sports & Outdoors"]), ["automotive", "sports"]);
+  assert.deepEqual(normalizeShopeeCategories(["all", "Automotive", "Sports & Outdoors"]), []);
+  assert.deepEqual(normalizeShopeeCategories([]), []);
   assert.equal(getShopeeCategoryLabel("beauty"), "Beauty & Personal Care");
   console.log("PASS Shopee category dropdown values normalize legacy text");
 }
