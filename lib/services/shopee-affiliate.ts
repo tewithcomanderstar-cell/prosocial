@@ -2725,12 +2725,76 @@ const SHOPEE_STORYBOARD_RULES: ShopeeStoryboardRule[] = [
   }
 ];
 
+function inferShopeeFallbackProductType(product: ShopeeProductRecord, haystack: string) {
+  const title = normalizeTextEncoding(product.productName || "");
+  const simpleName = getShopeeCaptionProductName(title)
+    .replace(/[✨🔥😍😋💯👍🎯🛒💥⭐📌📍🥤☕🧊💡🏠🏃⚽🎾🚗🍳📱💻💚💖👟📷⌚🎒🏸🦷🌀]+/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const rules: Array<[RegExp, string]> = [
+    [/กล้องติดรถ|กล้องหน้ารถ|dash\s?cam|car\s?camera|drive\s?recorder|บันทึกภาพรถ|กล้องรถ|gps\s*built/i, "กล้องติดรถยนต์"],
+    [/จัมป์สตาร์ท|jump\s?starter|แบตเตอรี่รถ|เติมลม|ยางรถ|รถยนต์|automotive/i, "อุปกรณ์รถยนต์"],
+    [/insta360|action\s?cam|กล้องแอคชั่?น|กล้อง|camera/i, "กล้องพกพา"],
+    [/ลูกแบด|shuttlecock|badminton|แบดมินตัน/i, "ลูกแบดมินตัน"],
+    [/รองเท้า|running\s?shoe|sneaker|adidas|nike|shoe/i, /วิ่ง|running/i.test(haystack) ? "รองเท้าวิ่ง" : "รองเท้ากีฬา"],
+    [/ถุงเท้า|sock|yonex/i, "ถุงเท้ากีฬา"],
+    [/เวย์|whey|protein|โปรตีน/i, "เวย์โปรตีน"],
+    [/อาหารเสริม|supplement|วิตามิน|vitamin|ผลิตภัณฑ์สุขภาพ/i, "อาหารเสริม"],
+    [/สกินแคร์|skincare|serum|เซรั่ม|ครีม|กันแดด|sunscreen|spf|ผิว|cosmetic/i, "สกินแคร์"],
+    [/แก้ว|tumbler|cup|กระติก|ขวดน้ำ|bottle|เก็บความเย็น|เก็บอุณหภูมิ/i, "แก้วเก็บอุณหภูมิ"],
+    [/ถาดน้ำแข็ง|น้ำแข็ง/i, "ถาดทำน้ำแข็ง"],
+    [/ครัว|kitchen|หม้อ|กระทะ|กล่องอาหาร|ช้อน|จาน/i, "อุปกรณ์ครัว"],
+    [/โคมไฟ|lamp|desk\s?light|led\s?light|อ่านหนังสือ|ถนอมสายตา/i, "โคมไฟตั้งโต๊ะ"],
+    [/หูฟัง|earbud|earphone|headphone|bluetooth|ลำโพง|speaker/i, "แกดเจ็ตเสียง"],
+    [/smart\s?watch|สมาร์ทวอทช์|นาฬิกาอัจฉริยะ|fitness\s?tracker/i, "สมาร์ทวอทช์"],
+    [/กระเป๋า|bag|เป้|คาดอก|crossbody|wallet/i, "กระเป๋าพกพา"],
+    [/art\s?toy|อาร์ตทอย|กล่องสุ่ม|blind\s?box|figure|ฟิกเกอร์|โมเดล|ของสะสม|ตุ๊กตา|จุ่ม/i, "Art Toy / ของสะสม"],
+    [/สัตว์|pet|แมว|cat|สุนัข|dog|อาหารสัตว์|ทรายแมว|ปลอกคอ/i, "อุปกรณ์สัตว์เลี้ยง"],
+    [/น้ำยาซัก|detergent|laundry|ปรับผ้านุ่ม|ซักผ้า|ทำความสะอาด|ไม้ถู|ชั้นวาง|กล่องเก็บ|จัดระเบียบ/i, "ของใช้ในบ้าน"],
+    [/ขนม|snack|อาหาร(?!เสริม)|food|เครื่องดื่ม|drink|กาแฟ|coffee|ชา|tea|เปี๊ยะ|คุกกี้|เค้ก|น้ำพริก/i, /น้ำพริก/i.test(haystack) ? "น้ำพริก / ของกินติดบ้าน" : "ของกินติดบ้าน"]
+  ];
+
+  const matched = rules.find(([pattern]) => pattern.test(haystack));
+  return compactProductText(matched?.[1] || simpleName || "ไอเทมใช้งานประจำวัน", 48);
+}
+
+function createFallbackShopeeProductStoryboard(product: ShopeeProductRecord, haystack: string): ShopeeProductStoryboard {
+  const productType = inferShopeeFallbackProductType(product, haystack);
+  const simpleName = getShopeeCaptionProductName(product.productName || productType);
+  const usageFromDescription = compactProductText(
+    removeShopeeProductNameFromText(product.productDescription || "", product.productName),
+    90
+  );
+  const mainUseCase = usageFromDescription || `หยิบใช้${productType}ในสถานการณ์ที่ต้องการ`;
+  const targetUser = `คนที่กำลังมองหา${productType}ไว้ใช้งาน`;
+  const usageScene = /รถ/.test(productType)
+    ? "ในรถหรือระหว่างเดินทาง"
+    : /กีฬา|วิ่ง|แบด|รองเท้า|ถุงเท้า/.test(productType)
+      ? "ตอนออกกำลังกายหรือทำกิจกรรม"
+      : /ครัว|แก้ว|กระติก|น้ำแข็ง|อาหาร|ขนม|น้ำพริก/.test(productType)
+        ? "ในครัวหรือช่วงใช้งานที่บ้าน"
+        : /สกินแคร์|อาหารเสริม|วิตามิน|เวย์|โปรตีน/.test(productType)
+          ? "ใน routine ดูแลตัวเอง"
+          : "ช่วงใช้งานในชีวิตประจำวัน";
+
+  return makeShopeeStoryboard(product, {
+    productType,
+    whatItIs: simpleName || productType,
+    mainUseCase,
+    targetUser,
+    keySellingPoint: `ช่วยให้หยิบใช้${productType}ได้สะดวกขึ้นเวลาต้องใช้จริง`,
+    usageScene,
+    captionAngle: `เล่าประโยชน์ของ${productType}ในมุมใช้งานจริงแบบสั้นและอ่านง่าย`
+  });
+}
+
 function createShopeeProductStoryboard(product: ShopeeProductRecord): ShopeeProductStoryboard | null {
   if (!hasShopeeProductName(product) || !hasShopeeProductImage(product)) return null;
   const haystack = getShopeeStoryboardInputText(product);
   const matchedRule = SHOPEE_STORYBOARD_RULES.find((rule) => rule.pattern.test(haystack));
   if (matchedRule) return matchedRule.build(product, haystack);
-  return null;
+  return createFallbackShopeeProductStoryboard(product, haystack);
 }
 
 function validateShopeeProductStoryboard(storyboard?: ShopeeProductStoryboard | null) {

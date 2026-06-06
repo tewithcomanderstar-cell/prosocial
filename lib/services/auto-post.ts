@@ -1003,7 +1003,7 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
       autoPostStatus: attempt > 1 ? "retrying" : "running",
       jobStatus: "pending",
       lastStatus: "pending",
-      lastError: attempt > 1 ? `Finding valid product (${attempt}/${AUTO_POST_MAX_PRODUCT_ATTEMPTS})` : null
+      lastError: attempt > 1 ? `Trying next Shopee product (${attempt}/${AUTO_POST_MAX_PRODUCT_ATTEMPTS})` : null
     });
 
     let lastError: unknown = null;
@@ -1212,7 +1212,7 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
             autoPostStatus: "retrying",
             jobStatus: "pending",
             lastStatus: "pending",
-            lastError: `Finding valid product (${Math.min(attempt + 1, AUTO_POST_MAX_PRODUCT_ATTEMPTS)}/${AUTO_POST_MAX_PRODUCT_ATTEMPTS})`
+            lastError: `Trying next Shopee product (${Math.min(attempt + 1, AUTO_POST_MAX_PRODUCT_ATTEMPTS)}/${AUTO_POST_MAX_PRODUCT_ATTEMPTS}) • ${skipReason}`
           });
 
           break;
@@ -1281,7 +1281,7 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
         autoPostStatus: "retrying",
         jobStatus: "pending",
         lastStatus: "pending",
-        lastError: `Finding valid product (1/${AUTO_POST_MAX_PRODUCT_ATTEMPTS}) • Search cycle ${searchCycle + 1}/${AUTO_POST_MAX_SEARCH_CYCLES}`
+        lastError: `Fetching fresh Shopee products (cycle ${searchCycle + 1}/${AUTO_POST_MAX_SEARCH_CYCLES})`
       });
 
       continue;
