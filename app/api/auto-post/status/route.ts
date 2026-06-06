@@ -8,7 +8,7 @@ import { ShopeeProduct } from "@/models/ShopeeProduct";
 import { getShopeeAffiliateConfigStatus, getShopeeEnvStatus, getShopeeProductProvider } from "@/lib/services/shopee-affiliate";
 import { repairMissingShopeePageTasks } from "@/lib/services/queue";
 import { getStorageStatus, mapStorageQuotaMessage } from "@/lib/services/storage-cleanup";
-import { DEFAULT_SHOPEE_CATEGORY, normalizeShopeeCategory } from "@/lib/shopee-categories";
+import { DEFAULT_SHOPEE_CATEGORY, normalizeShopeeCategories, normalizeShopeeCategory } from "@/lib/shopee-categories";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -219,6 +219,7 @@ export async function GET() {
       shopeeSourceTag: "trending",
       shopeeKeyword: "",
       shopeeCategory: DEFAULT_SHOPEE_CATEGORY,
+      shopeeCategories: [DEFAULT_SHOPEE_CATEGORY],
       shopeeCaptionStyle: "soft_sell",
       shopeeTrackingId: "",
       shopeeBlockedCategories: [],
@@ -244,6 +245,13 @@ export async function GET() {
         (effectiveConfig as Record<string, unknown>).shopeeCategory as string
       );
     }
+    (effectiveConfig as Record<string, unknown>).shopeeCategories = normalizeShopeeCategories(
+      Array.isArray((effectiveConfig as Record<string, unknown>).shopeeCategories)
+        ? ((effectiveConfig as Record<string, unknown>).shopeeCategories as string[])
+        : ((effectiveConfig as Record<string, unknown>).shopeeCategory as string | undefined)
+    );
+    (effectiveConfig as Record<string, unknown>).shopeeCategory =
+      ((effectiveConfig as Record<string, unknown>).shopeeCategories as string[])[0] ?? DEFAULT_SHOPEE_CATEGORY;
     const effectiveConfigDoc = effectiveConfig as AutoPostConfigStatusDoc & {
       targetPageIds?: string[];
       lastWorkflowRunId?: unknown;

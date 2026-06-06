@@ -3,7 +3,7 @@ import { logAction, logAndNotifyError } from "@/lib/services/logging";
 import { handleRoleError, requireRole } from "@/lib/services/permissions";
 import { traceExternalRequest } from "@/lib/services/request-debug";
 import { ensureStorageBeforeAutoPost, mapStorageQuotaMessage } from "@/lib/services/storage-cleanup";
-import { normalizeShopeeCategory } from "@/lib/shopee-categories";
+import { normalizeShopeeCategories, normalizeShopeeCategory } from "@/lib/shopee-categories";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
 import { after } from "next/server";
 
@@ -22,6 +22,7 @@ type LeanAutoPostConfig = {
   shopeeSourceTag?: "trending" | "best_selling" | "top_search" | "best_roi" | "manual";
   shopeeKeyword?: string;
   shopeeCategory?: string;
+  shopeeCategories?: string[];
   shopeeCaptionStyle?: "soft_sell" | "urgency" | "problem_solution" | "review_style" | "deal_alert" | "lifestyle";
   captionStrategy: "manual" | "ai" | "hybrid";
   captions: string[];
@@ -258,6 +259,7 @@ export async function POST(request: Request) {
         shopeeSourceTag: config.shopeeSourceTag ?? "trending",
         shopeeKeyword: config.shopeeKeyword ?? "",
         shopeeCategory: normalizeShopeeCategory(config.shopeeCategory),
+        shopeeCategories: normalizeShopeeCategories(config.shopeeCategories?.length ? config.shopeeCategories : config.shopeeCategory),
         targetPageCount: config.targetPageIds.length,
         intervalMinutes: config.intervalMinutes,
         source: "manual-start",

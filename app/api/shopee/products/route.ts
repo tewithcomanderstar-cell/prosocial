@@ -8,18 +8,47 @@ import {
   upsertShopeeProducts,
   ShopeeSourceTag
 } from "@/lib/services/shopee-affiliate";
-import { DEFAULT_SHOPEE_CATEGORY, normalizeShopeeCategory } from "@/lib/shopee-categories";
+import { DEFAULT_SHOPEE_CATEGORY, normalizeShopeeCategories, normalizeShopeeCategory } from "@/lib/shopee-categories";
 
 const querySchema = z.object({
   sourceTag: z.enum(["trending", "best_selling", "top_search", "best_roi", "manual"]).default("trending"),
   keyword: z.string().optional(),
   category: z.string().default(DEFAULT_SHOPEE_CATEGORY),
+  categories: z.array(z.string()).default([]),
   limit: z.number().min(1).max(50).default(20)
 });
 
 function parseSourceTag(value: string | null): ShopeeSourceTag {
   const allowed: ShopeeSourceTag[] = ["trending", "best_selling", "top_search", "best_roi", "manual"];
   return allowed.includes(value as ShopeeSourceTag) ? (value as ShopeeSourceTag) : "trending";
+}
+
+async function fetchProductsForCategories(input: {
+  provider: ReturnType<typeof getShopeeProductProvider>;
+  sourceTag: ShopeeSourceTag;
+  keyword?: string;
+  categories: string[];
+  limit: number;
+}) {
+  const products = (
+    await Promise.all(
+      input.categories.map((category) =>
+        input.provider.fetchProducts({
+          sourceTag: input.sourceTag,
+          keyword: input.keyword,
+          category,
+          limit: input.limit
+        })
+      )
+    )
+  ).flat();
+  const seen = new Set<string>();
+  return products.filter((product) => {
+    const key = String(product.productId || `${product.shopId}:${product.itemId}`);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 export async function GET(request: Request) {
@@ -29,6 +58,7 @@ export async function GET(request: Request) {
     const sourceTag = parseSourceTag(url.searchParams.get("sourceTag"));
     const keyword = url.searchParams.get("keyword") ?? undefined;
     const category = normalizeShopeeCategory(url.searchParams.get("category"));
+    const categories = normalizeShopeeCategories(url.searchParams.getAll("categories").length ? url.searchParams.getAll("categories") : category);
     const limit = Number(url.searchParams.get("limit") ?? "20");
 
     const provider = getShopeeProductProvider();
@@ -40,13 +70,15 @@ export async function GET(request: Request) {
       sourceTag,
       hasKeyword: Boolean(keyword),
       hasCategory: category !== DEFAULT_SHOPEE_CATEGORY,
+      categories,
       limit: Number.isFinite(limit) ? limit : 20,
       missingEnv: envStatus.missing
     });
-    const products = await provider.fetchProducts({
+    const products = await fetchProductsForCategories({
+      provider,
       sourceTag,
       keyword,
-      category,
+      categories,
       limit: Number.isFinite(limit) ? limit : 20
     });
     await upsertShopeeProducts(products);
@@ -94,12 +126,16 @@ export async function POST(request: Request) {
       sourceTag: payload.sourceTag,
       hasKeyword: Boolean(payload.keyword),
       hasCategory: normalizeShopeeCategory(payload.category) !== DEFAULT_SHOPEE_CATEGORY,
+      categories: normalizeShopeeCategories((payload.categories ?? []).length ? payload.categories : payload.category),
       limit: payload.limit,
       missingEnv: envStatus.missing
     });
-    const products = await provider.fetchProducts({
-      ...payload,
-      category: normalizeShopeeCategory(payload.category)
+    const products = await fetchProductsForCategories({
+      provider,
+      sourceTag: payload.sourceTag ?? "trending",
+      keyword: payload.keyword,
+      categories: normalizeShopeeCategories((payload.categories ?? []).length ? payload.categories : payload.category),
+      limit: payload.limit ?? 20
     });
     await upsertShopeeProducts(products);
     return jsonOk({

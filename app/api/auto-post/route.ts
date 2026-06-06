@@ -3,7 +3,7 @@ import { jsonError, jsonOk, parseBody } from "@/lib/api";
 import { handleRoleError, requireRole } from "@/lib/services/permissions";
 import { logAction } from "@/lib/services/logging";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
-import { DEFAULT_SHOPEE_CATEGORY, normalizeShopeeCategory } from "@/lib/shopee-categories";
+import { DEFAULT_SHOPEE_CATEGORY, normalizeShopeeCategories, normalizeShopeeCategory } from "@/lib/shopee-categories";
 
 type LeanAutoPostConfig = {
   enabled?: boolean;
@@ -19,6 +19,7 @@ type LeanAutoPostConfig = {
   maxPostsPerDay?: number;
   maxPostsPerPagePerDay?: number;
   shopeeCategory?: string | null;
+  shopeeCategories?: string[] | null;
 };
 
 const intervalSchema = z.union([
@@ -64,6 +65,7 @@ const schema = z.object({
   shopeeSourceTag: z.enum(["trending", "best_selling", "top_search", "best_roi", "manual"]).default("trending"),
   shopeeKeyword: z.string().default(""),
   shopeeCategory: z.string().default(DEFAULT_SHOPEE_CATEGORY),
+  shopeeCategories: z.array(z.string()).default([]),
   shopeeCaptionStyle: z
     .enum(["soft_sell", "urgency", "problem_solution", "review_style", "deal_alert", "lifestyle"])
     .default("soft_sell"),
@@ -121,6 +123,7 @@ export async function GET() {
           contentSource: "shopee-affiliate",
           shopeeSourceTag: "trending",
           shopeeCategory: DEFAULT_SHOPEE_CATEGORY,
+          shopeeCategories: [DEFAULT_SHOPEE_CATEGORY],
           shopeeCaptionStyle: "soft_sell",
           approvalMode: false,
           watermarkEnabled: true,
@@ -160,10 +163,14 @@ export async function GET() {
       config.postingWindowCustomized = false;
     }
 
-    const normalizedCategory = normalizeShopeeCategory(config.shopeeCategory);
-    if (normalizedCategory !== config.shopeeCategory) {
-      await AutoPostConfig.findOneAndUpdate({ userId }, { shopeeCategory: normalizedCategory });
+    const normalizedCategories = normalizeShopeeCategories(
+      Array.isArray(config.shopeeCategories) && config.shopeeCategories.length ? config.shopeeCategories : config.shopeeCategory
+    );
+    const normalizedCategory = normalizedCategories[0] ?? DEFAULT_SHOPEE_CATEGORY;
+    if (normalizedCategory !== config.shopeeCategory || JSON.stringify(normalizedCategories) !== JSON.stringify(config.shopeeCategories ?? [])) {
+      await AutoPostConfig.findOneAndUpdate({ userId }, { shopeeCategory: normalizedCategory, shopeeCategories: normalizedCategories });
       config.shopeeCategory = normalizedCategory;
+      config.shopeeCategories = normalizedCategories;
     }
 
     if (config.lastError) {
@@ -205,7 +212,8 @@ export async function POST(request: Request) {
     const payload = parseBody(schema, await request.json());
     const normalizedFolderId = normalizeFolderId(payload.folderId ?? "root");
     const shopeeKeyword = (payload.shopeeKeyword ?? "").trim();
-    const shopeeCategory = normalizeShopeeCategory(payload.shopeeCategory);
+    const shopeeCategories = normalizeShopeeCategories((payload.shopeeCategories ?? []).length ? payload.shopeeCategories : payload.shopeeCategory);
+    const shopeeCategory = shopeeCategories[0] ?? DEFAULT_SHOPEE_CATEGORY;
     const shopeeTrackingId = (payload.shopeeTrackingId ?? "").trim();
     const targetPageIds = uniquePageIds(payload.targetPageIds);
     const current = (await AutoPostConfig.findOne({ userId }).lean()) as LeanAutoPostConfig | null;
@@ -237,6 +245,7 @@ export async function POST(request: Request) {
         targetPageIds,
         shopeeKeyword,
         shopeeCategory,
+        shopeeCategories,
         shopeeTrackingId,
         shopeeBlockedCategories: (payload.shopeeBlockedCategories ?? []).map((item) => item.trim()).filter(Boolean),
         shopeeCategoryPriority: (payload.shopeeCategoryPriority ?? []).map((item) => item.trim()).filter(Boolean),
@@ -273,6 +282,7 @@ export async function POST(request: Request) {
         shopeeSourceTag: payload.shopeeSourceTag,
         shopeeKeyword,
         shopeeCategory,
+        shopeeCategories,
         shopeeCaptionStyle: payload.shopeeCaptionStyle,
         shopeeMinPrice: payload.shopeeMinPrice,
         shopeeMaxPrice: payload.shopeeMaxPrice,

@@ -58,8 +58,26 @@ export function normalizeShopeeCategory(value?: string | null) {
   return OPTION_BY_ALIAS.get(normalized) ?? (OPTION_BY_VALUE.has(value ?? "") ? String(value) : DEFAULT_SHOPEE_CATEGORY);
 }
 
+export function normalizeShopeeCategories(values?: Array<string | null | undefined> | string | null) {
+  const rawValues = Array.isArray(values) ? values : [values];
+  const normalized = rawValues
+    .flatMap((value) => String(value ?? "").split(","))
+    .map((value) => normalizeShopeeCategory(value))
+    .filter(Boolean);
+  const unique = Array.from(new Set(normalized));
+  if (!unique.length) return [DEFAULT_SHOPEE_CATEGORY];
+  if (unique.length > 1 && unique.includes(DEFAULT_SHOPEE_CATEGORY)) {
+    return unique.filter((value) => value !== DEFAULT_SHOPEE_CATEGORY);
+  }
+  return unique;
+}
+
 export function isValidShopeeCategory(value?: string | null) {
   return OPTION_BY_VALUE.has(normalizeShopeeCategory(value));
+}
+
+export function isValidShopeeCategories(values?: Array<string | null | undefined> | string | null) {
+  return normalizeShopeeCategories(values).every((value) => OPTION_BY_VALUE.has(value));
 }
 
 export function getShopeeCategoryOption(value?: string | null) {

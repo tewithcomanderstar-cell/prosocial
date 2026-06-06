@@ -20,6 +20,7 @@ const autoPostConfigSchema = new Schema(
     },
     shopeeKeyword: { type: String, default: "" },
     shopeeCategory: { type: String, default: "" },
+    shopeeCategories: { type: [String], default: [] },
     shopeeCaptionStyle: {
       type: String,
       enum: ["soft_sell", "urgency", "problem_solution", "review_style", "deal_alert", "lifestyle"],

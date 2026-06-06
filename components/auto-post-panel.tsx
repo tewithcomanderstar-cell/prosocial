@@ -1,7 +1,13 @@
 ﻿"use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { DEFAULT_SHOPEE_CATEGORY, SHOPEE_CATEGORY_OPTIONS, isValidShopeeCategory, normalizeShopeeCategory } from "@/lib/shopee-categories";
+import {
+  DEFAULT_SHOPEE_CATEGORY,
+  SHOPEE_CATEGORY_OPTIONS,
+  isValidShopeeCategories,
+  normalizeShopeeCategories,
+  normalizeShopeeCategory
+} from "@/lib/shopee-categories";
 
 type AutoPostStatus = "idle" | "running" | "posting" | "success" | "partial_success" | "failed" | "retrying" | "paused" | "waiting";
 type CaptionStrategy = "manual" | "ai" | "hybrid";
@@ -14,6 +20,7 @@ type AutoPostConfig = {
   shopeeSourceTag: "trending" | "best_selling" | "top_search" | "best_roi" | "manual";
   shopeeKeyword: string;
   shopeeCategory: string;
+  shopeeCategories: string[];
   shopeeCaptionStyle: "soft_sell" | "urgency" | "problem_solution" | "review_style" | "deal_alert" | "lifestyle";
   shopeeTrackingId: string;
   shopeeBlockedCategories: string[];
@@ -178,6 +185,7 @@ const defaults: AutoPostConfig = {
   shopeeSourceTag: "trending",
   shopeeKeyword: "",
   shopeeCategory: DEFAULT_SHOPEE_CATEGORY,
+  shopeeCategories: [DEFAULT_SHOPEE_CATEGORY],
   shopeeCaptionStyle: "soft_sell",
   shopeeTrackingId: "",
   shopeeBlockedCategories: [],
@@ -201,6 +209,24 @@ const defaults: AutoPostConfig = {
   jobStatus: "pending",
   retryCount: 0
 };
+
+function getConfigShopeeCategories(config?: Partial<AutoPostConfig> | null) {
+  return normalizeShopeeCategories(
+    Array.isArray(config?.shopeeCategories) && config.shopeeCategories.length
+      ? config.shopeeCategories
+      : config?.shopeeCategory
+  );
+}
+
+function withNormalizedShopeeCategories(config: Partial<AutoPostConfig>): AutoPostConfig {
+  const shopeeCategories = getConfigShopeeCategories(config);
+  return {
+    ...defaults,
+    ...config,
+    shopeeCategories,
+    shopeeCategory: shopeeCategories[0] ?? DEFAULT_SHOPEE_CATEGORY
+  };
+}
 
 function formatDateTime(value?: string) {
   if (!value) return "-";
@@ -479,11 +505,10 @@ export function AutoPostPanel() {
       if (statusJson.ok) {
         const loadedStatusData = statusJson.data as StatusResponse;
         statusData = loadedStatusData;
-        setConfig((current) => ({
+        setConfig((current) => withNormalizedShopeeCategories({
           ...current,
           ...defaults,
-          ...loadedStatusData.config,
-          shopeeCategory: normalizeShopeeCategory(loadedStatusData.config?.shopeeCategory)
+          ...loadedStatusData.config
         }));
         const liveLogs = loadedStatusData.controlPanel?.latestLogs ?? loadedStatusData.logs ?? [];
         setLogs(liveLogs.slice(0, 20).map((log) => ({ ...log, message: sanitizeText(log.message) })));
@@ -611,6 +636,15 @@ export function AutoPostPanel() {
     });
   }
 
+  function updateShopeeCategories(nextCategories: string[]) {
+    const shopeeCategories = normalizeShopeeCategories(nextCategories);
+    setConfig((current) => ({
+      ...current,
+      shopeeCategories,
+      shopeeCategory: shopeeCategories[0] ?? DEFAULT_SHOPEE_CATEGORY
+    }));
+  }
+
   function updateCaptions(value: string) {
     setConfig((current) => ({
       ...current,
@@ -629,9 +663,11 @@ export function AutoPostPanel() {
   }
 
   async function saveConfig(enabledOverride?: boolean) {
+    const shopeeCategories = getConfigShopeeCategories(config);
     const payload = {
       ...config,
-      shopeeCategory: normalizeShopeeCategory(config.shopeeCategory),
+      shopeeCategories,
+      shopeeCategory: shopeeCategories[0] ?? DEFAULT_SHOPEE_CATEGORY,
       enabled: enabledOverride ?? config.enabled
     };
     const response = await fetch("/api/auto-post", {
@@ -641,11 +677,7 @@ export function AutoPostPanel() {
     });
     const result = await readApiResult(response);
     if (!result.ok) throw new Error(result.message || "Unable to save Auto Post settings");
-    setConfig({
-      ...defaults,
-      ...result.data.config,
-      shopeeCategory: normalizeShopeeCategory(result.data.config?.shopeeCategory)
-    });
+    setConfig(withNormalizedShopeeCategories(result.data.config));
     return result;
   }
 
@@ -656,8 +688,8 @@ export function AutoPostPanel() {
     setError("");
 
     try {
-      if (!isValidShopeeCategory(config.shopeeCategory)) {
-        throw new Error("Please select category");
+      if (!isValidShopeeCategories(config.shopeeCategories)) {
+        throw new Error("Please select at least one valid category");
       }
       const result = await saveConfig();
       setMessage(result.message || "Settings saved");
@@ -907,9 +939,13 @@ export function AutoPostPanel() {
             Category
             <select
               className="select"
-              value={normalizeShopeeCategory(config.shopeeCategory)}
-              onChange={(event) => setConfig((current) => ({ ...current, shopeeCategory: normalizeShopeeCategory(event.target.value) }))}
-              aria-label="Shopee category"
+              multiple
+              size={6}
+              value={getConfigShopeeCategories(config)}
+              onChange={(event) =>
+                updateShopeeCategories(Array.from(event.target.selectedOptions).map((option) => option.value))
+              }
+              aria-label="Shopee categories"
               required
             >
               {SHOPEE_CATEGORY_OPTIONS.map((option) => (
@@ -918,6 +954,21 @@ export function AutoPostPanel() {
                 </option>
               ))}
             </select>
+            <span className="muted">
+              {getConfigShopeeCategories(config).map((category) => SHOPEE_CATEGORY_OPTIONS.find((option) => option.value === category)?.label ?? category).join(", ")}
+            </span>
+            <div className="inline-actions">
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={() => updateShopeeCategories(SHOPEE_CATEGORY_OPTIONS.filter((option) => option.value !== DEFAULT_SHOPEE_CATEGORY).map((option) => option.value))}
+              >
+                Select all
+              </button>
+              <button type="button" className="button button-secondary" onClick={() => updateShopeeCategories([DEFAULT_SHOPEE_CATEGORY])}>
+                Clear all
+              </button>
+            </div>
           </label>
         </div>
 

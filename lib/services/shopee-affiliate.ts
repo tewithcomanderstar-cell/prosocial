@@ -15,6 +15,7 @@ import {
   getShopeeCategoryLabel,
   getShopeeCategorySearchTerms,
   isShopeeCategoryMatch,
+  normalizeShopeeCategories,
   normalizeShopeeCategory
 } from "@/lib/shopee-categories";
 import { randomItem } from "@/lib/utils";
@@ -59,6 +60,7 @@ export type ProductDiscoveryQuery = {
   sourceTag?: ShopeeSourceTag;
   keyword?: string;
   category?: string;
+  categories?: string[];
   limit?: number;
 };
 
@@ -3229,12 +3231,34 @@ function weightedRandomProduct<T extends { score: ProductScore }>(items: T[]) {
   return items[items.length - 1];
 }
 
+function shuffleShopeeProducts(products: ShopeeProductRecord[]) {
+  const shuffled = [...products];
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+  }
+  return shuffled;
+}
+
+function dedupeShopeeProducts(products: ShopeeProductRecord[]) {
+  const seen = new Set<string>();
+  const deduped: ShopeeProductRecord[] = [];
+  for (const product of products) {
+    const key = String(product.productId || `${product.shopId}:${product.itemId}`);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(product);
+  }
+  return deduped;
+}
+
 export async function selectShopeeProductsForPages(input: {
   userId: string;
   pageIds: string[];
   sourceTag?: ShopeeSourceTag;
   keyword?: string;
   category?: string;
+  categories?: string[];
   categoryPriority?: string[];
   blockedCategories?: string[];
   minPrice?: number;
@@ -3249,12 +3273,27 @@ export async function selectShopeeProductsForPages(input: {
   const dailyLocks = process.env.AUTO_POST_NO_DUPLICATE_SAME_DAY === "false"
     ? { productIds: new Set<string>(), identities: new Set<string>(), postedDate: getBangkokPostedDate() }
     : await getShopeeProductLocksForDate(input.userId);
-  const discovered = await provider.fetchProducts({
-    sourceTag: input.sourceTag ?? "trending",
-    keyword: input.keyword,
-    category: normalizeShopeeCategory(input.category),
-    limit: Math.max(20, input.pageIds.length * Math.max(5, excludedProductIds.size + 5))
-  });
+  const categories = normalizeShopeeCategories(input.categories?.length ? input.categories : input.category);
+  const limitPerCategory = Math.max(20, input.pageIds.length * Math.max(5, excludedProductIds.size + 5));
+  const effectiveCategoryPriority = input.categoryPriority?.length ? input.categoryPriority : categories;
+  const discoveredByCategory: ShopeeProductRecord[][] = [];
+  const categoryFetchErrors: string[] = [];
+  for (const category of categories) {
+    try {
+      discoveredByCategory.push(await provider.fetchProducts({
+        sourceTag: input.sourceTag ?? "trending",
+        keyword: input.keyword,
+        category,
+        limit: limitPerCategory
+      }));
+    } catch (error) {
+      categoryFetchErrors.push(`${category}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  if (!discoveredByCategory.length && categoryFetchErrors.length) {
+    throw new Error(`Unable to fetch Shopee products for selected categories: ${categoryFetchErrors.join("; ")}`);
+  }
+  const discovered = shuffleShopeeProducts(dedupeShopeeProducts(discoveredByCategory.flat()));
   await upsertShopeeProducts(discovered);
 
   const selected: Array<{ pageId: string; product: ShopeeProductRecord; score: ProductScore }> = [];
@@ -3284,7 +3323,7 @@ export async function selectShopeeProductsForPages(input: {
       const score = scoreShopeeProduct({
         product,
         recentlyPosted,
-        categoryPriority: input.categoryPriority,
+        categoryPriority: effectiveCategoryPriority,
         blockedCategories: input.blockedCategories
       });
       if (!score.riskFlags.includes("blocked_category") && !score.riskFlags.includes("missing_product_url")) {

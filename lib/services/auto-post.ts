@@ -16,7 +16,7 @@ import {
   ShopeeSourceTag
 } from "@/lib/services/shopee-affiliate";
 import { randomItem } from "@/lib/utils";
-import { normalizeShopeeCategory } from "@/lib/shopee-categories";
+import { normalizeShopeeCategories, normalizeShopeeCategory } from "@/lib/shopee-categories";
 import { ensureStorageBeforeAutoPost, mapStorageQuotaMessage } from "@/lib/services/storage-cleanup";
 import { normalizeTextEncoding, validateTextEncoding } from "@/lib/services/text-encoding";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
@@ -36,6 +36,7 @@ type LeanAutoPostConfig = {
   shopeeSourceTag?: ShopeeSourceTag;
   shopeeKeyword?: string;
   shopeeCategory?: string;
+  shopeeCategories?: string[];
   shopeeCaptionStyle?: ShopeeCaptionStyle;
   shopeeTrackingId?: string;
   shopeeBlockedCategories?: string[];
@@ -899,6 +900,7 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
             sourceTag: input.config.shopeeSourceTag ?? "trending",
             keyword: input.config.shopeeKeyword,
             category: normalizeShopeeCategory(input.config.shopeeCategory),
+            categories: normalizeShopeeCategories(input.config.shopeeCategories?.length ? input.config.shopeeCategories : input.config.shopeeCategory),
             categoryPriority: input.config.shopeeCategoryPriority ?? [],
             blockedCategories: input.config.shopeeBlockedCategories ?? [],
             minPrice: input.config.shopeeMinPrice ?? 0,
@@ -924,6 +926,7 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
           productId: "",
           productName: "",
           category: normalizeShopeeCategory(input.config.shopeeCategory),
+          categories: normalizeShopeeCategories(input.config.shopeeCategories?.length ? input.config.shopeeCategories : input.config.shopeeCategory),
           reason: "no_eligible_candidate",
           workflowRunId: input.records.workflowRunId
         }
@@ -940,6 +943,7 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
           maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
           skipReason: "no eligible candidate found",
           category: normalizeShopeeCategory(input.config.shopeeCategory),
+          categories: normalizeShopeeCategories(input.config.shopeeCategories?.length ? input.config.shopeeCategories : input.config.shopeeCategory),
           skippedProductsCount: skippedProducts.length,
           workflowRunId: input.records.workflowRunId
         }
@@ -1531,6 +1535,7 @@ async function queueShopeeAutoPostsForConfig(
       sourceTag: config.shopeeSourceTag ?? "trending",
       keyword: config.shopeeKeyword ?? "",
       category: normalizeShopeeCategory(config.shopeeCategory),
+      categories: normalizeShopeeCategories(config.shopeeCategories?.length ? config.shopeeCategories : config.shopeeCategory),
       pageCount: eligiblePageIds.length
     }
   });
@@ -1540,6 +1545,7 @@ async function queueShopeeAutoPostsForConfig(
     sourceTag: config.shopeeSourceTag ?? "trending",
     keyword: config.shopeeKeyword,
     category: normalizeShopeeCategory(config.shopeeCategory),
+    categories: normalizeShopeeCategories(config.shopeeCategories?.length ? config.shopeeCategories : config.shopeeCategory),
     categoryPriority: config.shopeeCategoryPriority ?? [],
     blockedCategories: config.shopeeBlockedCategories ?? [],
     minPrice: config.shopeeMinPrice ?? 0,

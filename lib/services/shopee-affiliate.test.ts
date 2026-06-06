@@ -14,7 +14,7 @@ import {
 // @ts-ignore Node strip-types runner resolves the .ts module directly in tests.
 import type { ShopeeProductRecord } from "./shopee-affiliate-core.ts";
 // @ts-ignore Node strip-types runner resolves the .ts module directly in tests.
-import { getShopeeCategoryLabel, normalizeShopeeCategory } from "../shopee-categories.ts";
+import { getShopeeCategoryLabel, normalizeShopeeCategories, normalizeShopeeCategory } from "../shopee-categories.ts";
 
 const sampleProduct: ShopeeProductRecord = {
   productId: "test-product",
@@ -57,6 +57,8 @@ function testScoringRewardsStrongProducts() {
 function testShopeeCategoryNormalization() {
   assert.equal(normalizeShopeeCategory("Lifestyle, Beauty, Home"), "all");
   assert.equal(normalizeShopeeCategory("Home & Living"), "home_living");
+  assert.deepEqual(normalizeShopeeCategories(["all", "Automotive", "Sports & Outdoors"]), ["automotive", "sports"]);
+  assert.deepEqual(normalizeShopeeCategories([]), ["all"]);
   assert.equal(getShopeeCategoryLabel("beauty"), "Beauty & Personal Care");
   console.log("PASS Shopee category dropdown values normalize legacy text");
 }
