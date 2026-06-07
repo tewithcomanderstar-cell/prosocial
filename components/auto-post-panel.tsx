@@ -1336,6 +1336,11 @@ export function AutoPostPanel() {
               : ""}
           </div>
         ) : null}
+        {controlPanel?.queueHealth === "waiting_for_template_post" ? (
+          <div className="composer-message">
+            {sanitizeText(controlPanel.missingTasksWarning || "Waiting for template post. Start Now to retry if this run is no longer active.")}
+          </div>
+        ) : null}
         {controlPanel?.queueHealth === "finding_valid_product" ? (
           <div className="composer-message composer-message-error">
             กำลังลองสินค้าตัวใหม่
@@ -1360,7 +1365,7 @@ export function AutoPostPanel() {
                     </span>
                   </div>
                   <div className="muted auto-post-log-meta">
-                    {result.jobId ? `Job ${result.jobId}` : "Page task creation incomplete"}
+                    {result.jobId ? `Job ${result.jobId}` : "Waiting for template post"}
                     {result.facebookPostId ? ` • Facebook post ${result.facebookPostId}` : ""}
                     {result.scheduledAt ? ` • ${formatScheduledLabel(result.scheduledAt) || `Scheduled ${formatDateTime(result.scheduledAt)}`}` : ""}
                     {result.shortAffiliateLink ? ` • Short link ${sanitizeText(result.shortAffiliateLink)}` : ""}

@@ -423,12 +423,12 @@ export async function GET() {
           pageId,
           pageName: pageNameById.get(pageId) ?? "Facebook Page",
           shortAffiliateLink: null,
-          status: noTaskRunIsStale ? "failed" : "pending",
+          status: "pending",
           rawStatus: "not_created",
           facebookPostId: null,
-          errorCode: noTaskRunIsStale ? "no_page_tasks_created" : null,
+          errorCode: null,
           errorMessage: noTaskRunIsStale
-            ? "No page tasks were created for the latest run. Start Now to retry."
+            ? "No template post/page task exists for the latest run. Start Now to retry."
             : "Preparing Shopee post package before page tasks are created",
           startedAt: null,
           scheduledAt: null,
@@ -573,7 +573,7 @@ export async function GET() {
         name: String(page.name ?? page.pageName ?? "Facebook Page")
       })).filter((page: { pageId: string; name: string }) => page.pageId.length > 0),
       currentJobId: latestProcessingJob ? String(latestProcessingJob._id) : runJobs[0]?._id ? String(runJobs[0]._id) : null,
-      currentStep: isFindingValidProduct ? "FINDING_VALID_PRODUCT" : noTaskRunIsStale ? "PAGE_TASK_CREATION_FAILED" : currentStep,
+      currentStep: isFindingValidProduct ? "FINDING_VALID_PRODUCT" : noTaskRunIsStale ? "WAITING_FOR_TEMPLATE_POST" : currentStep,
       currentAttempt,
       maxProductAttempts,
       skippedProductsCount,
@@ -583,14 +583,14 @@ export async function GET() {
         : null,
       selectedPagesCount,
       createdTasksCount,
-      queueHealth: isFindingValidProduct ? "finding_valid_product" : noTaskRunIsActive ? "preparing_page_tasks" : noTaskRunIsStale ? "no_tasks_created" : missingTasksCount > 0 ? "missing_tasks" : "ok",
+      queueHealth: isFindingValidProduct ? "finding_valid_product" : noTaskRunIsActive ? "preparing_page_tasks" : noTaskRunIsStale ? "waiting_for_template_post" : missingTasksCount > 0 ? "missing_tasks" : "ok",
       missingTasksCount: isFindingValidProduct ? 0 : missingTasksCount,
       missingTasksWarning: isFindingValidProduct
         ? null
         : noTaskRunIsActive
         ? null
         : noTaskRunIsStale
-        ? `No page tasks were created for the latest run. Expected: ${selectedPagesCount}, Created: ${createdTasksCount}. Start Now to retry.`
+        ? `No template post/page task exists for the latest run. Expected: ${selectedPagesCount}, Created: ${createdTasksCount}. Start Now to retry.`
         : missingTasksCount > 0
         ? `Missing Tasks Detected. Expected: ${selectedPagesCount}, Created: ${createdTasksCount}`
         : null,

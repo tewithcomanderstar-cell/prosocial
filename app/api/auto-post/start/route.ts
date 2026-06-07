@@ -137,7 +137,28 @@ export async function POST(request: Request) {
       jobStatus: "processing",
       lastError: null,
       retryCount: 0,
-      lastRunAt: new Date()
+      lastRunAt: new Date(),
+      lastStatus: "pending",
+      lastPostId: null,
+      lastSelectedImageId: null,
+      lastWorkflowId: null,
+      lastWorkflowRunId: null,
+      lastContentItemId: null
+    });
+
+    await logAction({
+      userId,
+      type: "queue",
+      level: "info",
+      message: "RUN_STATE_RESET_FOR_NEW_START",
+      metadata: {
+        autoPost: true,
+        autoSource: "shopee-affiliate",
+        autoPostConfigId: config._id,
+        selectedPagesCount: config.targetPageIds.length,
+        previousStatus: config.autoPostStatus ?? null,
+        source: "manual-start"
+      }
     });
 
     after(() => {
