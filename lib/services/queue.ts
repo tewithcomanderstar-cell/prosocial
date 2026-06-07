@@ -1417,7 +1417,14 @@ export async function enqueuePostJobsForPost(userId: string, postId: string, opt
         postingMode: post.postingMode,
         randomizeImages: post.randomizeImages,
         randomizeCaption: post.randomizeCaption,
-        ...(options.payloadExtras ?? {})
+        ...(options.payloadExtras ?? {}),
+        ...(isShopeePageTask
+          ? {
+              pageIndex: pageIndex + 1,
+              selectedPagesCount: selectedPages.length,
+              scheduledDelayMinutes: pageIndex * spacingMinutes
+            }
+          : {})
       },
       nextRunAt,
       maxAttempts: 3,

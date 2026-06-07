@@ -1694,6 +1694,119 @@ async function queueShopeeAutoPostsForConfig(
     );
   }
 
+  let batchTaskCreationHandled = false;
+  if (!config.approvalMode && SHOPEE_BATCH_PRODUCT_MODE === "single" && sharedSingleProductPackage && selectedProductsForQueue.length > 0) {
+    const selected = selectedProductsForQueue[0];
+    const packageResult = sharedSingleProductPackage;
+    const trackingId = resolveShopeeTrackingId(config);
+    const contentHash = hashValue(packageResult.caption);
+    const imageHash = hashValue(packageResult.generatedImageUrls);
+    const fingerprint = hashValue({
+      source: "shopee-affiliate",
+      pageIds: eligiblePageIds,
+      productId: selected.product.productId,
+      contentHash,
+      imageHash
+    });
+    const captionProductName = getShopeeCaptionProductName(selected.product.productName);
+    const post = await Post.create({
+      userId: config.userId,
+      title: `Shopee Affiliate ${selected.product.productName}`,
+      content: packageResult.caption,
+      hashtags: [],
+      imageUrls: packageResult.generatedImageUrls,
+      targetPageIds: eligiblePageIds,
+      randomizeImages: false,
+      randomizeCaption: false,
+      postingMode: "broadcast",
+      variants: [],
+      status: "scheduled",
+      contentHash,
+      imageHash,
+      fingerprint
+    });
+
+    lastPostId = post._id;
+    await logShopeeStep({
+      config,
+      step: "TEMPLATE_POST_RESULT",
+      status: "success",
+      message: "Template post created for all selected Shopee page tasks",
+      productId: selected.product.productId,
+      metadata: {
+        created: true,
+        templatePostId: String(post._id),
+        targetPageIds: eligiblePageIds,
+        expectedPages: eligiblePageIds.length,
+        reason: "single template post created before batch page task enqueue",
+        workflowRunId: records.workflowRunId
+      }
+    });
+
+    const queuedForPost = await enqueuePostJobsForPost(config.userId, String(post._id), {
+      applyRandomDelay: false,
+      startAt: batchStartAt,
+      forceImmediate: true,
+      payloadExtras: {
+        autoPostConfigId: config._id,
+        autoSource: "shopee-affiliate",
+        shopeeProductId: selected.product.productId,
+        shopeeProductName: captionProductName,
+        shopeeProductScore: selected.score.productScore,
+        shopeeSelectionReason: selected.score.reason,
+        affiliateLink: packageResult.shortAffiliateLink,
+        affiliateUrl: packageResult.affiliateLink,
+        imageCount: packageResult.generatedImageUrls.length,
+        aiGeneratedPostId: packageResult.aiGeneratedPostId,
+        selectedPagesCount: eligiblePageIds.length,
+        workflowId: records.workflowId,
+        workflowRunId: records.workflowRunId,
+        contentItemId: records.contentItemId
+      }
+    });
+
+    console.info("[TASK CREATED]", {
+      mode: "batch",
+      queuedForPost,
+      selectedPagesCount: eligiblePageIds.length,
+      postId: String(post._id),
+      workflowRunId: records.workflowRunId
+    });
+
+    await logShopeeStep({
+      config,
+      step: "PAGE_TASK_CREATION_RESULT",
+      status: queuedForPost === eligiblePageIds.length ? "success" : "failed",
+      message: `Page task creation result: ${queuedForPost}/${eligiblePageIds.length} task(s) created`,
+      productId: selected.product.productId,
+      metadata: {
+        expectedPages: eligiblePageIds.length,
+        createdTasks: queuedForPost,
+        templatePostId: String(post._id),
+        reason: queuedForPost === eligiblePageIds.length ? "batch enqueue completed" : "batch enqueue incomplete",
+        workflowRunId: records.workflowRunId
+      }
+    });
+
+    for (const [pageIndex, pageId] of eligiblePageIds.entries()) {
+      await recordShopeeQueueItem({
+        userId: config.userId,
+        pageId,
+        product: selected.product,
+        postId: String(post._id),
+        jobId: records.workflowRunId,
+        scheduledAt: new Date(batchStartAt.getTime() + pageIndex * pageSpacingMinutes * 60 * 1000),
+        affiliateLink: packageResult.shortAffiliateLink,
+        aiGeneratedPostId: packageResult.aiGeneratedPostId,
+        status: "queued"
+      });
+    }
+
+    queued += queuedForPost;
+    batchTaskCreationHandled = true;
+  }
+
+  if (!batchTaskCreationHandled) {
   const selectedProductPageIds = new Set(selectedProductsForQueue.map((selected) => selected.pageId));
   for (let index = 0; index < eligiblePageIds.length; index += 1) {
     const pageId = eligiblePageIds[index];
@@ -2034,6 +2147,7 @@ async function queueShopeeAutoPostsForConfig(
         failedStep: "GENERATE_POST_PACKAGE"
       });
     }
+  }
   }
 
   const expectedPreparedPageCount = eligiblePageIds.length;
