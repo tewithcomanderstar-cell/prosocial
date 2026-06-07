@@ -4351,6 +4351,8 @@ async function logShopeePackageStage(input: {
   });
 }
 
+type ShopeePackageStageLogInput = Parameters<typeof logShopeePackageStage>[0];
+
 function isOpenAiImageTimeoutError(error: unknown) {
   if (error instanceof ShopeeProviderError && error.code === "openai_image_timeout") return true;
   const message = error instanceof Error ? error.message : String(error ?? "");
@@ -4394,6 +4396,13 @@ async function generateShopeeUgcImageWithTracing(input: {
   const provider = process.env.OPENAI_IMAGE_MODEL?.trim() || "gpt-image-1";
   const startedAt = new Date();
   const requestId = crypto.randomUUID();
+  let loggingDurationMs = 0;
+  const promptLength = input.prompt.length;
+  const timedLog = async (logInput: ShopeePackageStageLogInput) => {
+    const logStartedAt = Date.now();
+    await logShopeePackageStage(logInput);
+    loggingDurationMs += Date.now() - logStartedAt;
+  };
   const baseMetadata = {
     requestId,
     imageIndex: input.imageIndex,
@@ -4403,10 +4412,12 @@ async function generateShopeeUgcImageWithTracing(input: {
     maxAttempts: OPENAI_IMAGE_MAX_ATTEMPTS,
     provider,
     timeoutMs: OPENAI_IMAGE_REQUEST_TIMEOUT_MS,
-    startedAt: startedAt.toISOString()
+    startedAt: startedAt.toISOString(),
+    promptLength,
+    referenceImageCount: input.referenceImages.length + 1
   };
 
-  await logShopeePackageStage({
+  await timedLog({
     userId: input.userId,
     jobId: input.jobId,
     product: input.product,
@@ -4431,7 +4442,7 @@ async function generateShopeeUgcImageWithTracing(input: {
       OPENAI_IMAGE_REQUEST_TIMEOUT_MS
     );
     const completedAt = new Date();
-    await logShopeePackageStage({
+    await timedLog({
       userId: input.userId,
       jobId: input.jobId,
       product: input.product,
@@ -4442,14 +4453,20 @@ async function generateShopeeUgcImageWithTracing(input: {
         ...baseMetadata,
         completedAt: completedAt.toISOString(),
         durationMs: completedAt.getTime() - startedAt.getTime(),
+        loggingDurationMs,
         sizeBytes: generatedBuffer.length
       }
     });
-    return generatedBuffer;
+    return {
+      buffer: generatedBuffer,
+      requestDurationMs: completedAt.getTime() - startedAt.getTime(),
+      loggingDurationMs,
+      promptLength
+    };
   } catch (error) {
     const completedAt = new Date();
     const timeout = isOpenAiImageTimeoutError(error);
-    await logShopeePackageStage({
+    await timedLog({
       userId: input.userId,
       jobId: input.jobId,
       product: input.product,
@@ -4461,7 +4478,8 @@ async function generateShopeeUgcImageWithTracing(input: {
       metadata: {
         ...baseMetadata,
         completedAt: completedAt.toISOString(),
-        durationMs: completedAt.getTime() - startedAt.getTime()
+        durationMs: completedAt.getTime() - startedAt.getTime(),
+        loggingDurationMs
       },
       error
     });
@@ -4476,6 +4494,18 @@ async function generateShopeeUgcImageDocs(input: {
   promptSet: ReturnType<typeof buildShopeeImagePromptSet>;
   sourceImageUrls: string[];
 }) {
+  const totalStartedAt = Date.now();
+  let loggingDurationMs = 0;
+  let blobUploadDurationMs = 0;
+  let imageRequestCount = 0;
+  const imageDurations: Record<string, number> = {};
+  const imagePromptLengths: Record<string, number> = {};
+  const timedLog = async (logInput: ShopeePackageStageLogInput) => {
+    const logStartedAt = Date.now();
+    await logShopeePackageStage(logInput);
+    loggingDurationMs += Date.now() - logStartedAt;
+  };
+
   const uniqueSourceImageUrls = Array.from(new Set(input.sourceImageUrls.filter((url) => Boolean(url?.trim())))).slice(0, 4);
   const referenceImages = await Promise.all(uniqueSourceImageUrls.map(fetchShopeeReferenceImage));
   if (referenceImages.length === 0) {
@@ -4491,14 +4521,56 @@ async function generateShopeeUgcImageDocs(input: {
   const generatedHashes = new Set<string>();
   const imageDocs = [];
 
+  await timedLog({
+    userId: input.userId,
+    jobId: input.jobId,
+    product: input.product,
+    step: "IMAGE_GENERATION_MODE",
+    status: "started",
+    message: "Shopee UGC images will be generated sequentially",
+    metadata: {
+      mode: "sequential",
+      reason: "Each image uses prior duplicate/source validation and Blob upload before the next image",
+      expectedImages: input.promptSet.prompts.length,
+      referenceImageCount: referenceImages.length,
+      maxAttemptsPerImage: OPENAI_IMAGE_MAX_ATTEMPTS
+    }
+  });
+
   for (const [index, promptItem] of input.promptSet.prompts.entries()) {
     const primaryReference = referenceImages[index % referenceImages.length];
     let generatedBuffer: Buffer | null = null;
     let lastError: unknown = null;
+    let imageLoggingDurationMs = 0;
+    const prompt = [
+      promptItem.prompt,
+      `Generate image ${index + 1} of 4 only. This image must have a unique angle, environment, distance, camera framing, hand position, and usage context compared with the other three images.`,
+      "Use all attached Shopee images as product identity references. Create a new realistic UGC lifestyle photo; do not copy, crop, resize, or reuse the original Shopee product image composition.",
+      "No text, no overlay, no product card, no catalog background, no studio packshot."
+    ].join("\n");
+    imagePromptLengths[`IMAGE_${index + 1}_PROMPT_LENGTH`] = prompt.length;
+
+    await timedLog({
+      userId: input.userId,
+      jobId: input.jobId,
+      product: input.product,
+      step: "IMAGE_PROMPT_LENGTH",
+      status: "success",
+      message: `UGC image ${index + 1} prompt length measured`,
+      metadata: {
+        imageIndex: index + 1,
+        imageCount: input.promptSet.prompts.length,
+        promptLength: prompt.length,
+        basePromptLength: promptItem.prompt.length,
+        addedInstructionLength: prompt.length - promptItem.prompt.length,
+        referenceImageCount: referenceImages.length
+      }
+    });
 
     for (let attempt = 1; attempt <= OPENAI_IMAGE_MAX_ATTEMPTS; attempt += 1) {
       try {
-        generatedBuffer = await generateShopeeUgcImageWithTracing({
+        imageRequestCount += 1;
+        const imageResult = await generateShopeeUgcImageWithTracing({
           userId: input.userId,
           jobId: input.jobId,
           product: input.product,
@@ -4507,13 +4579,12 @@ async function generateShopeeUgcImageDocs(input: {
           attempt,
           primaryReference,
           referenceImages: referenceImages.filter((_, referenceIndex) => referenceIndex !== index % referenceImages.length),
-          prompt: [
-            promptItem.prompt,
-            `Generate image ${index + 1} of 4 only. This image must have a unique angle, environment, distance, camera framing, hand position, and usage context compared with the other three images.`,
-            "Use all attached Shopee images as product identity references. Create a new realistic UGC lifestyle photo; do not copy, crop, resize, or reuse the original Shopee product image composition.",
-            "No text, no overlay, no product card, no catalog background, no studio packshot."
-          ].join("\n")
+          prompt
         });
+        generatedBuffer = imageResult.buffer;
+        imageLoggingDurationMs += imageResult.loggingDurationMs;
+        loggingDurationMs += imageResult.loggingDurationMs;
+        imageDurations[`IMAGE_${index + 1}_DURATION`] = imageResult.requestDurationMs;
         const generatedHash = hashImageBuffer(generatedBuffer);
         if (sourceHashes.has(generatedHash)) {
           throw new Error("OpenAI returned the original Shopee product image instead of a new UGC lifestyle image");
@@ -4540,7 +4611,8 @@ async function generateShopeeUgcImageDocs(input: {
 
     generatedHashes.add(generatedHash);
 
-    await logShopeePackageStage({
+    const blobStartedAt = Date.now();
+    await timedLog({
       userId: input.userId,
       jobId: input.jobId,
       product: input.product,
@@ -4556,6 +4628,7 @@ async function generateShopeeUgcImageDocs(input: {
 
     let uploadedImage: Awaited<ReturnType<typeof uploadAutoPostImage>>;
     try {
+      const uploadStartedAt = Date.now();
       uploadedImage = await uploadAutoPostImage({
         jobId: input.jobId ?? `shopee-${Date.now()}`,
         productId: input.product.productId,
@@ -4564,8 +4637,10 @@ async function generateShopeeUgcImageDocs(input: {
         mimeType: "image/png",
         kind: "image"
       });
+      blobUploadDurationMs += Date.now() - uploadStartedAt;
     } catch (error) {
-      await logShopeePackageStage({
+      blobUploadDurationMs += Date.now() - blobStartedAt;
+      await timedLog({
         userId: input.userId,
         jobId: input.jobId,
         product: input.product,
@@ -4581,7 +4656,7 @@ async function generateShopeeUgcImageDocs(input: {
       throw error;
     }
 
-    await logShopeePackageStage({
+    await timedLog({
       userId: input.userId,
       jobId: input.jobId,
       product: input.product,
@@ -4594,7 +4669,9 @@ async function generateShopeeUgcImageDocs(input: {
         imageUrl: uploadedImage.url,
         pathname: uploadedImage.pathname,
         contentType: uploadedImage.contentType,
-        sizeBytes: uploadedImage.sizeBytes
+        sizeBytes: uploadedImage.sizeBytes,
+        blobUploadDurationMs: Date.now() - blobStartedAt,
+        imageLoggingDurationMs
       }
     });
 
@@ -4625,6 +4702,41 @@ async function generateShopeeUgcImageDocs(input: {
     const imageDoc = await AiGeneratedImage.create(imagePayload);
     imageDocs.push(imageDoc);
   }
+
+  const totalImageDurationMs = Date.now() - totalStartedAt;
+  await timedLog({
+    userId: input.userId,
+    jobId: input.jobId,
+    product: input.product,
+    step: "IMAGE_REQUEST_COUNT",
+    status: "success",
+    message: "Shopee UGC image request count measured",
+    metadata: {
+      imageRequestCount,
+      expectedImages: input.promptSet.prompts.length,
+      maxAttemptsPerImage: OPENAI_IMAGE_MAX_ATTEMPTS,
+      mode: "sequential"
+    }
+  });
+  await timedLog({
+    userId: input.userId,
+    jobId: input.jobId,
+    product: input.product,
+    step: "TOTAL_IMAGE_DURATION",
+    status: "success",
+    message: "Shopee UGC image generation performance summary",
+    metadata: {
+      mode: "sequential",
+      imageRequestCount,
+      expectedImages: input.promptSet.prompts.length,
+      generatedImages: imageDocs.length,
+      ...imagePromptLengths,
+      ...imageDurations,
+      BLOB_UPLOAD_DURATION: blobUploadDurationMs,
+      LOGGING_DURATION: loggingDurationMs,
+      TOTAL_IMAGE_DURATION: totalImageDurationMs
+    }
+  });
 
   return imageDocs;
 }
