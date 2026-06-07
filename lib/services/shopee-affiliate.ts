@@ -3548,6 +3548,16 @@ function dedupeShopeeProducts(products: ShopeeProductRecord[]) {
   return deduped;
 }
 
+function getShopeeProductDedupeKey(product: ShopeeProductRecord) {
+  return String(product.productId || `${product.shopId}:${product.itemId}`);
+}
+
+function getRotatedShopeeCategories(categories: string[], seed = Math.random()) {
+  if (!categories.length) return [];
+  const offset = Math.floor(seed * categories.length) % categories.length;
+  return [...categories.slice(offset), ...categories.slice(0, offset)];
+}
+
 export async function selectShopeeProductsForPages(input: {
   userId: string;
   pageIds: string[];
@@ -3574,15 +3584,23 @@ export async function selectShopeeProductsForPages(input: {
   const limitPerCategory = Math.max(20, input.pageIds.length * Math.max(5, excludedProductIds.size + 5));
   const effectiveCategoryPriority = input.categoryPriority?.length ? input.categoryPriority : categories;
   const discoveredByCategory: ShopeeProductRecord[][] = [];
+  const discoveredCategoryHints = new Map<string, Set<string>>();
   const categoryFetchErrors: string[] = [];
   for (const category of discoveryCategories) {
     try {
-      discoveredByCategory.push(await provider.fetchProducts({
+      const categoryProducts = await provider.fetchProducts({
         sourceTag: input.sourceTag ?? "trending",
         keyword: input.keyword,
         category,
         limit: limitPerCategory
-      }));
+      });
+      discoveredByCategory.push(categoryProducts);
+      for (const product of categoryProducts) {
+        const key = getShopeeProductDedupeKey(product);
+        const hints = discoveredCategoryHints.get(key) ?? new Set<string>();
+        hints.add(category);
+        discoveredCategoryHints.set(key, hints);
+      }
     } catch (error) {
       categoryFetchErrors.push(`${category}: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -3610,6 +3628,12 @@ export async function selectShopeeProductsForPages(input: {
     return true;
   });
 
+  const rotatedCategories = getRotatedShopeeCategories(categories);
+  const productMatchesPreferredCategory = (product: ShopeeProductRecord, category: string) => {
+    const hintedCategories = discoveredCategoryHints.get(getShopeeProductDedupeKey(product));
+    return Boolean(hintedCategories?.has(category)) || isShopeeCategoryMatch(product.category, category);
+  };
+
   for (const pageId of input.pageIds) {
     const scored = [];
     for (const product of filteredProducts) {
@@ -3629,7 +3653,16 @@ export async function selectShopeeProductsForPages(input: {
     }
 
     const eligibleScored = scored.filter((item) => item.score.productScore >= 35);
-    const best = eligibleScored.length ? weightedRandomProduct(eligibleScored) : null;
+    const pageIndex = input.pageIds.indexOf(pageId);
+    const preferredCategory = rotatedCategories.length ? rotatedCategories[pageIndex % rotatedCategories.length] : "";
+    const preferredEligible = preferredCategory
+      ? eligibleScored.filter((item) => productMatchesPreferredCategory(item.product, preferredCategory))
+      : [];
+    const best = preferredEligible.length
+      ? weightedRandomProduct(preferredEligible)
+      : eligibleScored.length
+        ? weightedRandomProduct(eligibleScored)
+        : null;
 
     if (!best) {
       continue;
