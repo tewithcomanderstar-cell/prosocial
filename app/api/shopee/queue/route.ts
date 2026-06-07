@@ -48,6 +48,24 @@ function logQueueRoute(step: string, metadata: Record<string, unknown> = {}) {
   });
 }
 
+function withQueueRouteTimeout<T>(stage: string, timeoutMs: number, promise: Promise<T>) {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  const guardedPromise = promise.catch((error) => {
+    throw error;
+  });
+
+  return Promise.race([
+    guardedPromise,
+    new Promise<T>((_, reject) => {
+      timeout = setTimeout(() => {
+        reject(new Error(`${stage} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+    })
+  ]).finally(() => {
+    if (timeout) clearTimeout(timeout);
+  });
+}
+
 async function runQueueRouteStage<T>(
   stage: string,
   metadata: Record<string, unknown>,
@@ -100,7 +118,10 @@ async function runOptionalQueueRouteStage<T>(
   fn: () => Promise<T> | T
 ) {
   try {
-    return await runQueueRouteStage(stage, metadata, fn);
+    const hardTimeoutMs = Number(metadata.hardTimeoutMs ?? 4000);
+    return await runQueueRouteStage(stage, { ...metadata, hardTimeoutMs }, () =>
+      withQueueRouteTimeout(stage, hardTimeoutMs, Promise.resolve(fn()))
+    );
   } catch (error) {
     const serialized = serializeQueueRouteError(error);
     console.error("[QUEUE_ROUTE_OPTIONAL_STAGE_SKIPPED]", {
@@ -169,7 +190,7 @@ export async function GET() {
       productIds.length
         ? runOptionalQueueRouteStage(
             "RELATED_DB_QUERY_SHOPEE_PRODUCTS",
-            { userId, productIdsCount: productIds.length, maxTimeMS: 8000 },
+            { userId, productIdsCount: productIds.length, maxTimeMS: 8000, hardTimeoutMs: 4000 },
             [],
             () =>
               ShopeeProduct.find({ userId, productId: { $in: productIds } })
@@ -181,7 +202,7 @@ export async function GET() {
       aiPostIds.valid.length
         ? runOptionalQueueRouteStage(
             "RELATED_DB_QUERY_AI_POSTS",
-            { userId, aiPostIdsCount: aiPostIds.valid.length, maxTimeMS: 8000 },
+            { userId, aiPostIdsCount: aiPostIds.valid.length, maxTimeMS: 8000, hardTimeoutMs: 2500 },
             [],
             () =>
               AiGeneratedPost.find({ userId, _id: { $in: aiPostIds.valid } })
@@ -193,7 +214,7 @@ export async function GET() {
       postIds.valid.length
         ? runOptionalQueueRouteStage(
             "RELATED_DB_QUERY_POSTS",
-            { userId, postIdsCount: postIds.valid.length, maxTimeMS: 8000 },
+            { userId, postIdsCount: postIds.valid.length, maxTimeMS: 8000, hardTimeoutMs: 4000 },
             [],
             () =>
               Post.find({ userId, _id: { $in: postIds.valid } })
