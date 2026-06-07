@@ -32,6 +32,34 @@ export type ShopeeSourceTag = "trending" | "best_selling" | "top_search" | "best
 export type ShopeeCaptionStyle = "soft_sell" | "urgency" | "problem_solution" | "review_style" | "deal_alert" | "lifestyle";
 
 const SHOPEE_MAX_HASHTAGS = 5;
+const DISABLED_STORYBOARD_PRESENTATION_VALIDATION_RULES = [
+  "storyboard_caption_max_4_benefit_bullets",
+  "storyboard_caption_min_benefit_bullets",
+  "storyboard_caption_exact_benefit_bullets",
+  "storyboard_caption_required_benefit_count",
+  "storyboard_caption_max_lines",
+  "storyboard_caption_min_lines",
+  "storyboard_caption_max_sections",
+  "storyboard_caption_exact_structure",
+  "storyboard_caption_required_emoji_count",
+  "storyboard_caption_max_emoji_count",
+  "storyboard_caption_max_hashtags",
+  "storyboard_caption_min_hashtags",
+  "storyboard_caption_required_closing",
+  "storyboard_caption_required_purchase_reason",
+  "storyboard_caption_required_problem_line",
+  "storyboard_caption_required_solution_line",
+  "benefit_bullets",
+  "bullet_count",
+  "max_bullets",
+  "min_bullets",
+  "caption_structure",
+  "caption_sections",
+  "caption_format",
+  "presentation_rules"
+] as const;
+
+let storyboardValidationDisabledRulesLogged = false;
 
 export type ShopeeProductRecord = {
   productId: string;
@@ -2904,15 +2932,15 @@ function getStoryboardCaptionDebugPayload(input: {
     validatorName: input.validatorName ?? "validateStoryboardAffiliateCaption",
     validationRulesEnabled: [
       "NON_EMPTY",
-      "FIRST_LINE_IS_HOOK",
       "HAS_CTA",
       "HAS_SHOPEE_SHORT_LINK",
+      "MIN_20_CHARS",
+      "FACEBOOK_LENGTH_LIMIT",
       "HAS_PRICE_WHEN_PRICE_EXISTS",
       "NO_FORBIDDEN_SOURCE_LANGUAGE",
-      "MAX_4_BENEFIT_BULLETS",
-      "PROBLEM_SOLUTION_BENEFIT_CTA_FLOW",
       "STORYBOARD_REQUIRED"
-    ]
+    ],
+    validationRulesDisabled: DISABLED_STORYBOARD_PRESENTATION_VALIDATION_RULES
   };
 }
 
@@ -2954,8 +2982,11 @@ function validateStoryboardAffiliateCaption(caption: string, storyboard: ShopeeP
   const normalized = repairStoryboardAffiliateCaption(caption, affiliateLink);
   const failedRules: StoryboardCaptionFailedRule[] = [];
   const lines = normalized.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const firstLine = lines[0] ?? "";
   const forbidden = /จากรูปสินค้า|จากภาพสินค้า|จากชื่อสินค้า|จากข้อมูลสินค้า|จากข้อมูลที่ระบุ|เห็นได้จากภาพ|ใช้งานได้จากชื่อสินค้า|เหมาะสำหรับจากชื่อสินค้า|จากรายละเอียดสินค้า|จากสเปกสินค้า|ตามข้อมูลสินค้า|ตามภาพสินค้า|ตามข้อมูล|ตามภาพ/iu;
+  if (!storyboardValidationDisabledRulesLogged) {
+    console.info("[STORYBOARD_VALIDATION_RULES_DISABLED]", DISABLED_STORYBOARD_PRESENTATION_VALIDATION_RULES);
+    storyboardValidationDisabledRulesLogged = true;
+  }
   console.info("[CAPTION_DEBUG_BEFORE_VALIDATION]", getStoryboardCaptionDebugPayload({
     jobId,
     product,
@@ -2972,13 +3003,20 @@ function validateStoryboardAffiliateCaption(caption: string, storyboard: ShopeeP
       actual: "empty caption"
     });
   }
-  if (!firstLine || /^(?:💰|🛒|📍|#)/u.test(firstLine)) {
+  if (normalized.length > 0 && normalized.length < 20) {
     failedRules.push({
-      rule: "FIRST_LINE_IS_HOOK",
-      message: "First line must be a Storyboard hook/pain point, not price/CTA/link/hashtag",
-      failedLine: firstLine,
-      expected: "hook from primaryPainPoint/problemSolved",
-      actual: firstLine || "missing first line"
+      rule: "MIN_20_CHARS",
+      message: "Caption is too short",
+      expected: "caption length greater than 20 characters",
+      actual: `${normalized.length} characters`
+    });
+  }
+  if (normalized.length >= 63000) {
+    failedRules.push({
+      rule: "FACEBOOK_LENGTH_LIMIT",
+      message: "Caption exceeds Facebook post length limit",
+      expected: "caption length below Facebook limit",
+      actual: `${normalized.length} characters`
     });
   }
   if (forbidden.test(normalized)) {
@@ -2992,14 +3030,6 @@ function validateStoryboardAffiliateCaption(caption: string, storyboard: ShopeeP
     });
   }
   const bulletCount = (normalized.match(/^(?:🔋|💨|🔦|📱|🏃|💪|🎯|🏸|🌶️|🍽️|😋|🏠|✨|💖|🌸|💄|📸|🚶|🎥|🥤|🍳|💧|🎒|✈️|🏕️|🧹|👍|✅)\s/gmu) || []).length;
-  if (bulletCount > 4) {
-    failedRules.push({
-      rule: "MAX_4_BENEFIT_BULLETS",
-      message: "Caption has more than 4 benefit bullets",
-      expected: "4 benefit bullets or fewer",
-      actual: `${bulletCount} bullets`
-    });
-  }
   if (!/🛒|กดสั่ง|ลิงก์ด้านล่าง|ดูรายละเอียด/iu.test(normalized)) {
     failedRules.push({
       rule: "HAS_CTA",
@@ -3025,16 +3055,6 @@ function validateStoryboardAffiliateCaption(caption: string, storyboard: ShopeeP
         actual: "price line not found"
       });
     }
-  }
-  const hasSolution = /✅|ตัวช่วย|สะดวก|อุ่นใจ|ง่าย|เอาอยู่|ช่วย/iu.test(normalized);
-  const hasBenefits = bulletCount >= 1;
-  if (!hasSolution || !hasBenefits) {
-    failedRules.push({
-      rule: "PROBLEM_SOLUTION_BENEFIT_CTA_FLOW",
-      message: "Caption must contain problem → solution → benefit → CTA flow",
-      expected: "hook, solution line, benefit bullets, CTA",
-      actual: `hasSolution=${hasSolution}; bulletCount=${bulletCount}`
-    });
   }
   if (!validateShopeeProductStoryboard(storyboard)) {
     failedRules.push({
@@ -3062,6 +3082,14 @@ function validateStoryboardAffiliateCaption(caption: string, storyboard: ShopeeP
     validatorName: "validateStoryboardAffiliateCaption",
     captionLength: normalized.length,
     bulletCount
+  });
+  console.info("[CAPTION_ACCEPTED_FROM_STORYBOARD]", {
+    jobId: jobId ?? "",
+    productId: product.productId,
+    productName: product.productName,
+    storyboardType: storyboard.productType,
+    benefitCount: bulletCount,
+    captionLength: normalized.length
   });
   return normalized;
 }
