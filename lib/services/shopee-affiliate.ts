@@ -1572,6 +1572,40 @@ function stripShopeeMarketplaceNoise(value: string) {
     .trim();
 }
 
+const SHOPEE_TITLE_NOISE_WORDS = [
+  "โคดัง",
+  "โค้ด",
+  "โค๊ด",
+  "code",
+  "cod",
+  "พร้อมส่ง",
+  "ของพร้อมส่ง",
+  "ส่งฟรี",
+  "ฟรีส่ง",
+  "flash sale",
+  "sale",
+  "deal",
+  "โปร",
+  "ลดราคา",
+  "ราคาถูก",
+  "ถูกมาก",
+  "ของแท้",
+  "ร้านไทย",
+  "เก็บเงินปลายทาง"
+] as const;
+
+function getShopeeCleanedProductTitleInfo(productName?: string) {
+  const rawTitle = normalizeTextEncoding(productName ?? "").trim();
+  const cleanedTitle = cleanShopeeProductTitleForContent(rawTitle);
+  const lowerRawTitle = rawTitle.toLowerCase();
+  const removedNoiseWords = SHOPEE_TITLE_NOISE_WORDS.filter((word) => lowerRawTitle.includes(word.toLowerCase()));
+  return {
+    rawTitle,
+    cleanedTitle: cleanedTitle || rawTitle,
+    removedNoiseWords
+  };
+}
+
 export function cleanShopeeProductTitleForContent(productName?: string) {
   const source = normalizeTextEncoding(productName ?? "").trim();
   if (!source) return "";
@@ -3756,7 +3790,56 @@ export async function generateShopeeCaption(input: {
   jobId?: string;
 }) {
   const { product } = input;
+  const titleInfo = getShopeeCleanedProductTitleInfo(product.productName);
+  const imageCount = [product.productImageUrl, ...(product.productImageUrls ?? [])].filter((url) => Boolean(url?.trim())).length;
+
+  await logShopeePackageStage({
+    userId: input.userId,
+    jobId: input.jobId,
+    product,
+    step: "PRODUCT_TITLE_CLEANED",
+    status: "success",
+    message: "Shopee product title cleaned before Storyboard",
+    metadata: {
+      productId: product.productId,
+      rawTitle: titleInfo.rawTitle,
+      cleanedTitle: titleInfo.cleanedTitle,
+      removedNoiseWords: titleInfo.removedNoiseWords
+    }
+  });
+
+  await logShopeePackageStage({
+    userId: input.userId,
+    jobId: input.jobId,
+    product,
+    step: "PRODUCT_VALIDATION_STARTED",
+    status: "started",
+    message: "Validating minimum Shopee product data before Storyboard",
+    metadata: {
+      productId: product.productId,
+      cleanedTitle: titleInfo.cleanedTitle,
+      rawTitle: titleInfo.rawTitle,
+      imageCount,
+      shortLinkExists: Boolean(input.affiliateLink?.trim())
+    }
+  });
+
   if (!hasShopeeProductName(product)) {
+    await logShopeePackageStage({
+      userId: input.userId,
+      jobId: input.jobId,
+      product,
+      step: "PRODUCT_VALIDATION_FAILED",
+      status: "failed",
+      message: "Product validation failed before Storyboard: missing title",
+      metadata: {
+        productId: product.productId,
+        rawTitle: titleInfo.rawTitle,
+        cleanedTitle: titleInfo.cleanedTitle,
+        reason: "missing_title",
+        validatorName: "minimumProductData"
+      }
+    });
     throw new ShopeeProviderError(
       `caption generation failed: SKIP_PRODUCT_AND_FETCH_NEW_PRODUCT missing product name for ${product.productId}`,
       422,
@@ -3765,6 +3848,21 @@ export async function generateShopeeCaption(input: {
     );
   }
   if (!hasShopeeProductImage(product)) {
+    await logShopeePackageStage({
+      userId: input.userId,
+      jobId: input.jobId,
+      product,
+      step: "PRODUCT_VALIDATION_FAILED",
+      status: "failed",
+      message: "Product validation failed before Storyboard: missing image",
+      metadata: {
+        productId: product.productId,
+        rawTitle: titleInfo.rawTitle,
+        cleanedTitle: titleInfo.cleanedTitle,
+        reason: "missing_images",
+        validatorName: "minimumProductData"
+      }
+    });
     throw new ShopeeProviderError(
       `caption generation failed: SKIP_PRODUCT_AND_FETCH_NEW_PRODUCT missing product image for ${product.productId}`,
       422,
@@ -3772,28 +3870,89 @@ export async function generateShopeeCaption(input: {
       "internal_api"
     );
   }
+  if (!input.affiliateLink?.trim()) {
+    await logShopeePackageStage({
+      userId: input.userId,
+      jobId: input.jobId,
+      product,
+      step: "PRODUCT_VALIDATION_FAILED",
+      status: "failed",
+      message: "Product validation failed before Storyboard: missing short link",
+      metadata: {
+        productId: product.productId,
+        rawTitle: titleInfo.rawTitle,
+        cleanedTitle: titleInfo.cleanedTitle,
+        reason: "missing_shortlink",
+        validatorName: "minimumProductData"
+      }
+    });
+    throw new ShopeeProviderError(
+      `caption generation failed: SKIP_PRODUCT_AND_FETCH_NEW_PRODUCT missing short link for ${product.productId}`,
+      422,
+      "missing_shortlink",
+      "internal_api"
+    );
+  }
+
   await logShopeePackageStage({
     userId: input.userId,
     jobId: input.jobId,
     product,
+    step: "PRODUCT_VALIDATION_PASSED",
+    status: "success",
+    message: "Product passed minimum validation before Storyboard",
+    metadata: {
+      productId: product.productId,
+      cleanedTitle: titleInfo.cleanedTitle,
+      validatorName: "minimumProductData"
+    }
+  });
+
+  await logShopeePackageStage({
+    userId: input.userId,
+    jobId: input.jobId,
+    product,
+    step: "STORYBOARD_INPUT_READY",
+    status: "success",
+    message: "Product input is ready for Storyboard",
+    metadata: {
+      productId: product.productId,
+      cleanedTitle: titleInfo.cleanedTitle,
+      descriptionExists: Boolean(product.productDescription?.trim()),
+      imageCount,
+      shortLinkExists: Boolean(input.affiliateLink?.trim())
+    }
+  });
+
+  const productForStoryboard: ShopeeProductRecord = {
+    ...product,
+    productName: titleInfo.cleanedTitle || product.productName
+  };
+
+  await logShopeePackageStage({
+    userId: input.userId,
+    jobId: input.jobId,
+    product: productForStoryboard,
     step: "STORYBOARD_STARTED",
     status: "started",
     message: "Creating Product Storyboard for Shopee caption",
     metadata: {
-      hasProductName: hasShopeeProductName(product),
-      hasProductImage: hasShopeeProductImage(product),
-      imageCount: [product.productImageUrl, ...(product.productImageUrls ?? [])].filter(Boolean).length
+      rawTitle: titleInfo.rawTitle,
+      cleanedTitle: titleInfo.cleanedTitle,
+      hasProductName: hasShopeeProductName(productForStoryboard),
+      hasProductImage: hasShopeeProductImage(productForStoryboard),
+      imageCount
     }
   });
 
   let storyboard: ShopeeProductStoryboard;
   try {
-    storyboard = createValidatedShopeeProductStoryboard(product);
+    storyboard = createValidatedShopeeProductStoryboard(productForStoryboard);
   } catch (error) {
     await logShopeePackageStage({
       userId: input.userId,
       jobId: input.jobId,
-      product,
+      product: productForStoryboard,
       step: "STORYBOARD_FAILED",
       status: "failed",
       message: "Product Storyboard creation failed",
@@ -3805,7 +3964,7 @@ export async function generateShopeeCaption(input: {
   await logShopeePackageStage({
     userId: input.userId,
     jobId: input.jobId,
-    product,
+    product: productForStoryboard,
     step: "STORYBOARD_CREATED",
     status: "success",
     message: "Product Storyboard created",
@@ -3823,7 +3982,7 @@ export async function generateShopeeCaption(input: {
   await logShopeePackageStage({
     userId: input.userId,
     jobId: input.jobId,
-    product,
+    product: productForStoryboard,
     step: "CAPTION_STARTED",
     status: "started",
     message: "Generating caption from Product Storyboard",
@@ -3836,7 +3995,7 @@ export async function generateShopeeCaption(input: {
   let storyboardCaption: string;
   try {
     storyboardCaption = buildShopeeStoryboardCaption({
-      product,
+      product: productForStoryboard,
       storyboard,
       affiliateLink: input.affiliateLink,
       jobId: input.jobId
@@ -3861,7 +4020,7 @@ export async function generateShopeeCaption(input: {
     await logShopeePackageStage({
       userId: input.userId,
       jobId: input.jobId,
-      product,
+      product: productForStoryboard,
       step: "CAPTION_FAILED",
       status: "failed",
       message: "Caption generation from Product Storyboard failed",
@@ -3876,7 +4035,7 @@ export async function generateShopeeCaption(input: {
   await logShopeePackageStage({
     userId: input.userId,
     jobId: input.jobId,
-    product,
+    product: productForStoryboard,
     step: "CAPTION_CREATED",
     status: "success",
     message: "Caption created from Product Storyboard",
