@@ -1574,6 +1574,9 @@ function getShopeeShortReviewProductName(productName?: string) {
     [/แก้ว|tumbler|cup/iu, () => /หลอด|straw/.test(haystack) ? "แก้วเก็บอุณหภูมิพร้อมหลอด 🥤" : "แก้วเก็บความเย็นพกพา 🥤"],
     [/โคมไฟ\s*LED|โคมไฟ|lamp|light/iu, () => /อ่าน|หนังสือ|ถนอม|ตา/.test(haystack) ? "โคมไฟตั้งโต๊ะถนอมสายตา 💡" : /ปรับ|ระดับ|แสง/.test(haystack) ? "โคมไฟอ่านหนังสือปรับแสงได้ 💡" : "โคมไฟอ่านหนังสือถนอมสายตา 💡"],
     [/ถุงเท้า|sock/iu, () => /yonex/.test(haystack) ? "ถุงเท้ากีฬากระชับเท้า YONEX 🏃" : /วิ่ง|running/.test(haystack) ? "ถุงเท้าสำหรับวิ่งและออกกำลังกาย 🏃" : "ถุงเท้ากีฬาระบายอากาศ 🏃"],
+    [/สร้อย|สร้อยคอ|necklace|จี้|pendant|เครื่องประดับ|jewelry/iu, () => /จี้|pendant/.test(haystack) ? "สร้อยคอพร้อมจี้สไตล์หรู 💎" : "สร้อยคอแฟชั่นลุคเรียบหรู 💎"],
+    [/แหวน|ring/iu, () => "แหวนแฟชั่นแต่งลุคเรียบหรู 💎"],
+    [/กำไล|bracelet|bangle/iu, () => "กำไลแฟชั่นแมตช์ง่าย 💎"],
     [/ต่างหู|earring/iu, () => /โบฮีเมียน|boho|bohemian/.test(haystack) ? "ต่างหูโบฮีเมียนแต่งลาย ✨" : "ต่างหูแฟชั่นสไตล์วินเทจ ✨"],
     [/พัดลมพกพา|fan/iu, () => "พัดลมพกพาชาร์จ USB 🌀"],
     [/สมาร์ทวอทช์|smart\s*watch|watch/iu, () => /awei/.test(haystack) ? "สมาร์ทวอทช์ฟังก์ชันครบ Awei ⌚" : "สมาร์ทวอทช์ฟังก์ชันครบ ⌚"],
@@ -2351,6 +2354,7 @@ function getShopeeStoryboardEmoji(productType: string) {
   if (/โคมไฟ|ไฟ/.test(productType)) return "💡";
   if (/หูฟัง|มือถือ|แกดเจ็ต|สมาร์ทวอทช์/.test(productType)) return "📱";
   if (/สกินแคร์|เซรั่ม|กันแดด|ผิว/.test(productType)) return "✨";
+  if (/สร้อย|เครื่องประดับ|จี้|ต่างหู|แหวน|กำไล|jewelry|necklace/i.test(productType)) return "💎";
   if (/กระเป๋า/.test(productType)) return "🎒";
   if (/รถ|จัมป์สตาร์ท|ยาง/.test(productType)) return "🚗";
   if (/อาหาร|ขนม|น้ำพริก|ครัว/.test(productType)) return "🍳";
@@ -2361,7 +2365,7 @@ function getShopeeStoryboardEmoji(productType: string) {
 
 function buildShopeeStoryboardName(fallback: string, emoji: string, product?: ShopeeProductRecord) {
   const name = getShopeeCaptionProductName(product?.productName || fallback)
-    .replace(/\s+[✨🔥😍😋💯👍🎯🛒💥⭐📌📍🥤☕🧊💡🏠🏃⚽🎾🚗🍳📱💻💚💖👟📷⌚🎒🏸🦷🌀]+$/u, "")
+    .replace(/\s+[✨🔥😍😋💯👍🎯🛒💥⭐📌📍🥤☕🧊💡🏠🏃⚽🎾🚗🍳📱💻💚💖💎👟📷⌚🎒🏸🦷🌀]+$/u, "")
     .trim();
   const safeName = name.length >= 8 && !/^(?:สินค้า|ไอเทม|ของใช้ทั่วไป)$/iu.test(name) ? name : fallback;
   return compactProductText(`${safeName} ${emoji}`.trim(), 64);
@@ -2394,6 +2398,7 @@ function getShopeeStoryboardProductGroup(storyboard: Pick<ShopeeProductStoryboar
   if (/ลูกแบด|แบด|กีฬา|วิ่ง|ฟิตเนส|รองเท้า|ถุงเท้า/i.test(haystack)) return "sports";
   if (/อาหาร|ขนม|น้ำพริก|กาแฟ|ชา|เครื่องดื่ม/i.test(haystack) && !/อาหารเสริม|วิตามิน|เวย์|โปรตีน/i.test(haystack)) return "food";
   if (/สกินแคร์|เซรั่ม|กันแดด|ผิว|เครื่องสำอาง|เวชสำอาง/i.test(haystack)) return "beauty";
+  if (/สร้อย|สร้อยคอ|เครื่องประดับ|จี้|ต่างหู|แหวน|กำไล|jewelry|necklace|earring|ring|bracelet/i.test(haystack)) return "jewelry";
   if (/กล้อง|มือถือ|หูฟัง|สมาร์ทวอทช์|แกดเจ็ต|ลำโพง/i.test(haystack)) return "electronics";
   if (/ครัว|แก้ว|กระติก|ขวดน้ำ|ถาดน้ำแข็ง|หม้อ|กระทะ/i.test(haystack)) return "kitchen";
   if (/กระเป๋า|เดินทาง|แคมป์|เที่ยว/i.test(haystack)) return "travel";
@@ -2442,6 +2447,13 @@ function enrichShopeeStoryboardForAffiliateReview(
       dailyBenefit: "หยิบใช้ใน routine ประจำวันได้ไม่ยุ่งยาก",
       emotionalBenefit: "เพิ่มความมั่นใจในวันที่ต้องออกไปข้างนอก",
       purchaseReason: "เหมาะกับคนที่อยากมีไอเทมดูแลตัวเองไว้ใช้ประจำ"
+    },
+    jewelry: {
+      primaryPainPoint: "แต่งตัวเรียบ ๆ แล้วอยากให้ลุคดูมีอะไรขึ้น",
+      problemSolved: "ช่วยเพิ่มดีเทลให้ลุคดูเรียบหรูขึ้นโดยไม่ต้องแต่งเยอะ",
+      dailyBenefit: "ใส่คู่กับเสื้อผ้าเรียบ ๆ แล้วช่วยให้ลุคดูครบขึ้น",
+      emotionalBenefit: "เพิ่มความมั่นใจเวลาแต่งตัวออกไปข้างนอก",
+      purchaseReason: "เหมาะกับคนที่ชอบเครื่องประดับโทนเรียบหรูและแมตช์ง่าย"
     },
     electronics: {
       primaryPainPoint: "อยากใช้งานหรือทำคอนเทนต์ให้สะดวกขึ้น",
@@ -2620,6 +2632,26 @@ const SHOPEE_STORYBOARD_RULES: ShopeeStoryboardRule[] = [
     })
   },
   {
+    pattern: /สร้อย|สร้อยคอ|necklace|จี้|pendant|เครื่องประดับ|jewelry|ต่างหู|earring|แหวน|ring|กำไล|bracelet|bangle/i,
+    build: (product, haystack) => makeShopeeStoryboard(product, {
+      productType: /ต่างหู|earring/i.test(haystack)
+        ? "ต่างหูแฟชั่น"
+        : /แหวน|ring/i.test(haystack)
+          ? "แหวนแฟชั่น"
+          : /กำไล|bracelet|bangle/i.test(haystack)
+            ? "กำไลแฟชั่น"
+            : "สร้อยคอ / เครื่องประดับ",
+      whatItIs: "เครื่องประดับสำหรับเพิ่มดีเทลให้ลุคแต่งตัว",
+      mainUseCase: "ใส่แมตช์กับเสื้อผ้าเวลาออกไปข้างนอก ไปทำงาน ไปเที่ยว หรือถ่ายรูป",
+      targetUser: "คนที่ชอบเครื่องประดับโทนเรียบหรูและอยากให้ลุคดูมีดีเทลขึ้น",
+      keySellingPoint: /จี้|pendant|สร้อย|necklace/i.test(haystack)
+        ? "เส้นเล็กกำลังดี ใส่แล้วช่วยให้ช่วงคอดูมีดีเทลและลุคดูเรียบหรูขึ้น"
+        : "ช่วยเติมดีเทลให้ลุคโดยไม่ต้องแต่งเยอะ",
+      usageScene: "ใส่คู่กับชุดทำงาน ชุดไปเที่ยว หรือวันที่อยากให้ลุคดูเรียบร้อยขึ้น",
+      captionAngle: "ใส่คู่กับเสื้อเรียบ ๆ แล้วช่วยให้ลุคดูมีอะไรขึ้น เหมาะกับคนชอบเครื่องประดับสไตล์เรียบหรู"
+    })
+  },
+  {
     pattern: /กระเป๋า|bag|เป้|คาดอก|crossbody|wallet/i,
     build: (product, haystack) => makeShopeeStoryboard(product, {
       productType: /คาดอก|crossbody/i.test(haystack) ? "กระเป๋าคาดอก" : "กระเป๋าพกพา",
@@ -2728,7 +2760,7 @@ const SHOPEE_STORYBOARD_RULES: ShopeeStoryboardRule[] = [
 function inferShopeeFallbackProductType(product: ShopeeProductRecord, haystack: string) {
   const title = normalizeTextEncoding(product.productName || "");
   const simpleName = getShopeeCaptionProductName(title)
-    .replace(/[✨🔥😍😋💯👍🎯🛒💥⭐📌📍🥤☕🧊💡🏠🏃⚽🎾🚗🍳📱💻💚💖👟📷⌚🎒🏸🦷🌀]+/gu, "")
+    .replace(/[✨🔥😍😋💯👍🎯🛒💥⭐📌📍🥤☕🧊💡🏠🏃⚽🎾🚗🍳📱💻💚💖💎👟📷⌚🎒🏸🦷🌀]+/gu, "")
     .replace(/\s+/g, " ")
     .trim();
 
@@ -2742,6 +2774,7 @@ function inferShopeeFallbackProductType(product: ShopeeProductRecord, haystack: 
     [/เวย์|whey|protein|โปรตีน/i, "เวย์โปรตีน"],
     [/อาหารเสริม|supplement|วิตามิน|vitamin|ผลิตภัณฑ์สุขภาพ/i, "อาหารเสริม"],
     [/สกินแคร์|skincare|serum|เซรั่ม|ครีม|กันแดด|sunscreen|spf|ผิว|cosmetic/i, "สกินแคร์"],
+    [/สร้อย|สร้อยคอ|necklace|จี้|pendant|เครื่องประดับ|jewelry|ต่างหู|earring|แหวน|ring|กำไล|bracelet|bangle/i, /ต่างหู|earring/i.test(haystack) ? "ต่างหูแฟชั่น" : /แหวน|ring/i.test(haystack) ? "แหวนแฟชั่น" : /กำไล|bracelet|bangle/i.test(haystack) ? "กำไลแฟชั่น" : "สร้อยคอ / เครื่องประดับ"],
     [/แก้ว|tumbler|cup|กระติก|ขวดน้ำ|bottle|เก็บความเย็น|เก็บอุณหภูมิ/i, "แก้วเก็บอุณหภูมิ"],
     [/ถาดน้ำแข็ง|น้ำแข็ง/i, "ถาดทำน้ำแข็ง"],
     [/ครัว|kitchen|หม้อ|กระทะ|กล่องอาหาร|ช้อน|จาน/i, "อุปกรณ์ครัว"],
@@ -2766,12 +2799,19 @@ function createFallbackShopeeProductStoryboard(product: ShopeeProductRecord, hay
     removeShopeeProductNameFromText(product.productDescription || "", product.productName),
     90
   );
-  const mainUseCase = usageFromDescription || `หยิบใช้${productType}ในสถานการณ์ที่ต้องการ`;
-  const targetUser = `คนที่กำลังมองหา${productType}ไว้ใช้งาน`;
+  const isJewelry = /สร้อย|เครื่องประดับ|จี้|ต่างหู|แหวน|กำไล|jewelry|necklace|earring|bracelet/i.test(productType);
+  const mainUseCase = isJewelry
+    ? "ใส่แมตช์กับชุดทำงาน ชุดไปเที่ยว หรือวันที่อยากให้ลุคดูมีดีเทลขึ้น"
+    : usageFromDescription || `หยิบใช้${productType}ในสถานการณ์ที่ต้องการ`;
+  const targetUser = isJewelry
+    ? "คนที่ชอบเครื่องประดับและอยากเพิ่มดีเทลให้ลุคแต่งตัว"
+    : `คนที่กำลังมองหา${productType}ไว้ใช้งาน`;
   const usageScene = /รถ/.test(productType)
     ? "ในรถหรือระหว่างเดินทาง"
     : /กีฬา|วิ่ง|แบด|รองเท้า|ถุงเท้า/.test(productType)
       ? "ตอนออกกำลังกายหรือทำกิจกรรม"
+      : isJewelry
+        ? "วันที่แต่งตัวไปทำงาน ไปเที่ยว หรือถ่ายรูป"
       : /ครัว|แก้ว|กระติก|น้ำแข็ง|อาหาร|ขนม|น้ำพริก/.test(productType)
         ? "ในครัวหรือช่วงใช้งานที่บ้าน"
         : /สกินแคร์|อาหารเสริม|วิตามิน|เวย์|โปรตีน/.test(productType)
@@ -2783,9 +2823,13 @@ function createFallbackShopeeProductStoryboard(product: ShopeeProductRecord, hay
     whatItIs: simpleName || productType,
     mainUseCase,
     targetUser,
-    keySellingPoint: `ช่วยให้หยิบใช้${productType}ได้สะดวกขึ้นเวลาต้องใช้จริง`,
+    keySellingPoint: isJewelry
+      ? "ช่วยเติมดีเทลให้ลุคดูเรียบหรูขึ้นโดยไม่ต้องแต่งเยอะ"
+      : `ช่วยให้หยิบใช้${productType}ได้สะดวกขึ้นเวลาต้องใช้จริง`,
     usageScene,
-    captionAngle: `เล่าประโยชน์ของ${productType}ในมุมใช้งานจริงแบบสั้นและอ่านง่าย`
+    captionAngle: isJewelry
+      ? "ใส่คู่กับเสื้อผ้าเรียบ ๆ แล้วช่วยให้ลุคดูมีอะไรขึ้น เหมาะกับคนชอบเครื่องประดับสไตล์เรียบหรู"
+      : `เล่าประโยชน์ของ${productType}ในมุมใช้งานจริงแบบสั้นและอ่านง่าย`
   });
 }
 
@@ -2834,6 +2878,7 @@ function getShopeeStoryboardBenefitEmojis(productType: string) {
   if (/ลูกแบด|กีฬา|วิ่ง|รองเท้า|ถุงเท้า/.test(productType)) return ["🏃", "💪", "🎯", "🏸"];
   if (/อาหาร|ขนม|น้ำพริก/.test(productType) && !/อาหารเสริม|วิตามิน|เวย์|โปรตีน/.test(productType)) return ["🌶️", "🍽️", "😋", "🏠"];
   if (/สกินแคร์|เซรั่ม|กันแดด|ผิว/.test(productType)) return ["✨", "💖", "🌸", "💄"];
+  if (/สร้อย|เครื่องประดับ|จี้|ต่างหู|แหวน|กำไล|jewelry|necklace/.test(productType)) return ["💎", "👗", "🎁", "✨"];
   if (/กล้อง|มือถือ|หูฟัง|สมาร์ทวอทช์|แกดเจ็ต/.test(productType)) return ["📱", "📸", "🚶", "🎥"];
   if (/ครัว|แก้ว|กระติก|ขวดน้ำ|ถาดน้ำแข็ง/.test(productType)) return ["🥤", "🍳", "💧", "🏠"];
   if (/กระเป๋า|เดินทาง|แคมป์|เที่ยว/.test(productType)) return ["🎒", "✈️", "🏕️", "🚶"];
@@ -2846,6 +2891,9 @@ function formatShopeeStoryboardPriceLine(product: ShopeeProductRecord, storyboar
     ? product.discountPrice
     : product.productPrice;
   if (typeof numericPrice === "number" && Number.isFinite(numericPrice)) {
+    if (/สร้อย|เครื่องประดับ|จี้|ต่างหู|แหวน|กำไล|jewelry|necklace/.test(storyboard.productType)) {
+      return `${price} สำหรับคนชอบเครื่องประดับโทนเรียบหรู`;
+    }
     if (numericPrice < 300) return `${price} ของมันต้องมี`;
     if (numericPrice > 1000) return `${price} คุ้มสำหรับคนใช้งานจริง`;
   }
