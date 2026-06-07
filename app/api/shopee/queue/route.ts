@@ -137,15 +137,18 @@ async function runOptionalQueueRouteStage<T>(
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const routeStartedAt = Date.now();
   logQueueRoute("QUEUE_ROUTE_STARTED", { method: "GET" });
   let userId = "";
   try {
+    const url = new URL(request.url);
+    const includeAiPostPreview = url.searchParams.get("includeAiPostPreview") === "true";
     userId = await runQueueRouteStage("REQUIRE_AUTH", {}, () => requireAuth());
     logQueueRoute("QUEUE_ROUTE_INPUT", {
       userId,
-      authenticated: true
+      authenticated: true,
+      includeAiPostPreview
     });
 
     const queue = await runQueueRouteStage("QUEUE_DB_QUERY", { userId, limit: 100 }, () =>
@@ -166,7 +169,7 @@ export async function GET() {
     });
 
     const productIds = [...new Set(queue.map((item) => item.productId).filter(Boolean))];
-    const aiPostIds = safeObjectIdStrings(queue.map((item) => item.aiGeneratedPostId));
+    const aiPostIds = includeAiPostPreview ? safeObjectIdStrings(queue.map((item) => item.aiGeneratedPostId)) : { valid: [], invalid: [] };
     const postIds = safeObjectIdStrings(queue.map((item) => item.postId));
     if (aiPostIds.invalid.length || postIds.invalid.length) {
       logQueueRoute("QUEUE_ROUTE_INPUT", {
@@ -183,7 +186,8 @@ export async function GET() {
       userId,
       productIdsCount: productIds.length,
       aiPostIdsCount: aiPostIds.valid.length,
-      postIdsCount: postIds.valid.length
+      postIdsCount: postIds.valid.length,
+      includeAiPostPreview
     });
 
     const [products, aiPosts, posts] = await Promise.all([
@@ -199,7 +203,7 @@ export async function GET() {
                 .lean()
           )
         : Promise.resolve([]),
-      aiPostIds.valid.length
+      includeAiPostPreview && aiPostIds.valid.length
         ? runOptionalQueueRouteStage(
             "RELATED_DB_QUERY_AI_POSTS",
             { userId, aiPostIdsCount: aiPostIds.valid.length, maxTimeMS: 8000, hardTimeoutMs: 2500 },
@@ -233,6 +237,7 @@ export async function GET() {
       productIdsCount: productIds.length,
       aiPostIdsCount: aiPostIds.valid.length,
       postIdsCount: postIds.valid.length,
+      includeAiPostPreview,
       productsFound: products.length,
       aiPostsFound: aiPosts.length,
       postsFound: posts.length
@@ -242,6 +247,7 @@ export async function GET() {
       productIdsCount: productIds.length,
       aiPostIdsCount: aiPostIds.valid.length,
       postIdsCount: postIds.valid.length,
+      includeAiPostPreview,
       productsFound: products.length,
       aiPostsFound: aiPosts.length,
       postsFound: posts.length
