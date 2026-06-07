@@ -1616,6 +1616,21 @@ async function queueShopeeAutoPostsForConfig(
 
   await logShopeeStep({
     config,
+    step: "PRODUCT_FETCH_STARTED",
+    status: "started",
+    message: "Fetching Shopee products for this auto-post run",
+    metadata: {
+      sourceTag: config.shopeeSourceTag ?? "trending",
+      keyword: config.shopeeKeyword ?? "",
+      category: normalizeShopeeCategory(config.shopeeCategory),
+      categories: normalizeShopeeCategories(config.shopeeCategories?.length ? config.shopeeCategories : config.shopeeCategory),
+      pageCount: eligiblePageIds.length,
+      workflowRunId: records.workflowRunId
+    }
+  });
+
+  await logShopeeStep({
+    config,
     step: "FETCH_SHOPEE_PRODUCTS",
     status: "started",
     message: "Fetching and scoring Shopee products",
@@ -1640,7 +1655,19 @@ async function queueShopeeAutoPostsForConfig(
     maxPrice: config.shopeeMaxPrice ?? 0,
     minRating: config.shopeeMinRating ?? 0,
     minSales: config.shopeeMinSales ?? 0,
-    minDiscountPercent: config.shopeeMinDiscountPercent ?? 0
+      minDiscountPercent: config.shopeeMinDiscountPercent ?? 0
+  });
+  await logShopeeStep({
+    config,
+    step: "PRODUCT_FETCHED",
+    status: selectedProducts.length ? "success" : "failed",
+    message: selectedProducts.length ? `Fetched ${selectedProducts.length} Shopee product candidate(s)` : "No Shopee product candidates fetched",
+    metadata: {
+      selectedCount: selectedProducts.length,
+      productIds: selectedProducts.map((selected) => selected.product.productId),
+      productNames: selectedProducts.map((selected) => selected.product.productName),
+      workflowRunId: records.workflowRunId
+    }
   });
   await logShopeeStep({
     config,
@@ -1725,24 +1752,82 @@ async function queueShopeeAutoPostsForConfig(
       imageHash
     });
     const captionProductName = getShopeeCaptionProductName(selected.product.productName);
-    const post = await Post.create({
-      userId: config.userId,
-      title: `Shopee Affiliate ${selected.product.productName}`,
-      content: packageResult.caption,
-      hashtags: [],
-      imageUrls: packageResult.generatedImageUrls,
-      targetPageIds: eligiblePageIds,
-      randomizeImages: false,
-      randomizeCaption: false,
-      postingMode: "broadcast",
-      variants: [],
-      status: "scheduled",
-      contentHash,
-      imageHash,
-      fingerprint
+    await logShopeeStep({
+      config,
+      step: "TEMPLATE_POST_CREATE_STARTED",
+      status: "started",
+      message: "Creating template Post for all selected Shopee page tasks",
+      productId: selected.product.productId,
+      metadata: {
+        jobId: records.workflowRunId,
+        productId: selected.product.productId,
+        hasStoryboard: true,
+        hasCaption: Boolean(packageResult.caption),
+        imageCount: packageResult.generatedImageUrls.length,
+        imageUrls: packageResult.generatedImageUrls,
+        blobUrls: packageResult.generatedImageUrls,
+        targetPageIds: eligiblePageIds,
+        workflowRunId: records.workflowRunId
+      }
     });
 
+    let post: any;
+    try {
+      post = await Post.create({
+        userId: config.userId,
+        title: `Shopee Affiliate ${selected.product.productName}`,
+        content: packageResult.caption,
+        hashtags: [],
+        imageUrls: packageResult.generatedImageUrls,
+        targetPageIds: eligiblePageIds,
+        randomizeImages: false,
+        randomizeCaption: false,
+        postingMode: "broadcast",
+        variants: [],
+        status: "scheduled",
+        contentHash,
+        imageHash,
+        fingerprint
+      });
+    } catch (error) {
+      await logShopeeStep({
+        config,
+        step: "TEMPLATE_POST_CREATE_FAILED",
+        status: "failed",
+        message: "Template Post creation failed before page task enqueue",
+        productId: selected.product.productId,
+        error,
+        metadata: {
+          jobId: records.workflowRunId,
+          productId: selected.product.productId,
+          hasStoryboard: true,
+          hasCaption: Boolean(packageResult.caption),
+          imageCount: packageResult.generatedImageUrls.length,
+          imageUrls: packageResult.generatedImageUrls,
+          blobUrls: packageResult.generatedImageUrls,
+          errorMessage: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack?.slice(0, 3000) : undefined,
+          workflowRunId: records.workflowRunId
+        }
+      });
+      throw error;
+    }
+
     lastPostId = post._id;
+    await logShopeeStep({
+      config,
+      step: "TEMPLATE_POST_CREATED",
+      status: "success",
+      message: "Template Post created for all selected Shopee page tasks",
+      productId: selected.product.productId,
+      metadata: {
+        templatePostId: String(post._id),
+        jobId: records.workflowRunId,
+        imageCount: packageResult.generatedImageUrls.length,
+        targetPageIds: eligiblePageIds,
+        workflowRunId: records.workflowRunId
+      }
+    });
     await logShopeeStep({
       config,
       step: "TEMPLATE_POST_RESULT",
@@ -1979,25 +2064,87 @@ async function queueShopeeAutoPostsForConfig(
         imageHash
       });
       const captionProductName = getShopeeCaptionProductName(selected.product.productName);
-      const post = await Post.create({
-        userId: config.userId,
-        title: `Shopee Affiliate ${selected.product.productName}`,
-        content: packageResult.caption,
-        hashtags: [],
-        imageUrls: packageResult.generatedImageUrls,
-        targetPageIds: [selected.pageId],
-        randomizeImages: false,
-        randomizeCaption: false,
-        postingMode: "broadcast",
-        variants: [],
-        status: postStatus,
-        contentHash,
-        imageHash,
-        fingerprint
+      await logShopeeStep({
+        config,
+        step: "TEMPLATE_POST_CREATE_STARTED",
+        status: "started",
+        message: "Creating template Post for Shopee page task",
+        pageId: selected.pageId,
+        productId: selected.product.productId,
+        metadata: {
+          jobId: records.workflowRunId,
+          productId: selected.product.productId,
+          hasStoryboard: true,
+          hasCaption: Boolean(packageResult.caption),
+          imageCount: packageResult.generatedImageUrls.length,
+          imageUrls: packageResult.generatedImageUrls,
+          blobUrls: packageResult.generatedImageUrls,
+          targetPageIds: [selected.pageId],
+          workflowRunId: records.workflowRunId
+        }
       });
+
+      let post: any;
+      try {
+        post = await Post.create({
+          userId: config.userId,
+          title: `Shopee Affiliate ${selected.product.productName}`,
+          content: packageResult.caption,
+          hashtags: [],
+          imageUrls: packageResult.generatedImageUrls,
+          targetPageIds: [selected.pageId],
+          randomizeImages: false,
+          randomizeCaption: false,
+          postingMode: "broadcast",
+          variants: [],
+          status: postStatus,
+          contentHash,
+          imageHash,
+          fingerprint
+        });
+      } catch (error) {
+        await logShopeeStep({
+          config,
+          step: "TEMPLATE_POST_CREATE_FAILED",
+          status: "failed",
+          message: "Template Post creation failed before page task enqueue",
+          pageId: selected.pageId,
+          productId: selected.product.productId,
+          error,
+          metadata: {
+            jobId: records.workflowRunId,
+            productId: selected.product.productId,
+            hasStoryboard: true,
+            hasCaption: Boolean(packageResult.caption),
+            imageCount: packageResult.generatedImageUrls.length,
+            imageUrls: packageResult.generatedImageUrls,
+            blobUrls: packageResult.generatedImageUrls,
+            errorMessage: error instanceof Error ? error.message : String(error),
+            stack: error instanceof Error ? error.stack?.slice(0, 3000) : undefined,
+            workflowRunId: records.workflowRunId
+          }
+        });
+        throw error;
+      }
 
       templatePostId = String(post._id);
       lastPostId = post._id;
+
+      await logShopeeStep({
+        config,
+        step: "TEMPLATE_POST_CREATED",
+        status: "success",
+        message: "Template Post created for Shopee page task",
+        pageId: selected.pageId,
+        productId: selected.product.productId,
+        metadata: {
+          templatePostId,
+          jobId: records.workflowRunId,
+          imageCount: packageResult.generatedImageUrls.length,
+          targetPageIds: [selected.pageId],
+          workflowRunId: records.workflowRunId
+        }
+      });
 
       await logShopeeStep({
         config,

@@ -169,6 +169,90 @@ async function withSoftTimeout<T>(task: Promise<T>, timeoutMs: number, fallback:
   });
 }
 
+type StageLog = {
+  message?: unknown;
+  createdAt?: unknown;
+  metadata?: Record<string, unknown>;
+};
+
+function getStageStep(log: StageLog) {
+  return String((log.metadata ?? {}).step ?? "");
+}
+
+function getLatestStageLog(logs: StageLog[], steps: string[]) {
+  const stepSet = new Set(steps);
+  return logs.find((log) => stepSet.has(getStageStep(log))) ?? null;
+}
+
+function getStageStatusSummary(logs: StageLog[], input: {
+  started: string[];
+  completed: string[];
+  failed: string[];
+}) {
+  if (getLatestStageLog(logs, input.failed)) return "failed";
+  if (getLatestStageLog(logs, input.completed)) return "created";
+  if (getLatestStageLog(logs, input.started)) return "started";
+  return "pending";
+}
+
+function derivePreTaskBlockingStep(logs: StageLog[]) {
+  const allRelevantSteps = [
+    "TEMPLATE_POST_CREATED",
+    "TEMPLATE_POST_CREATE_STARTED",
+    "TEMPLATE_POST_CREATE_FAILED",
+    "UGC_IMAGES_CREATED",
+    "UGC_IMAGES_STARTED",
+    "UGC_IMAGES_FAILED",
+    "BLOB_UPLOAD_COMPLETED",
+    "BLOB_UPLOAD_STARTED",
+    "BLOB_UPLOAD_FAILED",
+    "CAPTION_CREATED",
+    "CAPTION_STARTED",
+    "CAPTION_FAILED",
+    "STORYBOARD_CREATED",
+    "STORYBOARD_STARTED",
+    "STORYBOARD_FAILED",
+    "PRODUCT_FETCHED",
+    "PRODUCT_FETCH_STARTED",
+    "PRODUCT_FETCH_FAILED",
+    "PRODUCT_SELECTED",
+    "PRODUCT_ATTEMPT_STARTED"
+  ];
+  const failedStep = getLatestStageLog(logs, [
+    "TEMPLATE_POST_CREATE_FAILED",
+    "BLOB_UPLOAD_FAILED",
+    "UGC_IMAGES_FAILED",
+    "CAPTION_FAILED",
+    "STORYBOARD_FAILED",
+    "PRODUCT_FETCH_FAILED"
+  ]);
+  if (failedStep) return getStageStep(failedStep);
+
+  const latestRelevant = getLatestStageLog(logs, allRelevantSteps);
+  const latestStep = latestRelevant ? getStageStep(latestRelevant) : "";
+
+  if (latestStep === "TEMPLATE_POST_CREATED") return "WAITING_FOR_PAGE_TASKS";
+  if (latestStep === "TEMPLATE_POST_CREATE_STARTED") return "WAITING_FOR_TEMPLATE_POST";
+  if (latestStep === "UGC_IMAGES_CREATED") return "WAITING_FOR_TEMPLATE_POST";
+  if (latestStep === "UGC_IMAGES_STARTED") return "WAITING_FOR_UGC_IMAGES";
+  if (latestStep === "BLOB_UPLOAD_STARTED") return "WAITING_FOR_BLOB_UPLOAD";
+  if (latestStep === "BLOB_UPLOAD_COMPLETED") return "WAITING_FOR_UGC_IMAGES";
+  if (latestStep === "CAPTION_CREATED") return "WAITING_FOR_UGC_IMAGES";
+  if (latestStep === "CAPTION_STARTED") return "WAITING_FOR_CAPTION";
+  if (latestStep === "STORYBOARD_CREATED") return "WAITING_FOR_CAPTION";
+  if (latestStep === "STORYBOARD_STARTED") return "WAITING_FOR_STORYBOARD";
+  if (latestStep === "PRODUCT_FETCH_STARTED") return "WAITING_FOR_PRODUCT";
+  if (
+    latestStep === "PRODUCT_FETCHED" ||
+    latestStep === "PRODUCT_SELECTED" ||
+    latestStep === "PRODUCT_ATTEMPT_STARTED"
+  ) {
+    return "WAITING_FOR_STORYBOARD";
+  }
+
+  return "WAITING_FOR_PRODUCT";
+}
+
 const DEFAULT_POSTING_WINDOW_START = "00:00";
 const DEFAULT_POSTING_WINDOW_END = "23:59";
 const LEGACY_POSTING_WINDOW_START = "06:00";
@@ -262,10 +346,13 @@ export async function GET() {
     const logsPromise = withSoftTimeout(
       ActionLog.find({
         userId,
-        "metadata.autoPost": true
+        $or: [
+          { "metadata.autoPost": true },
+          { "metadata.shopeeAffiliate": true }
+        ]
       })
         .sort({ createdAt: -1 })
-        .limit(20)
+        .limit(80)
         .select("level message createdAt metadata")
         .maxTimeMS(STATUS_OPTIONAL_TIMEOUT_MS)
         .lean()
@@ -376,6 +463,47 @@ export async function GET() {
       const metadata = (log.metadata ?? {}) as Record<string, unknown>;
       return workflowRunId ? String(metadata.workflowRunId ?? "") === workflowRunId : true;
     });
+    const runStageLogs = logs.filter((log) => {
+      const metadata = (log.metadata ?? {}) as Record<string, unknown>;
+      return workflowRunId ? String(metadata.workflowRunId ?? metadata.jobId ?? "") === workflowRunId : true;
+    }) as StageLog[];
+    const productStageLog = getLatestStageLog(runStageLogs, [
+      "PRODUCT_ATTEMPT_STARTED",
+      "PRODUCT_SELECTED",
+      "PRODUCT_FETCHED",
+      "STORYBOARD_STARTED",
+      "STORYBOARD_CREATED",
+      "CAPTION_STARTED",
+      "CAPTION_CREATED",
+      "UGC_IMAGES_STARTED",
+      "UGC_IMAGES_CREATED",
+      "TEMPLATE_POST_CREATE_STARTED",
+      "TEMPLATE_POST_CREATED"
+    ]);
+    const productStageMetadata = (productStageLog?.metadata ?? {}) as Record<string, unknown>;
+    const templatePostLog = getLatestStageLog(runStageLogs, ["TEMPLATE_POST_CREATED", "TEMPLATE_POST_RESULT"]);
+    const templatePostMetadata = (templatePostLog?.metadata ?? {}) as Record<string, unknown>;
+    const preTaskBlockingStep = derivePreTaskBlockingStep(runStageLogs);
+    const storyboardStatus = getStageStatusSummary(runStageLogs, {
+      started: ["STORYBOARD_STARTED"],
+      completed: ["STORYBOARD_CREATED"],
+      failed: ["STORYBOARD_FAILED"]
+    });
+    const captionStatus = getStageStatusSummary(runStageLogs, {
+      started: ["CAPTION_STARTED"],
+      completed: ["CAPTION_CREATED"],
+      failed: ["CAPTION_FAILED", "CAPTION_VALIDATION_FAILED_DETAIL"]
+    });
+    const imageStatus = getStageStatusSummary(runStageLogs, {
+      started: ["UGC_IMAGES_STARTED"],
+      completed: ["UGC_IMAGES_CREATED"],
+      failed: ["UGC_IMAGES_FAILED", "shopee_ugc_image_generation_failed"]
+    });
+    const blobStatus = getStageStatusSummary(runStageLogs, {
+      started: ["BLOB_UPLOAD_STARTED"],
+      completed: ["BLOB_UPLOAD_COMPLETED", "UGC_IMAGES_CREATED"],
+      failed: ["BLOB_UPLOAD_FAILED"]
+    });
     const latestRunLogAt =
       latestRunLog?.createdAt instanceof Date
         ? latestRunLog.createdAt
@@ -472,7 +600,7 @@ export async function GET() {
     const missingTasksCount = Math.max(0, selectedPagesCount - createdTasksCount);
     const latestRunStep = String(((latestRunLog?.metadata ?? {}) as Record<string, unknown>).step ?? "");
     const currentStep = noTaskRunIsActive
-      ? latestRunStep || "PREPARING_SHOPEE_POST_PACKAGE"
+      ? preTaskBlockingStep || latestRunStep || "PREPARING_SHOPEE_POST_PACKAGE"
       : latestProcessingJob
       ? "PAGE_PUBLISH_STARTED"
       : runJobs.length
@@ -573,11 +701,32 @@ export async function GET() {
         name: String(page.name ?? page.pageName ?? "Facebook Page")
       })).filter((page: { pageId: string; name: string }) => page.pageId.length > 0),
       currentJobId: latestProcessingJob ? String(latestProcessingJob._id) : runJobs[0]?._id ? String(runJobs[0]._id) : null,
-      currentStep: isFindingValidProduct ? "FINDING_VALID_PRODUCT" : noTaskRunIsStale ? "WAITING_FOR_TEMPLATE_POST" : currentStep,
+      currentStep: isFindingValidProduct ? "FINDING_VALID_PRODUCT" : noTaskRunIsStale ? preTaskBlockingStep : currentStep,
       currentAttempt,
       maxProductAttempts,
       skippedProductsCount,
-      currentProduct: latestAttemptMetadata.productName ? String(latestAttemptMetadata.productName) : null,
+      currentProduct:
+        latestAttemptMetadata.productName
+          ? String(latestAttemptMetadata.productName)
+          : productStageMetadata.productName
+            ? String(productStageMetadata.productName)
+            : null,
+      currentProductId:
+        latestAttemptMetadata.productId
+          ? String(latestAttemptMetadata.productId)
+          : productStageMetadata.productId
+            ? String(productStageMetadata.productId)
+            : null,
+      templatePostId:
+        templatePostMetadata.templatePostId
+          ? String(templatePostMetadata.templatePostId)
+          : templatePostMetadata.aiGeneratedPostId
+            ? String(templatePostMetadata.aiGeneratedPostId)
+            : null,
+      storyboardStatus,
+      captionStatus,
+      imageStatus,
+      blobStatus,
       lastSkippedReason: latestSkippedProductLog
         ? sanitizeLegacyMessage(String(latestSkippedMetadata.reason ?? latestSkippedProductLog.message ?? "Product skipped"))
         : null,
@@ -648,7 +797,7 @@ export async function GET() {
       missingEnv
     });
 
-    return jsonOk({ config: sanitizedConfig, logs: normalizedLogs, controlPanel });
+    return jsonOk({ config: sanitizedConfig, logs: normalizedLogs.slice(0, 20), controlPanel });
   } catch (error) {
     if (isUnauthorizedError(error)) {
       return jsonError("Unauthorized", 401);

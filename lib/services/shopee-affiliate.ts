@@ -7,7 +7,7 @@ import {
 } from "@/lib/services/shopee-affiliate-core";
 import { generateFacebookContent, generateProductReferenceImage } from "@/lib/services/ai";
 import { assertNoLargeMongoFields, uploadAutoPostImage } from "@/lib/services/blob-storage";
-import { logAction } from "@/lib/services/logging";
+import { logAction, serializeError } from "@/lib/services/logging";
 import { logExternalResponseFailure, traceExternalRequest } from "@/lib/services/request-debug";
 import { assertValidTextEncoding, normalizeTextEncoding, validateTextEncoding } from "@/lib/services/text-encoding";
 import {
@@ -3772,7 +3772,67 @@ export async function generateShopeeCaption(input: {
       "internal_api"
     );
   }
-  const storyboard = createValidatedShopeeProductStoryboard(product);
+  await logShopeePackageStage({
+    userId: input.userId,
+    jobId: input.jobId,
+    product,
+    step: "STORYBOARD_STARTED",
+    status: "started",
+    message: "Creating Product Storyboard for Shopee caption",
+    metadata: {
+      hasProductName: hasShopeeProductName(product),
+      hasProductImage: hasShopeeProductImage(product),
+      imageCount: [product.productImageUrl, ...(product.productImageUrls ?? [])].filter(Boolean).length
+    }
+  });
+
+  let storyboard: ShopeeProductStoryboard;
+  try {
+    storyboard = createValidatedShopeeProductStoryboard(product);
+  } catch (error) {
+    await logShopeePackageStage({
+      userId: input.userId,
+      jobId: input.jobId,
+      product,
+      step: "STORYBOARD_FAILED",
+      status: "failed",
+      message: "Product Storyboard creation failed",
+      error
+    });
+    throw error;
+  }
+
+  await logShopeePackageStage({
+    userId: input.userId,
+    jobId: input.jobId,
+    product,
+    step: "STORYBOARD_CREATED",
+    status: "success",
+    message: "Product Storyboard created",
+    metadata: {
+      productSimpleName: storyboard.productSimpleName,
+      productType: storyboard.productType,
+      mainUseCase: storyboard.mainUseCase,
+      captionAngle: storyboard.captionAngle,
+      hasProblemSolved: Boolean(storyboard.problemSolved),
+      hasDailyBenefit: Boolean(storyboard.dailyBenefit),
+      hasRealUsageScenario: Boolean(storyboard.realUsageScenario)
+    }
+  });
+
+  await logShopeePackageStage({
+    userId: input.userId,
+    jobId: input.jobId,
+    product,
+    step: "CAPTION_STARTED",
+    status: "started",
+    message: "Generating caption from Product Storyboard",
+    metadata: {
+      storyboardType: storyboard.productType,
+      shortLink: input.affiliateLink
+    }
+  });
+
   let storyboardCaption: string;
   try {
     storyboardCaption = buildShopeeStoryboardCaption({
@@ -3798,8 +3858,35 @@ export async function generateShopeeCaption(input: {
         responseSummary: error instanceof ShopeeProviderError ? error.responseSummary ?? "" : ""
       }
     });
+    await logShopeePackageStage({
+      userId: input.userId,
+      jobId: input.jobId,
+      product,
+      step: "CAPTION_FAILED",
+      status: "failed",
+      message: "Caption generation from Product Storyboard failed",
+      metadata: {
+        storyboardType: storyboard.productType,
+        validatorName: "validateStoryboardAffiliateCaption"
+      },
+      error
+    });
     throw error;
   }
+  await logShopeePackageStage({
+    userId: input.userId,
+    jobId: input.jobId,
+    product,
+    step: "CAPTION_CREATED",
+    status: "success",
+    message: "Caption created from Product Storyboard",
+    metadata: {
+      storyboardType: storyboard.productType,
+      captionLength: storyboardCaption.length,
+      captionPreview: storyboardCaption.slice(0, 240),
+      shortLink: input.affiliateLink
+    }
+  });
   await logShopeeAutomationEvent({
     userId: input.userId,
     level: "success",
@@ -3865,6 +3952,41 @@ function bufferToArrayBuffer(buffer: Buffer) {
 
 function hashImageBuffer(buffer: Buffer) {
   return crypto.createHash("sha256").update(buffer).digest("hex");
+}
+
+async function logShopeePackageStage(input: {
+  userId: string;
+  jobId?: string;
+  pageId?: string;
+  product?: ShopeeProductRecord;
+  step: string;
+  status: "started" | "success" | "failed";
+  message: string;
+  metadata?: Record<string, unknown>;
+  error?: unknown;
+}) {
+  await logShopeeAutomationEvent({
+    userId: input.userId,
+    level: input.status === "failed" ? "error" : "info",
+    message: `${input.step}: ${input.message}`,
+    pageId: input.pageId,
+    productId: input.product?.productId,
+    metadata: {
+      step: input.step,
+      status: input.status,
+      workflowRunId: input.jobId,
+      productId: input.product?.productId,
+      productName: input.product?.productName,
+      ...(input.metadata ?? {}),
+      ...(input.error
+        ? {
+            errorMessage: input.error instanceof Error ? input.error.message : String(input.error),
+            stack: input.error instanceof Error ? input.error.stack?.slice(0, 3000) : undefined,
+            serializedError: serializeError(input.error)
+          }
+        : {})
+    }
+  });
 }
 
 async function generateShopeeUgcImageDocs(input: {
@@ -3939,13 +4061,62 @@ async function generateShopeeUgcImageDocs(input: {
 
     generatedHashes.add(generatedHash);
 
-    const uploadedImage = await uploadAutoPostImage({
-      jobId: input.jobId ?? `shopee-${Date.now()}`,
-      productId: input.product.productId,
-      index: index + 1,
-      buffer: generatedBuffer,
-      mimeType: "image/png",
-      kind: "image"
+    await logShopeePackageStage({
+      userId: input.userId,
+      jobId: input.jobId,
+      product: input.product,
+      step: "BLOB_UPLOAD_STARTED",
+      status: "started",
+      message: `Uploading UGC image ${index + 1} to Vercel Blob`,
+      metadata: {
+        imageIndex: index + 1,
+        imageCount: input.promptSet.prompts.length,
+        sizeBytes: generatedBuffer.length
+      }
+    });
+
+    let uploadedImage: Awaited<ReturnType<typeof uploadAutoPostImage>>;
+    try {
+      uploadedImage = await uploadAutoPostImage({
+        jobId: input.jobId ?? `shopee-${Date.now()}`,
+        productId: input.product.productId,
+        index: index + 1,
+        buffer: generatedBuffer,
+        mimeType: "image/png",
+        kind: "image"
+      });
+    } catch (error) {
+      await logShopeePackageStage({
+        userId: input.userId,
+        jobId: input.jobId,
+        product: input.product,
+        step: "BLOB_UPLOAD_FAILED",
+        status: "failed",
+        message: `Failed to upload UGC image ${index + 1} to Vercel Blob`,
+        metadata: {
+          imageIndex: index + 1,
+          imageCount: input.promptSet.prompts.length
+        },
+        error
+      });
+      throw error;
+    }
+
+    await logShopeePackageStage({
+      userId: input.userId,
+      jobId: input.jobId,
+      product: input.product,
+      step: "BLOB_UPLOAD_COMPLETED",
+      status: "success",
+      message: `Uploaded UGC image ${index + 1} to Vercel Blob`,
+      metadata: {
+        imageIndex: index + 1,
+        imageCount: input.promptSet.prompts.length,
+        imageUrl: uploadedImage.url,
+        pathname: uploadedImage.pathname,
+        contentType: uploadedImage.contentType,
+        sizeBytes: uploadedImage.sizeBytes
+      }
     });
 
     const imagePayload = {
@@ -4026,34 +4197,147 @@ export async function buildShopeePostPackage(input: {
     );
   }
 
-  const imageDocs = await generateShopeeUgcImageDocs({
+  await logShopeePackageStage({
     userId: input.userId,
     jobId: input.jobId,
+    pageId: input.pageId,
     product: input.product,
-    promptSet: imagePromptSet,
-    sourceImageUrls
+    step: "UGC_IMAGES_STARTED",
+    status: "started",
+    message: "Generating Shopee UGC images",
+    metadata: {
+      expectedImages: 4,
+      sourceImageCount: sourceImageUrls.length,
+      promptCount: imagePromptSet.prompts.length
+    }
   });
 
-  const postDoc = await AiGeneratedPost.create({
+  let imageDocs: Awaited<ReturnType<typeof generateShopeeUgcImageDocs>>;
+  try {
+    imageDocs = await generateShopeeUgcImageDocs({
+      userId: input.userId,
+      jobId: input.jobId,
+      product: input.product,
+      promptSet: imagePromptSet,
+      sourceImageUrls
+    });
+  } catch (error) {
+    await logShopeePackageStage({
+      userId: input.userId,
+      jobId: input.jobId,
+      pageId: input.pageId,
+      product: input.product,
+      step: "UGC_IMAGES_FAILED",
+      status: "failed",
+      message: "Shopee UGC image generation failed",
+      metadata: {
+        expectedImages: 4,
+        sourceImageCount: sourceImageUrls.length,
+        promptCount: imagePromptSet.prompts.length
+      },
+      error
+    });
+    throw error;
+  }
+
+  await logShopeePackageStage({
     userId: input.userId,
-    productId: input.product.productId,
-    caption,
-    imagePrompt,
-    generatedImageUrl: imageDocs[0] ? `ai-image:${String(imageDocs[0]._id)}` : input.product.productImageUrl,
-    affiliateLink: shortAffiliateLink,
-    scheduledAt: input.scheduledAt,
+    jobId: input.jobId,
     pageId: input.pageId,
-    status: "image_ready",
-    generationMetaJson: {
-      imageId: imageDocs[0] ? String(imageDocs[0]._id) : null,
-      imageIds: imageDocs.map((imageDoc) => String(imageDoc._id)),
-      generatedImageUrls: imageDocs.map((imageDoc) => `ai-image:${String(imageDoc._id)}`),
-      imagePromptSet,
-      source: "shopee-affiliate",
-      affiliateUrl: linkResult.affiliateUrl,
-      shortAffiliateLink,
-      trackingId: linkResult.trackingId,
-      promptCount: imagePrompts.length
+    product: input.product,
+    step: "UGC_IMAGES_CREATED",
+    status: "success",
+    message: "Shopee UGC images generated",
+    metadata: {
+      imageCount: imageDocs.length,
+      imageUrls: imageDocs.map((imageDoc) => imageDoc.generatedImageUrl).filter(Boolean),
+      blobUrls: imageDocs.map((imageDoc) => imageDoc.generatedImageUrl).filter(Boolean),
+      imageIds: imageDocs.map((imageDoc) => String(imageDoc._id))
+    }
+  });
+
+  await logShopeePackageStage({
+    userId: input.userId,
+    jobId: input.jobId,
+    pageId: input.pageId,
+    product: input.product,
+    step: "TEMPLATE_POST_CREATE_STARTED",
+    status: "started",
+    message: "Creating AI generated template post package",
+    metadata: {
+      hasStoryboard: true,
+      hasCaption: Boolean(caption),
+      imageCount: imageDocs.length,
+      imageUrls: imageDocs.map((imageDoc) => `ai-image:${String(imageDoc._id)}`),
+      blobUrls: imageDocs.map((imageDoc) => imageDoc.generatedImageUrl).filter(Boolean),
+      shortAffiliateLink
+    }
+  });
+
+  let postDoc: any;
+  try {
+    postDoc = await AiGeneratedPost.create({
+      userId: input.userId,
+      productId: input.product.productId,
+      caption,
+      imagePrompt,
+      generatedImageUrl: imageDocs[0] ? `ai-image:${String(imageDocs[0]._id)}` : input.product.productImageUrl,
+      affiliateLink: shortAffiliateLink,
+      scheduledAt: input.scheduledAt,
+      pageId: input.pageId,
+      status: "image_ready",
+      generationMetaJson: {
+        imageId: imageDocs[0] ? String(imageDocs[0]._id) : null,
+        imageIds: imageDocs.map((imageDoc) => String(imageDoc._id)),
+        generatedImageUrls: imageDocs.map((imageDoc) => `ai-image:${String(imageDoc._id)}`),
+        imagePromptSet,
+        source: "shopee-affiliate",
+        affiliateUrl: linkResult.affiliateUrl,
+        shortAffiliateLink,
+        trackingId: linkResult.trackingId,
+        promptCount: imagePrompts.length
+      }
+    });
+  } catch (error) {
+    await logShopeePackageStage({
+      userId: input.userId,
+      jobId: input.jobId,
+      pageId: input.pageId,
+      product: input.product,
+      step: "TEMPLATE_POST_CREATE_FAILED",
+      status: "failed",
+      message: "AI generated template post package creation failed",
+      metadata: {
+        jobId: input.jobId,
+        productId: input.product.productId,
+        hasStoryboard: true,
+        hasCaption: Boolean(caption),
+        imageCount: imageDocs.length,
+        imageUrls: imageDocs.map((imageDoc) => `ai-image:${String(imageDoc._id)}`),
+        blobUrls: imageDocs.map((imageDoc) => imageDoc.generatedImageUrl).filter(Boolean),
+        errorMessage: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack?.slice(0, 3000) : undefined
+      },
+      error
+    });
+    throw error;
+  }
+
+  await logShopeePackageStage({
+    userId: input.userId,
+    jobId: input.jobId,
+    pageId: input.pageId,
+    product: input.product,
+    step: "TEMPLATE_POST_CREATED",
+    status: "success",
+    message: "AI generated template post package created",
+    metadata: {
+      templatePostId: String(postDoc._id),
+      aiGeneratedPostId: String(postDoc._id),
+      imageCount: imageDocs.length,
+      imageUrls: imageDocs.map((imageDoc) => `ai-image:${String(imageDoc._id)}`),
+      blobUrls: imageDocs.map((imageDoc) => imageDoc.generatedImageUrl).filter(Boolean),
+      shortAffiliateLink
     }
   });
   const generatedImageUrls = imageDocs.map((imageDoc) => `ai-image:${String(imageDoc._id)}`);
@@ -4148,7 +4432,11 @@ export async function logShopeeAutomationEvent(input: {
     message: input.message,
     productId: input.productId,
     pageId: input.pageId,
-    metadata: input.metadata ?? {}
+    metadata: {
+      autoPost: true,
+      shopeeAffiliate: true,
+      ...(input.metadata ?? {})
+    }
   });
 
   await logAction({
@@ -4157,6 +4445,7 @@ export async function logShopeeAutomationEvent(input: {
     level: input.level,
     message: input.message,
     metadata: {
+      autoPost: true,
       shopeeAffiliate: true,
       productId: input.productId,
       pageId: input.pageId,

@@ -71,6 +71,12 @@ type ControlPanelStatus = {
   maxProductAttempts?: number | null;
   skippedProductsCount?: number;
   currentProduct?: string | null;
+  currentProductId?: string | null;
+  templatePostId?: string | null;
+  storyboardStatus?: string | null;
+  captionStatus?: string | null;
+  imageStatus?: string | null;
+  blobStatus?: string | null;
   lastSkippedReason?: string | null;
   selectedPagesCount?: number;
   createdTasksCount?: number;
@@ -1320,7 +1326,13 @@ export function AutoPostPanel() {
           <div className="auto-post-metric-card"><span className="muted">Product attempt</span><strong>{controlPanel?.currentAttempt ? `${controlPanel.currentAttempt} / ${controlPanel.maxProductAttempts ?? 10}` : "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Skipped products</span><strong>{controlPanel?.skippedProductsCount ?? 0}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Current product</span><strong>{controlPanel?.currentProduct ? sanitizeText(controlPanel.currentProduct) : "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Current product id</span><strong>{controlPanel?.currentProductId ? sanitizeText(controlPanel.currentProductId) : "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Template post id</span><strong>{controlPanel?.templatePostId ? sanitizeText(controlPanel.templatePostId) : "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Last skipped reason</span><strong>{controlPanel?.lastSkippedReason ? sanitizeText(controlPanel.lastSkippedReason) : "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Storyboard status</span><strong>{controlPanel?.storyboardStatus ?? "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Caption status</span><strong>{controlPanel?.captionStatus ?? "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Image status</span><strong>{controlPanel?.imageStatus ?? "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Blob status</span><strong>{controlPanel?.blobStatus ?? "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Selected pages</span><strong>{controlPanel?.selectedPagesCount ?? config.targetPageIds.length}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Created tasks</span><strong>{controlPanel?.createdTasksCount ?? controlPanel?.pageResults?.filter((result) => result.jobId).length ?? 0}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Current page</span><strong>{controlPanel?.currentPublishingPage?.pageName ?? "-"}</strong></div>
