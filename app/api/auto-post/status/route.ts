@@ -45,6 +45,7 @@ const STATUS_FAST_TIMEOUT_MS = Number(process.env.AUTO_POST_STATUS_FAST_TIMEOUT_
 const STATUS_OPTIONAL_TIMEOUT_MS = Number(process.env.AUTO_POST_STATUS_OPTIONAL_TIMEOUT_MS ?? 1500);
 const STATUS_JOB_TIMEOUT_MS = Number(process.env.AUTO_POST_STATUS_JOB_TIMEOUT_MS ?? 1800);
 const STATUS_REPAIR_TIMEOUT_MS = Number(process.env.AUTO_POST_STATUS_REPAIR_TIMEOUT_MS ?? 6000);
+const AUTO_POST_STATUS_PRE_TASK_TIMEOUT_MS = Number(process.env.AUTO_POST_JOB_TIMEOUT_MS ?? 300000);
 
 function sanitizeLegacyMessage(value?: string | null) {
   if (!value) return value ?? null;
@@ -330,7 +331,7 @@ export async function GET() {
       effectiveConfigDoc?._id &&
       contentSource === "shopee-affiliate" &&
       targetPageIds.length > 0 &&
-      ["running", "posting", "retrying", "waiting"].includes(String(effectiveConfigDoc.autoPostStatus ?? effectiveConfig?.autoPostStatus ?? ""));
+      ["posting", "waiting"].includes(String(effectiveConfigDoc.autoPostStatus ?? effectiveConfig?.autoPostStatus ?? ""));
 
     const repairedTasks = shouldAutoRepairMissingTasks
       ? await withSoftTimeout(
@@ -370,11 +371,36 @@ export async function GET() {
         : effectiveConfigDoc?.lastRunAt
           ? new Date(String(effectiveConfigDoc.lastRunAt))
           : null;
+    const autoPostEngineStatus = String(effectiveConfigDoc.autoPostStatus ?? effectiveConfig?.autoPostStatus ?? "");
+    const latestRunLog = logs.find((log) => {
+      const metadata = (log.metadata ?? {}) as Record<string, unknown>;
+      return workflowRunId ? String(metadata.workflowRunId ?? "") === workflowRunId : true;
+    });
+    const latestRunLogAt =
+      latestRunLog?.createdAt instanceof Date
+        ? latestRunLog.createdAt
+        : latestRunLog?.createdAt
+          ? new Date(String(latestRunLog.createdAt))
+          : null;
+    const preTaskReferenceAt =
+      latestRunLogAt instanceof Date && !Number.isNaN(latestRunLogAt.getTime())
+        ? latestRunLogAt
+        : lastRunAtDate;
+    const preTaskAgeMs =
+      preTaskReferenceAt instanceof Date && !Number.isNaN(preTaskReferenceAt.getTime())
+        ? Date.now() - preTaskReferenceAt.getTime()
+        : 0;
+    const noTaskRunIsActive =
+      runJobs.length === 0 &&
+      ["running", "retrying"].includes(autoPostEngineStatus) &&
+      preTaskAgeMs <= AUTO_POST_STATUS_PRE_TASK_TIMEOUT_MS;
     const noTaskRunIsStale =
       runJobs.length === 0 &&
       lastRunAtDate instanceof Date &&
       !Number.isNaN(lastRunAtDate.getTime()) &&
-      Date.now() - lastRunAtDate.getTime() > 3 * 60 * 1000;
+      !noTaskRunIsActive &&
+      (["failed", "stopped", "paused"].includes(autoPostEngineStatus) ||
+        Date.now() - lastRunAtDate.getTime() > AUTO_POST_STATUS_PRE_TASK_TIMEOUT_MS);
     const latestProcessingJob = runJobs.find((job) => job.status === "processing") ?? null;
     const latestFailedJob = runJobs.find((job) => job.status === "failed" || job.status === "duplicate_blocked") ?? null;
     const uniqueTargetPageIds = Array.from(new Set(targetPageIds.map((pageId) => String(pageId)).filter(Boolean)));
@@ -403,7 +429,7 @@ export async function GET() {
           errorCode: noTaskRunIsStale ? "no_page_tasks_created" : null,
           errorMessage: noTaskRunIsStale
             ? "No page tasks were created for the latest run. Start Now to retry."
-            : "Page task is being prepared",
+            : "Preparing Shopee post package before page tasks are created",
           startedAt: null,
           scheduledAt: null,
           finishedAt: null
@@ -444,7 +470,10 @@ export async function GET() {
     const pendingPagesCount = Math.max(0, selectedPagesCount - publishedPagesCount - failedPagesCount - activePagesCount);
     const createdTasksCount = pageResults.filter((page) => page.jobId).length;
     const missingTasksCount = Math.max(0, selectedPagesCount - createdTasksCount);
-    const currentStep = latestProcessingJob
+    const latestRunStep = String(((latestRunLog?.metadata ?? {}) as Record<string, unknown>).step ?? "");
+    const currentStep = noTaskRunIsActive
+      ? latestRunStep || "PREPARING_SHOPEE_POST_PACKAGE"
+      : latestProcessingJob
       ? "PAGE_PUBLISH_STARTED"
       : runJobs.length
         ? runJobs[0].status === "success"
@@ -554,9 +583,11 @@ export async function GET() {
         : null,
       selectedPagesCount,
       createdTasksCount,
-      queueHealth: isFindingValidProduct ? "finding_valid_product" : noTaskRunIsStale ? "no_tasks_created" : missingTasksCount > 0 ? "missing_tasks" : "ok",
+      queueHealth: isFindingValidProduct ? "finding_valid_product" : noTaskRunIsActive ? "preparing_page_tasks" : noTaskRunIsStale ? "no_tasks_created" : missingTasksCount > 0 ? "missing_tasks" : "ok",
       missingTasksCount: isFindingValidProduct ? 0 : missingTasksCount,
       missingTasksWarning: isFindingValidProduct
+        ? null
+        : noTaskRunIsActive
         ? null
         : noTaskRunIsStale
         ? `No page tasks were created for the latest run. Expected: ${selectedPagesCount}, Created: ${createdTasksCount}. Start Now to retry.`
