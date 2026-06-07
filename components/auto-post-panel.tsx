@@ -482,6 +482,7 @@ export function AutoPostPanel() {
   const [cleaningStorage, setCleaningStorage] = useState(false);
   const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false);
   const loadStatusInFlightRef = useRef(false);
+  const configDirtyRef = useRef(false);
   const pagesRef = useRef<FacebookPage[]>([]);
   const categoryDropdownRef = useRef<HTMLDivElement | null>(null);
 
@@ -532,11 +533,15 @@ export function AutoPostPanel() {
       if (statusJson.ok) {
         const loadedStatusData = statusJson.data as StatusResponse;
         statusData = loadedStatusData;
-        setConfig((current) => withNormalizedShopeeCategories({
-          ...current,
-          ...defaults,
-          ...loadedStatusData.config
-        }));
+        if (!configDirtyRef.current) {
+          setConfig((current) => withNormalizedShopeeCategories({
+            ...current,
+            ...defaults,
+            ...loadedStatusData.config
+          }));
+        } else {
+          console.info("[auto-post/control-panel] skipped config sync because local draft has unsaved changes");
+        }
         const liveLogs = loadedStatusData.controlPanel?.latestLogs ?? loadedStatusData.logs ?? [];
         setLogs(liveLogs.slice(0, 20).map((log) => ({ ...log, message: sanitizeText(log.message) })));
         setControlPanel(loadedStatusData.controlPanel ?? null);
@@ -642,8 +647,13 @@ export function AutoPostPanel() {
     [config.targetPageIds, pages]
   );
 
+  function updateConfig(updater: AutoPostConfig | ((current: AutoPostConfig) => AutoPostConfig)) {
+    configDirtyRef.current = true;
+    setConfig((current) => (typeof updater === "function" ? updater(current) : updater));
+  }
+
   function togglePage(pageId: string) {
-    setConfig((current) => {
+    updateConfig((current) => {
       if (current.targetPageIds.includes(pageId)) {
         return {
           ...current,
@@ -665,7 +675,7 @@ export function AutoPostPanel() {
 
   function updateShopeeCategories(nextCategories: string[]) {
     const shopeeCategories = normalizeShopeeCategories(nextCategories);
-    setConfig((current) => ({
+    updateConfig((current) => ({
       ...current,
       shopeeCategories,
       shopeeCategory: shopeeCategories[0] ?? DEFAULT_SHOPEE_CATEGORY
@@ -687,14 +697,14 @@ export function AutoPostPanel() {
   }
 
   function updateCaptions(value: string) {
-    setConfig((current) => ({
+    updateConfig((current) => ({
       ...current,
       captions: value.split("\n").map((item) => item.trim()).filter(Boolean)
     }));
   }
 
   function updateHashtags(value: string) {
-    setConfig((current) => ({
+    updateConfig((current) => ({
       ...current,
       hashtags: value
         .split(/\s+/)
@@ -718,6 +728,7 @@ export function AutoPostPanel() {
     });
     const result = await readApiResult(response);
     if (!result.ok) throw new Error(result.message || "Unable to save Auto Post settings");
+    configDirtyRef.current = false;
     setConfig(withNormalizedShopeeCategories(result.data.config));
     return result;
   }
@@ -924,7 +935,7 @@ export function AutoPostPanel() {
             <input
               type="checkbox"
               checked={config.enabled}
-              onChange={(event) => setConfig((current) => ({ ...current, enabled: event.target.checked }))}
+              onChange={(event) => updateConfig((current) => ({ ...current, enabled: event.target.checked }))}
             />
           </label>
         </div>
@@ -936,7 +947,7 @@ export function AutoPostPanel() {
               className="select"
               value={config.shopeeSourceTag}
               onChange={(event) =>
-                setConfig((current) => ({
+                updateConfig((current) => ({
                   ...current,
                   contentSource: "shopee-affiliate",
                   shopeeSourceTag: event.target.value as AutoPostConfig["shopeeSourceTag"]
@@ -956,7 +967,7 @@ export function AutoPostPanel() {
             <select
               className="select"
               value={config.intervalMinutes}
-              onChange={(event) => setConfig((current) => ({ ...current, intervalMinutes: Number(event.target.value) || 60 }))}
+              onChange={(event) => updateConfig((current) => ({ ...current, intervalMinutes: Number(event.target.value) || 60 }))}
             >
               {INTERVAL_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
@@ -971,7 +982,7 @@ export function AutoPostPanel() {
             <input
               className="input"
               value={config.shopeeKeyword}
-              onChange={(event) => setConfig((current) => ({ ...current, shopeeKeyword: event.target.value }))}
+              onChange={(event) => updateConfig((current) => ({ ...current, shopeeKeyword: event.target.value }))}
               placeholder="เช่น ของใช้ในบ้าน, แก้วเก็บความเย็น"
             />
           </label>
@@ -1058,7 +1069,7 @@ export function AutoPostPanel() {
               className="select"
               value={config.shopeeCaptionStyle}
               onChange={(event) =>
-                setConfig((current) => ({ ...current, shopeeCaptionStyle: event.target.value as AutoPostConfig["shopeeCaptionStyle"] }))
+                updateConfig((current) => ({ ...current, shopeeCaptionStyle: event.target.value as AutoPostConfig["shopeeCaptionStyle"] }))
               }
             >
               <option value="soft_sell">Soft sell</option>
@@ -1075,7 +1086,7 @@ export function AutoPostPanel() {
             <input
               className="input"
               value={config.shopeeTrackingId}
-              onChange={(event) => setConfig((current) => ({ ...current, shopeeTrackingId: event.target.value }))}
+              onChange={(event) => updateConfig((current) => ({ ...current, shopeeTrackingId: event.target.value }))}
               placeholder="Optional affiliate tracking id"
             />
           </label>
@@ -1091,7 +1102,7 @@ export function AutoPostPanel() {
               max="5"
               step="0.1"
               value={config.shopeeMinRating}
-              onChange={(event) => setConfig((current) => ({ ...current, shopeeMinRating: Number(event.target.value) || 0 }))}
+              onChange={(event) => updateConfig((current) => ({ ...current, shopeeMinRating: Number(event.target.value) || 0 }))}
               placeholder="เช่น 4.5"
             />
           </label>
@@ -1103,7 +1114,7 @@ export function AutoPostPanel() {
               type="number"
               min="0"
               value={config.shopeeMinSales}
-              onChange={(event) => setConfig((current) => ({ ...current, shopeeMinSales: Number(event.target.value) || 0 }))}
+              onChange={(event) => updateConfig((current) => ({ ...current, shopeeMinSales: Number(event.target.value) || 0 }))}
               placeholder="เช่น 100"
             />
           </label>
@@ -1117,7 +1128,7 @@ export function AutoPostPanel() {
               value={`${config.shopeeMinPrice || ""}${config.shopeeMaxPrice ? `-${config.shopeeMaxPrice}` : ""}`}
               onChange={(event) => {
                 const [min, max] = event.target.value.split("-").map((item) => Number(item.trim()) || 0);
-                setConfig((current) => ({ ...current, shopeeMinPrice: min, shopeeMaxPrice: max ?? 0 }));
+                updateConfig((current) => ({ ...current, shopeeMinPrice: min, shopeeMaxPrice: max ?? 0 }));
               }}
               placeholder="เช่น 100-1500"
             />
@@ -1131,7 +1142,7 @@ export function AutoPostPanel() {
               min="0"
               max="100"
               value={config.shopeeMinDiscountPercent}
-              onChange={(event) => setConfig((current) => ({ ...current, shopeeMinDiscountPercent: Number(event.target.value) || 0 }))}
+              onChange={(event) => updateConfig((current) => ({ ...current, shopeeMinDiscountPercent: Number(event.target.value) || 0 }))}
               placeholder="เช่น 20"
             />
           </label>
@@ -1142,7 +1153,7 @@ export function AutoPostPanel() {
           <input
             type="checkbox"
             checked={config.approvalMode}
-            onChange={(event) => setConfig((current) => ({ ...current, approvalMode: event.target.checked }))}
+            onChange={(event) => updateConfig((current) => ({ ...current, approvalMode: event.target.checked }))}
           />
         </label>
 
@@ -1153,7 +1164,7 @@ export function AutoPostPanel() {
               className="input"
               type="time"
               value={config.postingWindowStart}
-              onChange={(event) => setConfig((current) => ({ ...current, postingWindowStart: event.target.value }))}
+              onChange={(event) => updateConfig((current) => ({ ...current, postingWindowStart: event.target.value }))}
             />
           </label>
 
@@ -1163,7 +1174,7 @@ export function AutoPostPanel() {
               className="input"
               type="time"
               value={config.postingWindowEnd}
-              onChange={(event) => setConfig((current) => ({ ...current, postingWindowEnd: event.target.value }))}
+              onChange={(event) => updateConfig((current) => ({ ...current, postingWindowEnd: event.target.value }))}
             />
           </label>
         </div>
@@ -1197,7 +1208,7 @@ export function AutoPostPanel() {
           <select
             className="select"
             value={config.captionStrategy}
-            onChange={(event) => setConfig((current) => ({ ...current, captionStrategy: event.target.value as CaptionStrategy }))}
+            onChange={(event) => updateConfig((current) => ({ ...current, captionStrategy: event.target.value as CaptionStrategy }))}
           >
             <option value="manual">Manual</option>
             <option value="hybrid">Manual + AI</option>
@@ -1230,7 +1241,7 @@ export function AutoPostPanel() {
           <input
             className="input"
             value={config.aiPrompt}
-            onChange={(event) => setConfig((current) => ({ ...current, aiPrompt: event.target.value }))}
+            onChange={(event) => updateConfig((current) => ({ ...current, aiPrompt: event.target.value }))}
             placeholder={config.captionStrategy === "hybrid" ? "Tell AI exactly how to rewrite the image text/caption" : "Optional"}
           />
         </label>
