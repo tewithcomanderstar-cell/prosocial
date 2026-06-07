@@ -43,6 +43,43 @@ const FACEBOOK_RATE_LIMIT_COOLDOWN_MINUTES = Number(process.env.FACEBOOK_RATE_LI
 const COMMENT_REPLY_RATE_LIMIT_COOLDOWN_MINUTES = Number(process.env.COMMENT_REPLY_RATE_LIMIT_COOLDOWN_MINUTES ?? "30");
 const COMMENT_REPLY_IMMEDIATE_BATCH_SIZE = Number(process.env.COMMENT_REPLY_IMMEDIATE_BATCH_SIZE ?? "5");
 const USER_JOB_LOCK_WINDOW_MS = Number(process.env.USER_JOB_LOCK_WINDOW_MS ?? String(5 * 60 * 1000));
+const QUEUE_SLOW_STAGE_WARNING_MS = 30_000;
+
+function startQueueStageTimer(stage: string, metadata: Record<string, unknown> = {}) {
+  const startedAt = Date.now();
+  const startedIso = new Date(startedAt).toISOString();
+  console.info("[STAGE_START]", {
+    stage,
+    startedAt: startedIso,
+    ...metadata
+  });
+
+  return (status: "success" | "failed", extra: Record<string, unknown> = {}, error?: unknown) => {
+    const completedAt = Date.now();
+    const durationMs = completedAt - startedAt;
+    const payload = {
+      stage,
+      status,
+      startedAt: startedIso,
+      completedAt: new Date(completedAt).toISOString(),
+      STAGE_DURATION_MS: durationMs,
+      durationMs,
+      ...metadata,
+      ...extra,
+      ...(error
+        ? {
+            errorMessage: error instanceof Error ? error.message : String(error),
+            stack: error instanceof Error ? error.stack?.slice(0, 3000) : undefined
+          }
+        : {})
+    };
+
+    console.info("[STAGE_END]", payload);
+    if (durationMs > QUEUE_SLOW_STAGE_WARNING_MS) {
+      console.warn("[WARNING_STAGE_SLOW]", payload);
+    }
+  };
+}
 
 let notoSansThaiFont: { dataUri: string; format: "woff" | "woff2" } | null | undefined;
 
@@ -1360,6 +1397,14 @@ async function applyUserJobCooldown(userId: string, jobType: JobType, nextRetryA
 }
 
 export async function enqueuePostJobsForPost(userId: string, postId: string, options: EnqueueOptions = {}) {
+  const pageTaskStageDone = startQueueStageTimer("PAGE_TASK_CREATE", {
+    userId,
+    postId,
+    autoSource: options.payloadExtras?.autoSource,
+    autoPostConfigId: options.payloadExtras?.autoPostConfigId,
+    workflowRunId: options.payloadExtras?.workflowRunId
+  });
+  try {
   const post = (await Post.findById(postId).lean()) as LeanPost | null;
   if (!post) {
     throw new Error("Post not found");
@@ -1406,30 +1451,49 @@ export async function enqueuePostJobsForPost(userId: string, postId: string, opt
           ? new Date()
           : baseRunAt;
 
-    const job = await Job.create({
+    const jobCreateStageDone = startQueueStageTimer("DATABASE_SAVE", {
+      collection: "Job",
       userId,
-      type: "post",
-      scheduleId: options.scheduleId,
-      postId: post._id,
-      targetPageId: page.pageId,
-      fingerprint,
-      payload: {
-        postingMode: post.postingMode,
-        randomizeImages: post.randomizeImages,
-        randomizeCaption: post.randomizeCaption,
-        ...(options.payloadExtras ?? {}),
-        ...(isShopeePageTask
-          ? {
-              pageIndex: pageIndex + 1,
-              selectedPagesCount: selectedPages.length,
-              scheduledDelayMinutes: pageIndex * spacingMinutes
-            }
-          : {})
-      },
-      nextRunAt,
-      maxAttempts: 3,
-      status: "queued"
+      postId,
+      pageId: page.pageId,
+      pageName: page.name ?? "Facebook Page",
+      pageIndex: pageIndex + 1,
+      selectedPagesCount: selectedPages.length,
+      nextRunAt: nextRunAt.toISOString(),
+      autoSource: options.payloadExtras?.autoSource,
+      workflowRunId: options.payloadExtras?.workflowRunId
     });
+    let job: any;
+    try {
+      job = await Job.create({
+        userId,
+        type: "post",
+        scheduleId: options.scheduleId,
+        postId: post._id,
+        targetPageId: page.pageId,
+        fingerprint,
+        payload: {
+          postingMode: post.postingMode,
+          randomizeImages: post.randomizeImages,
+          randomizeCaption: post.randomizeCaption,
+          ...(options.payloadExtras ?? {}),
+          ...(isShopeePageTask
+            ? {
+                pageIndex: pageIndex + 1,
+                selectedPagesCount: selectedPages.length,
+                scheduledDelayMinutes: pageIndex * spacingMinutes
+              }
+            : {})
+        },
+        nextRunAt,
+        maxAttempts: 3,
+        status: "queued"
+      });
+      jobCreateStageDone("success", { jobId: String(job._id) });
+    } catch (error) {
+      jobCreateStageDone("failed", {}, error);
+      throw error;
+    }
 
     if (options.payloadExtras?.autoSource === "shopee-affiliate") {
       const autoPostConfigId = String(options.payloadExtras.autoPostConfigId ?? "");
@@ -1521,7 +1585,16 @@ export async function enqueuePostJobsForPost(userId: string, postId: string, opt
     throw new Error("Page task creation incomplete");
   }
 
+  pageTaskStageDone("success", {
+    queued,
+    selectedPagesCount: selectedPages.length,
+    targetPageIds: selectedPages.map((page) => page.pageId)
+  });
   return queued;
+  } catch (error) {
+    pageTaskStageDone("failed", {}, error);
+    throw error;
+  }
 }
 
 export async function repairMissingShopeePageTasks(userId: string, config: Record<string, any>, workflowRunId?: string | null) {

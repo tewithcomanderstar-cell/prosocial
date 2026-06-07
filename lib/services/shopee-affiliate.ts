@@ -42,6 +42,7 @@ const OPENAI_IMAGE_REQUEST_TIMEOUT_MS = Math.max(
   Number(process.env.OPENAI_IMAGE_TIMEOUT_MS ?? "180000")
 );
 const OPENAI_IMAGE_MAX_ATTEMPTS = 2;
+const AUTO_POST_SLOW_STAGE_WARNING_MS = 30_000;
 const DISABLED_STORYBOARD_PRESENTATION_VALIDATION_RULES = [
   "storyboard_caption_max_4_benefit_bullets",
   "storyboard_caption_min_benefit_bullets",
@@ -4353,6 +4354,128 @@ async function logShopeePackageStage(input: {
 
 type ShopeePackageStageLogInput = Parameters<typeof logShopeePackageStage>[0];
 
+async function logShopeeTimedStageStart(input: {
+  userId: string;
+  jobId?: string;
+  pageId?: string;
+  product?: ShopeeProductRecord;
+  stage: string;
+  startedAt: Date;
+  metadata?: Record<string, unknown>;
+}) {
+  await logShopeePackageStage({
+    userId: input.userId,
+    jobId: input.jobId,
+    pageId: input.pageId,
+    product: input.product,
+    step: "STAGE_START",
+    status: "started",
+    message: `${input.stage} started`,
+    metadata: {
+      stage: input.stage,
+      startedAt: input.startedAt.toISOString(),
+      ...(input.metadata ?? {})
+    }
+  });
+}
+
+async function logShopeeTimedStageEnd(input: {
+  userId: string;
+  jobId?: string;
+  pageId?: string;
+  product?: ShopeeProductRecord;
+  stage: string;
+  startedAt: Date;
+  status: "success" | "failed";
+  metadata?: Record<string, unknown>;
+  error?: unknown;
+}) {
+  const completedAt = new Date();
+  const durationMs = completedAt.getTime() - input.startedAt.getTime();
+  const metadata = {
+    stage: input.stage,
+    startedAt: input.startedAt.toISOString(),
+    completedAt: completedAt.toISOString(),
+    STAGE_DURATION_MS: durationMs,
+    durationMs,
+    ...(input.metadata ?? {})
+  };
+
+  await logShopeePackageStage({
+    userId: input.userId,
+    jobId: input.jobId,
+    pageId: input.pageId,
+    product: input.product,
+    step: "STAGE_END",
+    status: input.status,
+    message: `${input.stage} ${input.status === "success" ? "completed" : "failed"} in ${durationMs}ms`,
+    metadata,
+    error: input.error
+  });
+
+  if (durationMs > AUTO_POST_SLOW_STAGE_WARNING_MS) {
+    await logShopeePackageStage({
+      userId: input.userId,
+      jobId: input.jobId,
+      pageId: input.pageId,
+      product: input.product,
+      step: "WARNING_STAGE_SLOW",
+      status: "success",
+      message: `${input.stage} exceeded ${AUTO_POST_SLOW_STAGE_WARNING_MS}ms (${durationMs}ms)`,
+      metadata
+    });
+  }
+}
+
+async function runShopeeTimedStage<T>(input: {
+  userId: string;
+  jobId?: string;
+  pageId?: string;
+  product?: ShopeeProductRecord;
+  stage: string;
+  metadata?: Record<string, unknown>;
+  fn: () => Promise<T> | T;
+}) {
+  const startedAt = new Date();
+  await logShopeeTimedStageStart({
+    userId: input.userId,
+    jobId: input.jobId,
+    pageId: input.pageId,
+    product: input.product,
+    stage: input.stage,
+    startedAt,
+    metadata: input.metadata
+  });
+
+  try {
+    const result = await input.fn();
+    await logShopeeTimedStageEnd({
+      userId: input.userId,
+      jobId: input.jobId,
+      pageId: input.pageId,
+      product: input.product,
+      stage: input.stage,
+      startedAt,
+      status: "success",
+      metadata: input.metadata
+    });
+    return result;
+  } catch (error) {
+    await logShopeeTimedStageEnd({
+      userId: input.userId,
+      jobId: input.jobId,
+      pageId: input.pageId,
+      product: input.product,
+      stage: input.stage,
+      startedAt,
+      status: "failed",
+      metadata: input.metadata,
+      error
+    });
+    throw error;
+  }
+}
+
 function isOpenAiImageTimeoutError(error: unknown) {
   if (error instanceof ShopeeProviderError && error.code === "openai_image_timeout") return true;
   const message = error instanceof Error ? error.message : String(error ?? "");
@@ -4505,7 +4628,20 @@ async function generateShopeeUgcImageDocs(input: {
     await logShopeePackageStage(logInput);
     loggingDurationMs += Date.now() - logStartedAt;
   };
+  const imageGenerationStageStartedAt = new Date();
+  await logShopeeTimedStageStart({
+    userId: input.userId,
+    jobId: input.jobId,
+    product: input.product,
+    stage: "IMAGE_GENERATION",
+    startedAt: imageGenerationStageStartedAt,
+    metadata: {
+      expectedImages: input.promptSet.prompts.length,
+      sourceImageCount: input.sourceImageUrls.length
+    }
+  });
 
+  try {
   const uniqueSourceImageUrls = Array.from(new Set(input.sourceImageUrls.filter((url) => Boolean(url?.trim())))).slice(0, 4);
   const referenceImages = await Promise.all(uniqueSourceImageUrls.map(fetchShopeeReferenceImage));
   if (referenceImages.length === 0) {
@@ -4517,7 +4653,17 @@ async function generateShopeeUgcImageDocs(input: {
     );
   }
 
-  const sourceHashes = new Set(referenceImages.map((image) => hashImageBuffer(image.bytes)));
+  const sourceHashes = await runShopeeTimedStage({
+    userId: input.userId,
+    jobId: input.jobId,
+    product: input.product,
+    stage: "IMAGE_VALIDATION",
+    metadata: {
+      validationStep: "reference_hashes",
+      referenceImageCount: referenceImages.length
+    },
+    fn: () => new Set(referenceImages.map((image) => hashImageBuffer(image.bytes)))
+  });
   const generatedHashes = new Set<string>();
   const imageDocs = [];
 
@@ -4585,13 +4731,29 @@ async function generateShopeeUgcImageDocs(input: {
         imageLoggingDurationMs += imageResult.loggingDurationMs;
         loggingDurationMs += imageResult.loggingDurationMs;
         imageDurations[`IMAGE_${index + 1}_DURATION`] = imageResult.requestDurationMs;
-        const generatedHash = hashImageBuffer(generatedBuffer);
-        if (sourceHashes.has(generatedHash)) {
-          throw new Error("OpenAI returned the original Shopee product image instead of a new UGC lifestyle image");
-        }
-        if (generatedHashes.has(generatedHash)) {
-          throw new Error("OpenAI returned duplicate UGC images");
-        }
+        await runShopeeTimedStage({
+          userId: input.userId,
+          jobId: input.jobId,
+          product: input.product,
+          stage: "IMAGE_VALIDATION",
+          metadata: {
+            validationStep: "generated_hash_compare",
+            imageIndex: index + 1,
+            attempt,
+            sourceHashCount: sourceHashes.size,
+            generatedHashCount: generatedHashes.size
+          },
+          fn: () => {
+            const generatedHash = hashImageBuffer(generatedBuffer as Buffer);
+            if (sourceHashes.has(generatedHash)) {
+              throw new Error("OpenAI returned the original Shopee product image instead of a new UGC lifestyle image");
+            }
+            if (generatedHashes.has(generatedHash)) {
+              throw new Error("OpenAI returned duplicate UGC images");
+            }
+            return generatedHash;
+          }
+        });
         break;
       } catch (error) {
         lastError = error;
@@ -4607,7 +4769,18 @@ async function generateShopeeUgcImageDocs(input: {
         "internal_api"
       );
     }
-    const generatedHash = hashImageBuffer(generatedBuffer);
+    const generatedHash = await runShopeeTimedStage({
+      userId: input.userId,
+      jobId: input.jobId,
+      product: input.product,
+      stage: "IMAGE_VALIDATION",
+      metadata: {
+        validationStep: "final_generated_hash",
+        imageIndex: index + 1,
+        imageCount: input.promptSet.prompts.length
+      },
+      fn: () => hashImageBuffer(generatedBuffer as Buffer)
+    });
 
     generatedHashes.add(generatedHash);
 
@@ -4629,13 +4802,24 @@ async function generateShopeeUgcImageDocs(input: {
     let uploadedImage: Awaited<ReturnType<typeof uploadAutoPostImage>>;
     try {
       const uploadStartedAt = Date.now();
-      uploadedImage = await uploadAutoPostImage({
-        jobId: input.jobId ?? `shopee-${Date.now()}`,
-        productId: input.product.productId,
-        index: index + 1,
-        buffer: generatedBuffer,
-        mimeType: "image/png",
-        kind: "image"
+      uploadedImage = await runShopeeTimedStage({
+        userId: input.userId,
+        jobId: input.jobId,
+        product: input.product,
+        stage: "BLOB_UPLOAD",
+        metadata: {
+          imageIndex: index + 1,
+          imageCount: input.promptSet.prompts.length,
+          sizeBytes: generatedBuffer.length
+        },
+        fn: () => uploadAutoPostImage({
+          jobId: input.jobId ?? `shopee-${Date.now()}`,
+          productId: input.product.productId,
+          index: index + 1,
+          buffer: generatedBuffer as Buffer,
+          mimeType: "image/png",
+          kind: "image"
+        })
       });
       blobUploadDurationMs += Date.now() - uploadStartedAt;
     } catch (error) {
@@ -4699,7 +4883,19 @@ async function generateShopeeUgcImageDocs(input: {
       ]
     };
     assertNoLargeMongoFields(imagePayload, "AiGeneratedImage");
-    const imageDoc = await AiGeneratedImage.create(imagePayload);
+    const imageDoc = await runShopeeTimedStage({
+      userId: input.userId,
+      jobId: input.jobId,
+      product: input.product,
+      stage: "DATABASE_SAVE",
+      metadata: {
+        collection: "AiGeneratedImage",
+        imageIndex: index + 1,
+        imageCount: input.promptSet.prompts.length,
+        pathname: uploadedImage.pathname
+      },
+      fn: () => AiGeneratedImage.create(imagePayload)
+    });
     imageDocs.push(imageDoc);
   }
 
@@ -4738,7 +4934,41 @@ async function generateShopeeUgcImageDocs(input: {
     }
   });
 
+  await logShopeeTimedStageEnd({
+    userId: input.userId,
+    jobId: input.jobId,
+    product: input.product,
+    stage: "IMAGE_GENERATION",
+    startedAt: imageGenerationStageStartedAt,
+    status: "success",
+    metadata: {
+      expectedImages: input.promptSet.prompts.length,
+      generatedImages: imageDocs.length,
+      IMAGE_REQUEST_COUNT: imageRequestCount,
+      TOTAL_IMAGE_DURATION: totalImageDurationMs,
+      BLOB_UPLOAD_DURATION: blobUploadDurationMs,
+      LOGGING_DURATION: loggingDurationMs
+    }
+  });
   return imageDocs;
+  } catch (error) {
+    await logShopeeTimedStageEnd({
+      userId: input.userId,
+      jobId: input.jobId,
+      product: input.product,
+      stage: "IMAGE_GENERATION",
+      startedAt: imageGenerationStageStartedAt,
+      status: "failed",
+      metadata: {
+        expectedImages: input.promptSet.prompts.length,
+        IMAGE_REQUEST_COUNT: imageRequestCount,
+        BLOB_UPLOAD_DURATION: blobUploadDurationMs,
+        LOGGING_DURATION: loggingDurationMs
+      },
+      error
+    });
+    throw error;
+  }
 }
 
 export async function buildShopeePostPackage(input: {
@@ -4867,27 +5097,40 @@ export async function buildShopeePostPackage(input: {
 
   let postDoc: any;
   try {
-    postDoc = await AiGeneratedPost.create({
+    postDoc = await runShopeeTimedStage({
       userId: input.userId,
-      productId: input.product.productId,
-      caption,
-      imagePrompt,
-      generatedImageUrl: imageDocs[0] ? `ai-image:${String(imageDocs[0]._id)}` : input.product.productImageUrl,
-      affiliateLink: shortAffiliateLink,
-      scheduledAt: input.scheduledAt,
+      jobId: input.jobId,
       pageId: input.pageId,
-      status: "image_ready",
-      generationMetaJson: {
-        imageId: imageDocs[0] ? String(imageDocs[0]._id) : null,
-        imageIds: imageDocs.map((imageDoc) => String(imageDoc._id)),
-        generatedImageUrls: imageDocs.map((imageDoc) => `ai-image:${String(imageDoc._id)}`),
-        imagePromptSet,
-        source: "shopee-affiliate",
-        affiliateUrl: linkResult.affiliateUrl,
+      product: input.product,
+      stage: "TEMPLATE_POST_CREATE",
+      metadata: {
+        collection: "AiGeneratedPost",
+        imageCount: imageDocs.length,
         shortAffiliateLink,
-        trackingId: linkResult.trackingId,
-        promptCount: imagePrompts.length
-      }
+        scheduledAt: input.scheduledAt.toISOString()
+      },
+      fn: () => AiGeneratedPost.create({
+        userId: input.userId,
+        productId: input.product.productId,
+        caption,
+        imagePrompt,
+        generatedImageUrl: imageDocs[0] ? `ai-image:${String(imageDocs[0]._id)}` : input.product.productImageUrl,
+        affiliateLink: shortAffiliateLink,
+        scheduledAt: input.scheduledAt,
+        pageId: input.pageId,
+        status: "image_ready",
+        generationMetaJson: {
+          imageId: imageDocs[0] ? String(imageDocs[0]._id) : null,
+          imageIds: imageDocs.map((imageDoc) => String(imageDoc._id)),
+          generatedImageUrls: imageDocs.map((imageDoc) => `ai-image:${String(imageDoc._id)}`),
+          imagePromptSet,
+          source: "shopee-affiliate",
+          affiliateUrl: linkResult.affiliateUrl,
+          shortAffiliateLink,
+          trackingId: linkResult.trackingId,
+          promptCount: imagePrompts.length
+        }
+      })
     });
   } catch (error) {
     await logShopeePackageStage({

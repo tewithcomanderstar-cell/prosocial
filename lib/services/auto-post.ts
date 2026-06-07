@@ -831,6 +831,121 @@ async function logShopeeStep(input: {
   });
 }
 
+const AUTO_POST_SLOW_STAGE_WARNING_MS = 30_000;
+
+async function logShopeeTimedStageStart(input: {
+  config: LeanAutoPostConfig;
+  stage: string;
+  startedAt: Date;
+  pageId?: string;
+  productId?: string;
+  metadata?: Record<string, unknown>;
+}) {
+  await logShopeeStep({
+    config: input.config,
+    step: "STAGE_START",
+    status: "started",
+    message: `${input.stage} started`,
+    pageId: input.pageId,
+    productId: input.productId,
+    metadata: {
+      stage: input.stage,
+      startedAt: input.startedAt.toISOString(),
+      ...(input.metadata ?? {})
+    }
+  });
+}
+
+async function logShopeeTimedStageEnd(input: {
+  config: LeanAutoPostConfig;
+  stage: string;
+  startedAt: Date;
+  status: "success" | "failed";
+  pageId?: string;
+  productId?: string;
+  metadata?: Record<string, unknown>;
+  error?: unknown;
+}) {
+  const completedAt = new Date();
+  const durationMs = completedAt.getTime() - input.startedAt.getTime();
+  const metadata = {
+    stage: input.stage,
+    startedAt: input.startedAt.toISOString(),
+    completedAt: completedAt.toISOString(),
+    STAGE_DURATION_MS: durationMs,
+    durationMs,
+    ...(input.metadata ?? {})
+  };
+
+  await logShopeeStep({
+    config: input.config,
+    step: "STAGE_END",
+    status: input.status,
+    message: `${input.stage} ${input.status === "success" ? "completed" : "failed"} in ${durationMs}ms`,
+    pageId: input.pageId,
+    productId: input.productId,
+    metadata,
+    error: input.error
+  });
+
+  if (durationMs > AUTO_POST_SLOW_STAGE_WARNING_MS) {
+    await logShopeeStep({
+      config: input.config,
+      step: "WARNING_STAGE_SLOW",
+      status: "success",
+      message: `${input.stage} exceeded ${AUTO_POST_SLOW_STAGE_WARNING_MS}ms (${durationMs}ms)`,
+      pageId: input.pageId,
+      productId: input.productId,
+      metadata
+    });
+  }
+}
+
+async function runShopeeTimedStage<T>(input: {
+  config: LeanAutoPostConfig;
+  stage: string;
+  pageId?: string;
+  productId?: string;
+  metadata?: Record<string, unknown>;
+  fn: () => Promise<T> | T;
+}) {
+  const startedAt = new Date();
+  await logShopeeTimedStageStart({
+    config: input.config,
+    stage: input.stage,
+    startedAt,
+    pageId: input.pageId,
+    productId: input.productId,
+    metadata: input.metadata
+  });
+
+  try {
+    const result = await input.fn();
+    await logShopeeTimedStageEnd({
+      config: input.config,
+      stage: input.stage,
+      startedAt,
+      status: "success",
+      pageId: input.pageId,
+      productId: input.productId,
+      metadata: input.metadata
+    });
+    return result;
+  } catch (error) {
+    await logShopeeTimedStageEnd({
+      config: input.config,
+      stage: input.stage,
+      startedAt,
+      status: "failed",
+      pageId: input.pageId,
+      productId: input.productId,
+      metadata: input.metadata,
+      error
+    });
+    throw error;
+  }
+}
+
 async function createFailedShopeePageJob(input: {
   config: LeanAutoPostConfig;
   pageId: string;
@@ -1808,21 +1923,33 @@ async function queueShopeeAutoPostsForConfig(
 
     let post: any;
     try {
-      post = await Post.create({
-        userId: config.userId,
-        title: `Shopee Affiliate ${selected.product.productName}`,
-        content: packageResult.caption,
-        hashtags: [],
-        imageUrls: packageResult.generatedImageUrls,
-        targetPageIds: eligiblePageIds,
-        randomizeImages: false,
-        randomizeCaption: false,
-        postingMode: "broadcast",
-        variants: [],
-        status: "scheduled",
-        contentHash,
-        imageHash,
-        fingerprint
+      post = await runShopeeTimedStage({
+        config,
+        stage: "TEMPLATE_POST_CREATE",
+        productId: selected.product.productId,
+        metadata: {
+          workflowRunId: records.workflowRunId,
+          targetPageIds: eligiblePageIds,
+          imageCount: packageResult.generatedImageUrls.length,
+          collection: "Post",
+          mode: "batch"
+        },
+        fn: () => Post.create({
+          userId: config.userId,
+          title: `Shopee Affiliate ${selected.product.productName}`,
+          content: packageResult.caption,
+          hashtags: [],
+          imageUrls: packageResult.generatedImageUrls,
+          targetPageIds: eligiblePageIds,
+          randomizeImages: false,
+          randomizeCaption: false,
+          postingMode: "broadcast",
+          variants: [],
+          status: "scheduled",
+          contentHash,
+          imageHash,
+          fingerprint
+        })
       });
     } catch (error) {
       await logShopeeStep({
@@ -1879,26 +2006,37 @@ async function queueShopeeAutoPostsForConfig(
       }
     });
 
-    const queuedForPost = await enqueuePostJobsForPost(config.userId, String(post._id), {
-      applyRandomDelay: false,
-      startAt: batchStartAt,
-      forceImmediate: true,
-      payloadExtras: {
-        autoPostConfigId: config._id,
-        autoSource: "shopee-affiliate",
-        shopeeProductId: selected.product.productId,
-        shopeeProductName: captionProductName,
-        shopeeProductScore: selected.score.productScore,
-        shopeeSelectionReason: selected.score.reason,
-        affiliateLink: packageResult.shortAffiliateLink,
-        affiliateUrl: packageResult.affiliateLink,
-        imageCount: packageResult.generatedImageUrls.length,
-        aiGeneratedPostId: packageResult.aiGeneratedPostId,
-        selectedPagesCount: eligiblePageIds.length,
-        workflowId: records.workflowId,
+    const queuedForPost = await runShopeeTimedStage({
+      config,
+      stage: "PAGE_TASK_CREATE",
+      productId: selected.product.productId,
+      metadata: {
         workflowRunId: records.workflowRunId,
-        contentItemId: records.contentItemId
-      }
+        templatePostId: String(post._id),
+        expectedPages: eligiblePageIds.length,
+        mode: "batch"
+      },
+      fn: () => enqueuePostJobsForPost(config.userId, String(post._id), {
+        applyRandomDelay: false,
+        startAt: batchStartAt,
+        forceImmediate: true,
+        payloadExtras: {
+          autoPostConfigId: config._id,
+          autoSource: "shopee-affiliate",
+          shopeeProductId: selected.product.productId,
+          shopeeProductName: captionProductName,
+          shopeeProductScore: selected.score.productScore,
+          shopeeSelectionReason: selected.score.reason,
+          affiliateLink: packageResult.shortAffiliateLink,
+          affiliateUrl: packageResult.affiliateLink,
+          imageCount: packageResult.generatedImageUrls.length,
+          aiGeneratedPostId: packageResult.aiGeneratedPostId,
+          selectedPagesCount: eligiblePageIds.length,
+          workflowId: records.workflowId,
+          workflowRunId: records.workflowRunId,
+          contentItemId: records.contentItemId
+        }
+      })
     });
 
     console.info("[TASK CREATED]", {
@@ -2088,9 +2226,10 @@ async function queueShopeeAutoPostsForConfig(
         throw new Error("Shopee post package is incomplete: affiliate short link and 4 images are required");
       }
 
+      const readyPackageResult = packageResult;
       const postStatus = config.approvalMode ? "draft" : "scheduled";
-      const contentHash = hashValue(packageResult.caption);
-      const imageHash = hashValue(packageResult.generatedImageUrls);
+      const contentHash = hashValue(readyPackageResult.caption);
+      const imageHash = hashValue(readyPackageResult.generatedImageUrls);
       const fingerprint = hashValue({
         source: "shopee-affiliate",
         pageId: selected.pageId,
@@ -2110,10 +2249,10 @@ async function queueShopeeAutoPostsForConfig(
           jobId: records.workflowRunId,
           productId: selected.product.productId,
           hasStoryboard: true,
-          hasCaption: Boolean(packageResult.caption),
-          imageCount: packageResult.generatedImageUrls.length,
-          imageUrls: packageResult.generatedImageUrls,
-          blobUrls: packageResult.generatedImageUrls,
+          hasCaption: Boolean(readyPackageResult.caption),
+          imageCount: readyPackageResult.generatedImageUrls.length,
+          imageUrls: readyPackageResult.generatedImageUrls,
+          blobUrls: readyPackageResult.generatedImageUrls,
           targetPageIds: [selected.pageId],
           workflowRunId: records.workflowRunId
         }
@@ -2121,21 +2260,34 @@ async function queueShopeeAutoPostsForConfig(
 
       let post: any;
       try {
-        post = await Post.create({
-          userId: config.userId,
-          title: `Shopee Affiliate ${selected.product.productName}`,
-          content: packageResult.caption,
-          hashtags: [],
-          imageUrls: packageResult.generatedImageUrls,
-          targetPageIds: [selected.pageId],
-          randomizeImages: false,
-          randomizeCaption: false,
-          postingMode: "broadcast",
-          variants: [],
-          status: postStatus,
-          contentHash,
-          imageHash,
-          fingerprint
+        post = await runShopeeTimedStage({
+          config,
+          stage: "TEMPLATE_POST_CREATE",
+          pageId: selected.pageId,
+          productId: selected.product.productId,
+          metadata: {
+            workflowRunId: records.workflowRunId,
+            targetPageIds: [selected.pageId],
+            imageCount: readyPackageResult.generatedImageUrls.length,
+            collection: "Post",
+            mode: "per_page"
+          },
+          fn: () => Post.create({
+            userId: config.userId,
+            title: `Shopee Affiliate ${selected.product.productName}`,
+            content: readyPackageResult.caption,
+            hashtags: [],
+            imageUrls: readyPackageResult.generatedImageUrls,
+            targetPageIds: [selected.pageId],
+            randomizeImages: false,
+            randomizeCaption: false,
+            postingMode: "broadcast",
+            variants: [],
+            status: postStatus,
+            contentHash,
+            imageHash,
+            fingerprint
+          })
         });
       } catch (error) {
         await logShopeeStep({
@@ -2198,28 +2350,41 @@ async function queueShopeeAutoPostsForConfig(
 
       const queuedForPost = config.approvalMode
         ? 0
-        : await enqueuePostJobsForPost(config.userId, String(post._id), {
-            applyRandomDelay: false,
-            startAt,
-            forceImmediate: true,
-            payloadExtras: {
-              autoPostConfigId: config._id,
-              autoSource: "shopee-affiliate",
-              shopeeProductId: selected.product.productId,
-              shopeeProductName: captionProductName,
-              shopeeProductScore: selected.score.productScore,
-              shopeeSelectionReason: selected.score.reason,
-              affiliateLink: packageResult.shortAffiliateLink,
-              affiliateUrl: packageResult.affiliateLink,
-              imageCount: packageResult.generatedImageUrls.length,
-              aiGeneratedPostId: packageResult.aiGeneratedPostId,
-              selectedPagesCount: eligiblePageIds.length,
-              pageIndex: Math.max(pageIndex, index) + 1,
-              scheduledDelayMinutes: Math.max(pageIndex, index) * pageSpacingMinutes,
-              workflowId: records.workflowId,
+        : await runShopeeTimedStage({
+            config,
+            stage: "PAGE_TASK_CREATE",
+            pageId: selected.pageId,
+            productId: selected.product.productId,
+            metadata: {
               workflowRunId: records.workflowRunId,
-              contentItemId: records.contentItemId
-            }
+              templatePostId: String(post._id),
+              expectedPages: 1,
+              mode: "per_page",
+              pageIndex: Math.max(pageIndex, index) + 1
+            },
+            fn: () => enqueuePostJobsForPost(config.userId, String(post._id), {
+              applyRandomDelay: false,
+              startAt,
+              forceImmediate: true,
+              payloadExtras: {
+                autoPostConfigId: config._id,
+                autoSource: "shopee-affiliate",
+                shopeeProductId: selected.product.productId,
+                shopeeProductName: captionProductName,
+                shopeeProductScore: selected.score.productScore,
+                shopeeSelectionReason: selected.score.reason,
+              affiliateLink: readyPackageResult.shortAffiliateLink,
+              affiliateUrl: readyPackageResult.affiliateLink,
+              imageCount: readyPackageResult.generatedImageUrls.length,
+              aiGeneratedPostId: readyPackageResult.aiGeneratedPostId,
+                selectedPagesCount: eligiblePageIds.length,
+                pageIndex: Math.max(pageIndex, index) + 1,
+                scheduledDelayMinutes: Math.max(pageIndex, index) * pageSpacingMinutes,
+                workflowId: records.workflowId,
+                workflowRunId: records.workflowRunId,
+                contentItemId: records.contentItemId
+              }
+            })
           });
 
       console.info("[TASK CREATED]", {
