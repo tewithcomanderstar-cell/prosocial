@@ -741,6 +741,15 @@ export function classifyAutoPostError(error: unknown): AutoPostErrorClassificati
   }
 
   if (
+    message.includes("openai_image_timeout") ||
+    message.includes("openai image request timeout") ||
+    message.includes("shopee ugc image generation failed") ||
+    message.includes("image generation failed")
+  ) {
+    return "retry_with_next_product";
+  }
+
+  if (
     message.includes("timeout") ||
     message.includes("timed out") ||
     message.includes("rate limit") ||
@@ -1189,6 +1198,32 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
             reason: skipReason,
             classification
           });
+
+          if (
+            skipReason.toLowerCase().includes("image") ||
+            skipReason.toLowerCase().includes("openai") ||
+            skipReason.toLowerCase().includes("ugc")
+          ) {
+            await logShopeeStep({
+              config: input.config,
+              step: "PRODUCT_SKIPPED_IMAGE_GENERATION_FAILED",
+              status: "skipped",
+              message: `Product skipped because UGC image generation failed: ${skipReason}`,
+              pageId: selected.pageId,
+              productId,
+              error,
+              metadata: {
+                attempt,
+                maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
+                productId,
+                productName: selected.product.productName,
+                category: selected.product.category ?? "",
+                skipReason,
+                skippedProductsCount: skippedProducts.length,
+                workflowRunId: input.records.workflowRunId
+              }
+            });
+          }
 
           await logShopeeStep({
             config: input.config,

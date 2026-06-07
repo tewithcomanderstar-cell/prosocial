@@ -77,6 +77,11 @@ type ControlPanelStatus = {
   captionStatus?: string | null;
   imageStatus?: string | null;
   blobStatus?: string | null;
+  imageStartedAt?: string | null;
+  imageDurationMs?: number | null;
+  imageProvider?: string | null;
+  imageRetryCount?: number | null;
+  imageLastError?: string | null;
   lastSkippedReason?: string | null;
   selectedPagesCount?: number;
   createdTasksCount?: number;
@@ -244,6 +249,16 @@ function getShopeeCategorySummary(categories: string[]) {
 function formatDateTime(value?: string) {
   if (!value) return "-";
   return new Date(value).toLocaleString();
+}
+
+function formatDurationMs(value?: number | null) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "-";
+  if (value < 1000) return `${Math.max(0, Math.round(value))} ms`;
+  const seconds = Math.round(value / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${minutes}m ${remainingSeconds}s`;
 }
 
 function formatScheduledLabel(value?: string | null) {
@@ -1332,6 +1347,11 @@ export function AutoPostPanel() {
           <div className="auto-post-metric-card"><span className="muted">Storyboard status</span><strong>{controlPanel?.storyboardStatus ?? "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Caption status</span><strong>{controlPanel?.captionStatus ?? "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Image status</span><strong>{controlPanel?.imageStatus ?? "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Image started at</span><strong>{formatDateTime(controlPanel?.imageStartedAt ?? undefined)}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Image duration</span><strong>{formatDurationMs(controlPanel?.imageDurationMs)}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Image provider</span><strong>{controlPanel?.imageProvider ? sanitizeText(controlPanel.imageProvider) : "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Image retry count</span><strong>{controlPanel?.imageRetryCount ?? "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Image last error</span><strong>{controlPanel?.imageLastError ? sanitizeText(controlPanel.imageLastError) : "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Blob status</span><strong>{controlPanel?.blobStatus ?? "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Selected pages</span><strong>{controlPanel?.selectedPagesCount ?? config.targetPageIds.length}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Created tasks</span><strong>{controlPanel?.createdTasksCount ?? controlPanel?.pageResults?.filter((result) => result.jobId).length ?? 0}</strong></div>

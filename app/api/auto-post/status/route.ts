@@ -189,9 +189,12 @@ function getStageStatusSummary(logs: StageLog[], input: {
   completed: string[];
   failed: string[];
 }) {
-  if (getLatestStageLog(logs, input.failed)) return "failed";
-  if (getLatestStageLog(logs, input.completed)) return "created";
-  if (getLatestStageLog(logs, input.started)) return "started";
+  const latest = getLatestStageLog(logs, [...input.failed, ...input.completed, ...input.started]);
+  if (!latest) return "pending";
+  const latestStep = getStageStep(latest);
+  if (input.failed.includes(latestStep)) return "failed";
+  if (input.completed.includes(latestStep)) return "created";
+  if (input.started.includes(latestStep)) return "started";
   return "pending";
 }
 
@@ -203,6 +206,10 @@ function derivePreTaskBlockingStep(logs: StageLog[]) {
     "UGC_IMAGES_CREATED",
     "UGC_IMAGES_STARTED",
     "UGC_IMAGES_FAILED",
+    "OPENAI_IMAGE_REQUEST_END",
+    "OPENAI_IMAGE_REQUEST_START",
+    "OPENAI_IMAGE_REQUEST_FAILED",
+    "OPENAI_IMAGE_TIMEOUT",
     "BLOB_UPLOAD_COMPLETED",
     "BLOB_UPLOAD_STARTED",
     "BLOB_UPLOAD_FAILED",
@@ -227,6 +234,8 @@ function derivePreTaskBlockingStep(logs: StageLog[]) {
     "TEMPLATE_POST_CREATE_FAILED",
     "BLOB_UPLOAD_FAILED",
     "UGC_IMAGES_FAILED",
+    "OPENAI_IMAGE_REQUEST_FAILED",
+    "OPENAI_IMAGE_TIMEOUT",
     "CAPTION_FAILED",
     "STORYBOARD_FAILED",
     "PRODUCT_FETCH_FAILED"
@@ -239,6 +248,8 @@ function derivePreTaskBlockingStep(logs: StageLog[]) {
   if (latestStep === "TEMPLATE_POST_CREATED") return "WAITING_FOR_PAGE_TASKS";
   if (latestStep === "TEMPLATE_POST_CREATE_STARTED") return "WAITING_FOR_TEMPLATE_POST";
   if (latestStep === "UGC_IMAGES_CREATED") return "WAITING_FOR_TEMPLATE_POST";
+  if (latestStep === "OPENAI_IMAGE_REQUEST_END") return "WAITING_FOR_BLOB_UPLOAD";
+  if (latestStep === "OPENAI_IMAGE_REQUEST_START") return "WAITING_FOR_OPENAI_IMAGE";
   if (latestStep === "UGC_IMAGES_STARTED") return "WAITING_FOR_UGC_IMAGES";
   if (latestStep === "BLOB_UPLOAD_STARTED") return "WAITING_FOR_BLOB_UPLOAD";
   if (latestStep === "BLOB_UPLOAD_COMPLETED") return "WAITING_FOR_UGC_IMAGES";
@@ -488,6 +499,10 @@ export async function GET() {
       "CAPTION_CREATED",
       "UGC_IMAGES_STARTED",
       "UGC_IMAGES_CREATED",
+      "OPENAI_IMAGE_REQUEST_START",
+      "OPENAI_IMAGE_REQUEST_END",
+      "OPENAI_IMAGE_REQUEST_FAILED",
+      "OPENAI_IMAGE_TIMEOUT",
       "TEMPLATE_POST_CREATE_STARTED",
       "TEMPLATE_POST_CREATED"
     ]);
@@ -506,15 +521,40 @@ export async function GET() {
       failed: ["CAPTION_FAILED", "CAPTION_VALIDATION_FAILED_DETAIL"]
     });
     const imageStatus = getStageStatusSummary(runStageLogs, {
-      started: ["UGC_IMAGES_STARTED"],
-      completed: ["UGC_IMAGES_CREATED"],
-      failed: ["UGC_IMAGES_FAILED", "shopee_ugc_image_generation_failed"]
+      started: ["UGC_IMAGES_STARTED", "OPENAI_IMAGE_REQUEST_START"],
+      completed: ["UGC_IMAGES_CREATED", "OPENAI_IMAGE_REQUEST_END"],
+      failed: ["UGC_IMAGES_FAILED", "OPENAI_IMAGE_REQUEST_FAILED", "OPENAI_IMAGE_TIMEOUT", "shopee_ugc_image_generation_failed"]
     });
     const blobStatus = getStageStatusSummary(runStageLogs, {
       started: ["BLOB_UPLOAD_STARTED"],
       completed: ["BLOB_UPLOAD_COMPLETED", "UGC_IMAGES_CREATED"],
       failed: ["BLOB_UPLOAD_FAILED"]
     });
+    const latestImageRequestLog = getLatestStageLog(runStageLogs, [
+      "OPENAI_IMAGE_REQUEST_END",
+      "OPENAI_IMAGE_REQUEST_FAILED",
+      "OPENAI_IMAGE_TIMEOUT",
+      "OPENAI_IMAGE_REQUEST_START"
+    ]);
+    const latestImageRequestMetadata = (latestImageRequestLog?.metadata ?? {}) as Record<string, unknown>;
+    const imageDurationMs =
+      typeof latestImageRequestMetadata.durationMs === "number"
+        ? latestImageRequestMetadata.durationMs
+        : latestImageRequestMetadata.durationMs
+          ? Number(latestImageRequestMetadata.durationMs)
+          : null;
+    const imageRetryCount =
+      typeof latestImageRequestMetadata.retryCount === "number"
+        ? latestImageRequestMetadata.retryCount
+        : latestImageRequestMetadata.retryCount
+          ? Number(latestImageRequestMetadata.retryCount)
+          : null;
+    const imageLastError =
+      typeof latestImageRequestMetadata.errorMessage === "string"
+        ? latestImageRequestMetadata.errorMessage
+        : typeof latestImageRequestMetadata.serializedError === "object" && latestImageRequestMetadata.serializedError
+          ? String((latestImageRequestMetadata.serializedError as Record<string, unknown>).message ?? "")
+          : null;
     const latestRunLogAt =
       latestRunLog?.createdAt instanceof Date
         ? latestRunLog.createdAt
@@ -738,6 +778,17 @@ export async function GET() {
       captionStatus,
       imageStatus,
       blobStatus,
+      imageStartedAt:
+        typeof latestImageRequestMetadata.startedAt === "string"
+          ? latestImageRequestMetadata.startedAt
+          : latestImageRequestLog?.createdAt ?? null,
+      imageDurationMs: imageDurationMs !== null && Number.isFinite(imageDurationMs) ? imageDurationMs : null,
+      imageProvider:
+        typeof latestImageRequestMetadata.provider === "string"
+          ? latestImageRequestMetadata.provider
+          : null,
+      imageRetryCount: imageRetryCount !== null && Number.isFinite(imageRetryCount) ? imageRetryCount : null,
+      imageLastError: imageLastError ? sanitizeLegacyMessage(imageLastError) : null,
       lastSkippedReason: latestSkippedProductLog
         ? sanitizeLegacyMessage(String(latestSkippedMetadata.reason ?? latestSkippedProductLog.message ?? "Product skipped"))
         : null,

@@ -32,6 +32,11 @@ export type ShopeeSourceTag = "trending" | "best_selling" | "top_search" | "best
 export type ShopeeCaptionStyle = "soft_sell" | "urgency" | "problem_solution" | "review_style" | "deal_alert" | "lifestyle";
 
 const SHOPEE_MAX_HASHTAGS = 5;
+const OPENAI_IMAGE_REQUEST_TIMEOUT_MS = Math.max(
+  30_000,
+  Number(process.env.OPENAI_IMAGE_TIMEOUT_MS ?? "180000")
+);
+const OPENAI_IMAGE_MAX_ATTEMPTS = 2;
 const DISABLED_STORYBOARD_PRESENTATION_VALIDATION_RULES = [
   "storyboard_caption_max_4_benefit_bullets",
   "storyboard_caption_min_benefit_bullets",
@@ -4148,6 +4153,124 @@ async function logShopeePackageStage(input: {
   });
 }
 
+function isOpenAiImageTimeoutError(error: unknown) {
+  if (error instanceof ShopeeProviderError && error.code === "openai_image_timeout") return true;
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return message.toLowerCase().includes("openai image request timeout");
+}
+
+function withOpenAiImageTimeout<T>(promise: Promise<T>, timeoutMs: number) {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  return new Promise<T>((resolve, reject) => {
+    timeout = setTimeout(() => {
+      reject(
+        new ShopeeProviderError(
+          `OpenAI image request timeout after ${timeoutMs}ms`,
+          504,
+          "openai_image_timeout",
+          "internal_api"
+        )
+      );
+    }, timeoutMs);
+
+    promise
+      .then(resolve)
+      .catch(reject)
+      .finally(() => {
+        if (timeout) clearTimeout(timeout);
+      });
+  });
+}
+
+async function generateShopeeUgcImageWithTracing(input: {
+  userId: string;
+  jobId?: string;
+  product: ShopeeProductRecord;
+  imageIndex: number;
+  imageCount: number;
+  attempt: number;
+  primaryReference: { bytes: Buffer; mimeType: string };
+  referenceImages: Array<{ bytes: Buffer; mimeType: string }>;
+  prompt: string;
+}) {
+  const provider = process.env.OPENAI_IMAGE_MODEL?.trim() || "gpt-image-1";
+  const startedAt = new Date();
+  const requestId = crypto.randomUUID();
+  const baseMetadata = {
+    requestId,
+    imageIndex: input.imageIndex,
+    imageCount: input.imageCount,
+    attempt: input.attempt,
+    retryCount: Math.max(0, input.attempt - 1),
+    maxAttempts: OPENAI_IMAGE_MAX_ATTEMPTS,
+    provider,
+    timeoutMs: OPENAI_IMAGE_REQUEST_TIMEOUT_MS,
+    startedAt: startedAt.toISOString()
+  };
+
+  await logShopeePackageStage({
+    userId: input.userId,
+    jobId: input.jobId,
+    product: input.product,
+    step: "OPENAI_IMAGE_REQUEST_START",
+    status: "started",
+    message: `OpenAI image request started for UGC image ${input.imageIndex}/${input.imageCount}`,
+    metadata: baseMetadata
+  });
+
+  try {
+    const generatedBuffer = await withOpenAiImageTimeout(
+      generateProductReferenceImage({
+        imageBytes: bufferToArrayBuffer(input.primaryReference.bytes),
+        mimeType: input.primaryReference.mimeType,
+        prompt: input.prompt,
+        userId: input.userId,
+        referenceImages: input.referenceImages.map((reference) => ({
+          imageBytes: bufferToArrayBuffer(reference.bytes),
+          mimeType: reference.mimeType
+        }))
+      }),
+      OPENAI_IMAGE_REQUEST_TIMEOUT_MS
+    );
+    const completedAt = new Date();
+    await logShopeePackageStage({
+      userId: input.userId,
+      jobId: input.jobId,
+      product: input.product,
+      step: "OPENAI_IMAGE_REQUEST_END",
+      status: "success",
+      message: `OpenAI image request completed for UGC image ${input.imageIndex}/${input.imageCount}`,
+      metadata: {
+        ...baseMetadata,
+        completedAt: completedAt.toISOString(),
+        durationMs: completedAt.getTime() - startedAt.getTime(),
+        sizeBytes: generatedBuffer.length
+      }
+    });
+    return generatedBuffer;
+  } catch (error) {
+    const completedAt = new Date();
+    const timeout = isOpenAiImageTimeoutError(error);
+    await logShopeePackageStage({
+      userId: input.userId,
+      jobId: input.jobId,
+      product: input.product,
+      step: timeout ? "OPENAI_IMAGE_TIMEOUT" : "OPENAI_IMAGE_REQUEST_FAILED",
+      status: "failed",
+      message: timeout
+        ? `OpenAI image request timed out for UGC image ${input.imageIndex}/${input.imageCount}`
+        : `OpenAI image request failed for UGC image ${input.imageIndex}/${input.imageCount}`,
+      metadata: {
+        ...baseMetadata,
+        completedAt: completedAt.toISOString(),
+        durationMs: completedAt.getTime() - startedAt.getTime()
+      },
+      error
+    });
+    throw error;
+  }
+}
+
 async function generateShopeeUgcImageDocs(input: {
   userId: string;
   jobId?: string;
@@ -4175,24 +4298,23 @@ async function generateShopeeUgcImageDocs(input: {
     let generatedBuffer: Buffer | null = null;
     let lastError: unknown = null;
 
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
+    for (let attempt = 1; attempt <= OPENAI_IMAGE_MAX_ATTEMPTS; attempt += 1) {
       try {
-        generatedBuffer = await generateProductReferenceImage({
-          imageBytes: bufferToArrayBuffer(primaryReference.bytes),
-          mimeType: primaryReference.mimeType,
+        generatedBuffer = await generateShopeeUgcImageWithTracing({
+          userId: input.userId,
+          jobId: input.jobId,
+          product: input.product,
+          imageIndex: index + 1,
+          imageCount: input.promptSet.prompts.length,
+          attempt,
+          primaryReference,
+          referenceImages: referenceImages.filter((_, referenceIndex) => referenceIndex !== index % referenceImages.length),
           prompt: [
             promptItem.prompt,
             `Generate image ${index + 1} of 4 only. This image must have a unique angle, environment, distance, camera framing, hand position, and usage context compared with the other three images.`,
             "Use all attached Shopee images as product identity references. Create a new realistic UGC lifestyle photo; do not copy, crop, resize, or reuse the original Shopee product image composition.",
             "No text, no overlay, no product card, no catalog background, no studio packshot."
-          ].join("\n"),
-          userId: input.userId,
-          referenceImages: referenceImages
-            .filter((_, referenceIndex) => referenceIndex !== index % referenceImages.length)
-            .map((reference) => ({
-              imageBytes: bufferToArrayBuffer(reference.bytes),
-              mimeType: reference.mimeType
-            }))
+          ].join("\n")
         });
         const generatedHash = hashImageBuffer(generatedBuffer);
         if (sourceHashes.has(generatedHash)) {
