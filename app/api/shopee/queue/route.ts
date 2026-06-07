@@ -48,21 +48,68 @@ function logQueueRoute(step: string, metadata: Record<string, unknown> = {}) {
   });
 }
 
+async function runQueueRouteStage<T>(
+  stage: string,
+  metadata: Record<string, unknown>,
+  fn: () => Promise<T> | T
+) {
+  const startedAt = Date.now();
+  logQueueRoute("QUEUE_ROUTE_STAGE_STARTED", {
+    stage,
+    startedAt: new Date(startedAt).toISOString(),
+    ...metadata
+  });
+
+  try {
+    const result = await fn();
+    const durationMs = Date.now() - startedAt;
+    logQueueRoute("QUEUE_ROUTE_STAGE_COMPLETED", {
+      stage,
+      durationMs,
+      ...metadata
+    });
+    if (durationMs > 10_000) {
+      logQueueRoute("QUEUE_ROUTE_STAGE_SLOW", {
+        stage,
+        durationMs,
+        thresholdMs: 10_000,
+        ...metadata
+      });
+    }
+    return result;
+  } catch (error) {
+    const durationMs = Date.now() - startedAt;
+    const serialized = serializeQueueRouteError(error);
+    console.error("[QUEUE_ROUTE_STAGE_ERROR]", {
+      route: "/api/shopee/queue",
+      stage,
+      durationMs,
+      ...metadata,
+      errorMessage: serialized.message,
+      errorStack: serialized.stack,
+      errorJson: serialized.json
+    });
+    throw error;
+  }
+}
+
 export async function GET() {
   const routeStartedAt = Date.now();
   logQueueRoute("QUEUE_ROUTE_STARTED", { method: "GET" });
   let userId = "";
   try {
-    userId = await requireAuth();
+    userId = await runQueueRouteStage("REQUIRE_AUTH", {}, () => requireAuth());
     logQueueRoute("QUEUE_ROUTE_INPUT", {
       userId,
       authenticated: true
     });
 
-    const queue = await FacebookPostQueue.find({ userId })
-      .sort({ scheduledAt: 1 })
-      .limit(100)
-      .lean();
+    const queue = await runQueueRouteStage("QUEUE_DB_QUERY", { userId, limit: 100 }, () =>
+      FacebookPostQueue.find({ userId })
+        .sort({ scheduledAt: 1 })
+        .limit(100)
+        .lean()
+    );
     logQueueRoute("QUEUE_ROUTE_INPUT", {
       userId,
       queueCount: queue.length,
@@ -86,21 +133,30 @@ export async function GET() {
       });
     }
 
-    const [products, aiPosts, posts] = await Promise.all([
-      ShopeeProduct.find({ userId, productId: { $in: productIds } })
-        .select("productId productName productPrice discountPrice discountPercent productImageUrl productImageUrls category rating salesCount reviewCount shopName")
-        .lean(),
-      aiPostIds.valid.length
-        ? AiGeneratedPost.find({ userId, _id: { $in: aiPostIds.valid } })
-        .select("caption affiliateLink generationMetaJson generatedImageUrl status")
-            .lean()
-        : Promise.resolve([]),
-      postIds.valid.length
-        ? Post.find({ userId, _id: { $in: postIds.valid } })
-        .select("content imageUrls status")
-            .lean()
-        : Promise.resolve([])
-    ]);
+    const [products, aiPosts, posts] = await runQueueRouteStage(
+      "RELATED_DB_QUERY",
+      {
+        userId,
+        productIdsCount: productIds.length,
+        aiPostIdsCount: aiPostIds.valid.length,
+        postIdsCount: postIds.valid.length
+      },
+      () => Promise.all([
+        ShopeeProduct.find({ userId, productId: { $in: productIds } })
+          .select("productId productName productPrice discountPrice discountPercent productImageUrl productImageUrls category rating salesCount reviewCount shopName")
+          .lean(),
+        aiPostIds.valid.length
+          ? AiGeneratedPost.find({ userId, _id: { $in: aiPostIds.valid } })
+              .select("caption affiliateLink generationMetaJson generatedImageUrl status")
+              .lean()
+          : Promise.resolve([]),
+        postIds.valid.length
+          ? Post.find({ userId, _id: { $in: postIds.valid } })
+              .select("content imageUrls status")
+              .lean()
+          : Promise.resolve([])
+      ])
+    );
     logQueueRoute("QUEUE_ROUTE_INPUT", {
       userId,
       productIdsCount: productIds.length,
@@ -115,7 +171,7 @@ export async function GET() {
     const aiPostMap = new Map(aiPosts.map((post) => [String(post._id), post]));
     const postMap = new Map(posts.map((post) => [String(post._id), post]));
 
-    const response = {
+    const response = await runQueueRouteStage("QUEUE_RESPONSE_MAP", { userId, queueCount: queue.length }, async () => ({
       queue: queue.map((item) => ({
         _id: String(item._id),
         pageId: item.pageId,
@@ -147,7 +203,7 @@ export async function GET() {
         errorCode: item.errorCode ?? null
       })),
       count: queue.length
-    };
+    }));
     logQueueRoute("QUEUE_ROUTE_COMPLETED", {
       userId,
       count: queue.length,
