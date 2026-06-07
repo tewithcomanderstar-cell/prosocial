@@ -74,6 +74,11 @@ type ControlPanelStatus = {
   currentProductId?: string | null;
   templatePostId?: string | null;
   storyboardStatus?: string | null;
+  storyboardStartedAt?: string | null;
+  storyboardDurationMs?: number | null;
+  storyboardProvider?: string | null;
+  storyboardRetryCount?: number | null;
+  storyboardLastError?: string | null;
   captionStatus?: string | null;
   imageStatus?: string | null;
   blobStatus?: string | null;
@@ -1345,6 +1350,11 @@ export function AutoPostPanel() {
           <div className="auto-post-metric-card"><span className="muted">Template post id</span><strong>{controlPanel?.templatePostId ? sanitizeText(controlPanel.templatePostId) : "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Last skipped reason</span><strong>{controlPanel?.lastSkippedReason ? sanitizeText(controlPanel.lastSkippedReason) : "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Storyboard status</span><strong>{controlPanel?.storyboardStatus ?? "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Storyboard started at</span><strong>{formatDateTime(controlPanel?.storyboardStartedAt ?? undefined)}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Storyboard duration</span><strong>{formatDurationMs(controlPanel?.storyboardDurationMs)}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Storyboard provider</span><strong>{controlPanel?.storyboardProvider ? sanitizeText(controlPanel.storyboardProvider) : "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Storyboard retry count</span><strong>{controlPanel?.storyboardRetryCount ?? "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Storyboard last error</span><strong>{controlPanel?.storyboardLastError ? sanitizeText(controlPanel.storyboardLastError) : "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Caption status</span><strong>{controlPanel?.captionStatus ?? "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Image status</span><strong>{controlPanel?.imageStatus ?? "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Image started at</span><strong>{formatDateTime(controlPanel?.imageStartedAt ?? undefined)}</strong></div>

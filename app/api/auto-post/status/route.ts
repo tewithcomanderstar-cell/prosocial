@@ -217,6 +217,12 @@ function derivePreTaskBlockingStep(logs: StageLog[]) {
     "CAPTION_STARTED",
     "CAPTION_FAILED",
     "STORYBOARD_CREATED",
+    "OPENAI_STORYBOARD_REQUEST_END",
+    "OPENAI_STORYBOARD_REQUEST_START",
+    "OPENAI_STORYBOARD_REQUEST_FAILED",
+    "OPENAI_STORYBOARD_REQUEST_TIMEOUT",
+    "STORYBOARD_TIMEOUT",
+    "STORYBOARD_RETRYING",
     "STORYBOARD_STARTED",
     "STORYBOARD_FAILED",
     "STORYBOARD_INPUT_READY",
@@ -230,20 +236,25 @@ function derivePreTaskBlockingStep(logs: StageLog[]) {
     "PRODUCT_SELECTED",
     "PRODUCT_ATTEMPT_STARTED"
   ];
-  const failedStep = getLatestStageLog(logs, [
-    "TEMPLATE_POST_CREATE_FAILED",
-    "BLOB_UPLOAD_FAILED",
-    "UGC_IMAGES_FAILED",
-    "OPENAI_IMAGE_REQUEST_FAILED",
-    "OPENAI_IMAGE_TIMEOUT",
-    "CAPTION_FAILED",
-    "STORYBOARD_FAILED",
-    "PRODUCT_FETCH_FAILED"
-  ]);
-  if (failedStep) return getStageStep(failedStep);
-
   const latestRelevant = getLatestStageLog(logs, allRelevantSteps);
   const latestStep = latestRelevant ? getStageStep(latestRelevant) : "";
+  if (
+    [
+      "TEMPLATE_POST_CREATE_FAILED",
+      "BLOB_UPLOAD_FAILED",
+      "UGC_IMAGES_FAILED",
+      "OPENAI_IMAGE_REQUEST_FAILED",
+      "OPENAI_IMAGE_TIMEOUT",
+      "CAPTION_FAILED",
+      "STORYBOARD_FAILED",
+      "STORYBOARD_TIMEOUT",
+      "OPENAI_STORYBOARD_REQUEST_FAILED",
+      "OPENAI_STORYBOARD_REQUEST_TIMEOUT",
+      "PRODUCT_FETCH_FAILED"
+    ].includes(latestStep)
+  ) {
+    return latestStep;
+  }
 
   if (latestStep === "TEMPLATE_POST_CREATED") return "WAITING_FOR_PAGE_TASKS";
   if (latestStep === "TEMPLATE_POST_CREATE_STARTED") return "WAITING_FOR_TEMPLATE_POST";
@@ -256,6 +267,8 @@ function derivePreTaskBlockingStep(logs: StageLog[]) {
   if (latestStep === "CAPTION_CREATED") return "WAITING_FOR_UGC_IMAGES";
   if (latestStep === "CAPTION_STARTED") return "WAITING_FOR_CAPTION";
   if (latestStep === "STORYBOARD_CREATED") return "WAITING_FOR_CAPTION";
+  if (latestStep === "OPENAI_STORYBOARD_REQUEST_END") return "WAITING_FOR_CAPTION";
+  if (latestStep === "OPENAI_STORYBOARD_REQUEST_START" || latestStep === "STORYBOARD_RETRYING") return "WAITING_FOR_STORYBOARD";
   if (latestStep === "STORYBOARD_STARTED") return "WAITING_FOR_STORYBOARD";
   if (latestStep === "STORYBOARD_INPUT_READY" || latestStep === "PRODUCT_VALIDATION_PASSED") return "WAITING_FOR_STORYBOARD";
   if (latestStep === "PRODUCT_VALIDATION_STARTED" || latestStep === "PRODUCT_TITLE_CLEANED") return "WAITING_FOR_PRODUCT_VALIDATION";
@@ -491,6 +504,12 @@ export async function GET() {
       "PRODUCT_FETCHED",
       "STORYBOARD_STARTED",
       "STORYBOARD_CREATED",
+      "OPENAI_STORYBOARD_REQUEST_START",
+      "OPENAI_STORYBOARD_REQUEST_END",
+      "OPENAI_STORYBOARD_REQUEST_FAILED",
+      "OPENAI_STORYBOARD_REQUEST_TIMEOUT",
+      "STORYBOARD_TIMEOUT",
+      "STORYBOARD_RETRYING",
       "STORYBOARD_INPUT_READY",
       "PRODUCT_VALIDATION_STARTED",
       "PRODUCT_VALIDATION_PASSED",
@@ -511,9 +530,9 @@ export async function GET() {
     const templatePostMetadata = (templatePostLog?.metadata ?? {}) as Record<string, unknown>;
     const preTaskBlockingStep = derivePreTaskBlockingStep(runStageLogs);
     const storyboardStatus = getStageStatusSummary(runStageLogs, {
-      started: ["STORYBOARD_STARTED"],
-      completed: ["STORYBOARD_CREATED"],
-      failed: ["STORYBOARD_FAILED"]
+      started: ["STORYBOARD_STARTED", "OPENAI_STORYBOARD_REQUEST_START", "STORYBOARD_RETRYING"],
+      completed: ["STORYBOARD_CREATED", "OPENAI_STORYBOARD_REQUEST_END"],
+      failed: ["STORYBOARD_FAILED", "STORYBOARD_TIMEOUT", "OPENAI_STORYBOARD_REQUEST_FAILED", "OPENAI_STORYBOARD_REQUEST_TIMEOUT"]
     });
     const captionStatus = getStageStatusSummary(runStageLogs, {
       started: ["CAPTION_STARTED"],
@@ -554,6 +573,37 @@ export async function GET() {
         ? latestImageRequestMetadata.errorMessage
         : typeof latestImageRequestMetadata.serializedError === "object" && latestImageRequestMetadata.serializedError
           ? String((latestImageRequestMetadata.serializedError as Record<string, unknown>).message ?? "")
+          : null;
+    const latestStoryboardRequestLog = getLatestStageLog(runStageLogs, [
+      "STORYBOARD_CREATED",
+      "OPENAI_STORYBOARD_REQUEST_END",
+      "OPENAI_STORYBOARD_REQUEST_FAILED",
+      "OPENAI_STORYBOARD_REQUEST_TIMEOUT",
+      "STORYBOARD_TIMEOUT",
+      "OPENAI_STORYBOARD_REQUEST_START",
+      "STORYBOARD_STARTED",
+      "STORYBOARD_RETRYING"
+    ]);
+    const latestStoryboardRequestMetadata = (latestStoryboardRequestLog?.metadata ?? {}) as Record<string, unknown>;
+    const storyboardDurationMs =
+      typeof latestStoryboardRequestMetadata.storyboardDurationMs === "number"
+        ? latestStoryboardRequestMetadata.storyboardDurationMs
+        : typeof latestStoryboardRequestMetadata.durationMs === "number"
+          ? latestStoryboardRequestMetadata.durationMs
+          : latestStoryboardRequestMetadata.durationMs
+            ? Number(latestStoryboardRequestMetadata.durationMs)
+            : null;
+    const storyboardRetryCount =
+      typeof latestStoryboardRequestMetadata.retryCount === "number"
+        ? latestStoryboardRequestMetadata.retryCount
+        : latestStoryboardRequestMetadata.retryCount
+          ? Number(latestStoryboardRequestMetadata.retryCount)
+          : null;
+    const storyboardLastError =
+      typeof latestStoryboardRequestMetadata.errorMessage === "string"
+        ? latestStoryboardRequestMetadata.errorMessage
+        : typeof latestStoryboardRequestMetadata.serializedError === "object" && latestStoryboardRequestMetadata.serializedError
+          ? String((latestStoryboardRequestMetadata.serializedError as Record<string, unknown>).message ?? "")
           : null;
     const latestRunLogAt =
       latestRunLog?.createdAt instanceof Date
@@ -775,6 +825,19 @@ export async function GET() {
             ? String(templatePostMetadata.aiGeneratedPostId)
             : null,
       storyboardStatus,
+      storyboardStartedAt:
+        typeof latestStoryboardRequestMetadata.startedAt === "string"
+          ? latestStoryboardRequestMetadata.startedAt
+          : typeof latestStoryboardRequestMetadata.storyboardStartedAt === "string"
+            ? latestStoryboardRequestMetadata.storyboardStartedAt
+            : latestStoryboardRequestLog?.createdAt ?? null,
+      storyboardDurationMs: storyboardDurationMs !== null && Number.isFinite(storyboardDurationMs) ? storyboardDurationMs : null,
+      storyboardProvider:
+        typeof latestStoryboardRequestMetadata.provider === "string"
+          ? latestStoryboardRequestMetadata.provider
+          : null,
+      storyboardRetryCount: storyboardRetryCount !== null && Number.isFinite(storyboardRetryCount) ? storyboardRetryCount : null,
+      storyboardLastError: storyboardLastError ? sanitizeLegacyMessage(storyboardLastError) : null,
       captionStatus,
       imageStatus,
       blobStatus,

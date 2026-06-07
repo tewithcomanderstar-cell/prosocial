@@ -32,6 +32,11 @@ export type ShopeeSourceTag = "trending" | "best_selling" | "top_search" | "best
 export type ShopeeCaptionStyle = "soft_sell" | "urgency" | "problem_solution" | "review_style" | "deal_alert" | "lifestyle";
 
 const SHOPEE_MAX_HASHTAGS = 5;
+const STORYBOARD_TIMEOUT_MS = Math.max(
+  30_000,
+  Number(process.env.STORYBOARD_TIMEOUT_MS ?? "90000")
+);
+const STORYBOARD_MAX_ATTEMPTS = 2;
 const OPENAI_IMAGE_REQUEST_TIMEOUT_MS = Math.max(
   30_000,
   Number(process.env.OPENAI_IMAGE_TIMEOUT_MS ?? "180000")
@@ -3313,6 +3318,188 @@ function createValidatedShopeeProductStoryboard(product: ShopeeProductRecord) {
   );
 }
 
+function getShopeeStoryboardProvider() {
+  return process.env.OPENAI_STORYBOARD_MODEL?.trim() || process.env.OPENAI_MODEL?.trim() || "rule_storyboard";
+}
+
+function getShopeeStoryboardPromptLength(product: ShopeeProductRecord) {
+  return [
+    product.productName,
+    product.productDescription,
+    product.category,
+    product.productUrl,
+    product.productImageUrl,
+    ...(product.productImageUrls ?? [])
+  ].filter(Boolean).join("\n").length;
+}
+
+function isStoryboardTimeoutError(error: unknown) {
+  if (error instanceof ShopeeProviderError && error.code === "storyboard_timeout") return true;
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return message.toLowerCase().includes("storyboard request timeout");
+}
+
+function withStoryboardTimeout<T>(producer: () => T | Promise<T>, timeoutMs: number) {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  return Promise.race([
+    Promise.resolve().then(producer),
+    new Promise<T>((_, reject) => {
+      timeout = setTimeout(() => {
+        reject(
+          new ShopeeProviderError(
+            `Storyboard request timeout after ${timeoutMs}ms`,
+            504,
+            "storyboard_timeout",
+            "internal_api"
+          )
+        );
+      }, timeoutMs);
+    })
+  ]).finally(() => {
+    if (timeout) clearTimeout(timeout);
+  });
+}
+
+async function createShopeeProductStoryboardWithTracing(input: {
+  userId: string;
+  jobId?: string;
+  product: ShopeeProductRecord;
+  attempt: number;
+}) {
+  const provider = getShopeeStoryboardProvider();
+  const startedAt = new Date();
+  const requestId = crypto.randomUUID();
+  const promptLength = getShopeeStoryboardPromptLength(input.product);
+  const baseMetadata = {
+    requestId,
+    attempt: input.attempt,
+    retryCount: Math.max(0, input.attempt - 1),
+    maxAttempts: STORYBOARD_MAX_ATTEMPTS,
+    provider,
+    timeoutMs: STORYBOARD_TIMEOUT_MS,
+    startedAt: startedAt.toISOString(),
+    promptLength
+  };
+
+  await logShopeePackageStage({
+    userId: input.userId,
+    jobId: input.jobId,
+    product: input.product,
+    step: "OPENAI_STORYBOARD_REQUEST_START",
+    status: "started",
+    message: "Storyboard request started",
+    metadata: baseMetadata
+  });
+
+  try {
+    const storyboard = await withStoryboardTimeout(
+      () => createValidatedShopeeProductStoryboard(input.product),
+      STORYBOARD_TIMEOUT_MS
+    );
+    const completedAt = new Date();
+    await logShopeePackageStage({
+      userId: input.userId,
+      jobId: input.jobId,
+      product: input.product,
+      step: "OPENAI_STORYBOARD_REQUEST_END",
+      status: "success",
+      message: "Storyboard request completed",
+      metadata: {
+        ...baseMetadata,
+        completedAt: completedAt.toISOString(),
+        durationMs: completedAt.getTime() - startedAt.getTime(),
+        productType: storyboard.productType,
+        mainUseCase: storyboard.mainUseCase
+      }
+    });
+    return storyboard;
+  } catch (error) {
+    const completedAt = new Date();
+    const timeout = isStoryboardTimeoutError(error);
+    await logShopeePackageStage({
+      userId: input.userId,
+      jobId: input.jobId,
+      product: input.product,
+      step: timeout ? "OPENAI_STORYBOARD_REQUEST_TIMEOUT" : "OPENAI_STORYBOARD_REQUEST_FAILED",
+      status: "failed",
+      message: timeout ? "Storyboard request timed out" : "Storyboard request failed",
+      metadata: {
+        ...baseMetadata,
+        completedAt: completedAt.toISOString(),
+        durationMs: completedAt.getTime() - startedAt.getTime()
+      },
+      error
+    });
+    if (timeout) {
+      await logShopeePackageStage({
+        userId: input.userId,
+        jobId: input.jobId,
+        product: input.product,
+        step: "STORYBOARD_TIMEOUT",
+        status: "failed",
+        message: `Product Storyboard timed out after ${STORYBOARD_TIMEOUT_MS}ms`,
+        metadata: {
+          jobId: input.jobId,
+          productId: input.product.productId,
+          productName: input.product.productName,
+          provider,
+          durationMs: completedAt.getTime() - startedAt.getTime(),
+          promptLength,
+          attempt: input.attempt,
+          retryCount: Math.max(0, input.attempt - 1),
+          maxAttempts: STORYBOARD_MAX_ATTEMPTS
+        },
+        error
+      });
+    }
+    throw error;
+  }
+}
+
+async function createShopeeProductStoryboardWithRetry(input: {
+  userId: string;
+  jobId?: string;
+  product: ShopeeProductRecord;
+}) {
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= STORYBOARD_MAX_ATTEMPTS; attempt += 1) {
+    if (attempt > 1) {
+      await logShopeePackageStage({
+        userId: input.userId,
+        jobId: input.jobId,
+        product: input.product,
+        step: "STORYBOARD_RETRYING",
+        status: "started",
+        message: `Retrying Product Storyboard generation (${attempt}/${STORYBOARD_MAX_ATTEMPTS})`,
+        metadata: {
+          attempt,
+          retryCount: attempt - 1,
+          maxAttempts: STORYBOARD_MAX_ATTEMPTS,
+          provider: getShopeeStoryboardProvider()
+        }
+      });
+    }
+
+    try {
+      return await createShopeeProductStoryboardWithTracing({
+        userId: input.userId,
+        jobId: input.jobId,
+        product: input.product,
+        attempt
+      });
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw new ShopeeProviderError(
+    `PRODUCT_STORYBOARD_FAILED after retry: ${lastError instanceof Error ? lastError.message : "Storyboard did not return a valid result"}`,
+    422,
+    "storyboard_generation_failed",
+    "internal_api"
+  );
+}
+
 export async function createOrReuseAffiliateShortLink(input: {
   userId: string;
   product: ShopeeProductRecord;
@@ -3934,6 +4121,7 @@ export async function generateShopeeCaption(input: {
     productName: titleInfo.cleanedTitle || product.productName
   };
 
+  const storyboardStartedAt = new Date();
   await logShopeePackageStage({
     userId: input.userId,
     jobId: input.jobId,
@@ -3946,13 +4134,20 @@ export async function generateShopeeCaption(input: {
       cleanedTitle: titleInfo.cleanedTitle,
       hasProductName: hasShopeeProductName(productForStoryboard),
       hasProductImage: hasShopeeProductImage(productForStoryboard),
-      imageCount
+      imageCount,
+      storyboardStartedAt: storyboardStartedAt.toISOString(),
+      provider: getShopeeStoryboardProvider(),
+      timeoutMs: STORYBOARD_TIMEOUT_MS
     }
   });
 
   let storyboard: ShopeeProductStoryboard;
   try {
-    storyboard = createValidatedShopeeProductStoryboard(productForStoryboard);
+    storyboard = await createShopeeProductStoryboardWithRetry({
+      userId: input.userId,
+      jobId: input.jobId,
+      product: productForStoryboard
+    });
   } catch (error) {
     await logShopeePackageStage({
       userId: input.userId,
@@ -3980,7 +4175,10 @@ export async function generateShopeeCaption(input: {
       captionAngle: storyboard.captionAngle,
       hasProblemSolved: Boolean(storyboard.problemSolved),
       hasDailyBenefit: Boolean(storyboard.dailyBenefit),
-      hasRealUsageScenario: Boolean(storyboard.realUsageScenario)
+      hasRealUsageScenario: Boolean(storyboard.realUsageScenario),
+      storyboardCompletedAt: new Date().toISOString(),
+      storyboardDurationMs: Date.now() - storyboardStartedAt.getTime(),
+      provider: getShopeeStoryboardProvider()
     }
   });
 
