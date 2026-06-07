@@ -1551,16 +1551,51 @@ function assertRecognizedShopeeProductInsight(product: ShopeeProductRecord) {
 }
 
 export function getShopeeCaptionProductName(productName?: string) {
-  const cleaned = normalizeTextEncoding(productName ?? "")
-    .replace(/^\s*\[[^\]]*(?:แถม|โปร|ลด|ส่งฟรี|sale|deal)[^\]]*\]\s*/giu, "")
-    .replace(/^\s*(?:แถม|โปร|ลด|ส่งฟรี|sale|deal)\s*[:：-]?\s*/giu, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  const cleaned = cleanShopeeProductTitleForContent(productName);
   return getShopeeShortReviewProductName(cleaned || productName || TH.defaultProductName);
 }
 
+const SHOPEE_PRODUCT_ENTITY_HINT_PATTERN =
+  /ผงซักฟอก|น้ำยาซัก|สเปรย์|ฉีดผ้า|ผ้าหอม|detergent|laundry|ปรับผ้านุ่ม|ซักผ้า|ลดกลิ่นอับ|แก้ว|กระติก|โคมไฟ|ถุงเท้า|รองเท้า|กล้อง|สร้อย|เครื่องประดับ|อาหารเสริม|วิตามิน|เซรั่ม|กระเป๋า|ขนม|น้ำพริก|ถาดน้ำแข็ง|สัตว์|pet|smart\s?watch|หูฟัง|จัมป์|ยางรถ|ลูกแบด|art\s?toy|กล่องสุ่ม/i;
+
+const SHOPEE_TITLE_NOISE_SEGMENT_PATTERN =
+  /^(?:\[[^\]]*\]|\([^)]*\)|[\s|/,-])*(?:โคดัง|โค้ด|โค๊ด|code|cod|ของพร้อมส่ง|พร้อมส่ง|ส่งฟรี|ฟรีส่ง|flash\s?sale|sale|deal|โปร|ลดราคา|ราคาถูก|ถูกมาก|ของแท้|ร้านไทย|เก็บเงินปลายทาง)(?:[\s\p{L}\p{N}|/,-]*)$/iu;
+
+function stripShopeeMarketplaceNoise(value: string) {
+  return normalizeTextEncoding(value)
+    .replace(/\[[^\]]*(?:แถม|โปร|ลด|ส่งฟรี|sale|deal|พร้อมส่ง|โค้ด|โคดัง|code)[^\]]*\]/giu, " ")
+    .replace(/\([^)]*(?:แถม|โปร|ลด|ส่งฟรี|sale|deal|พร้อมส่ง|โค้ด|โคดัง|code)[^)]*\)/giu, " ")
+    .replace(/\b(?:flash\s?sale|sale|deal|code)\b/giu, " ")
+    .replace(/(?:โคดัง|โค้ด|โค๊ด|โคมตั้ง|โค้ต|โค๊ต)\s*(?:ต่ำ|ส่วนลด|ลด)?/giu, " ")
+    .replace(/(?:ของ)?พร้อมส่ง|ส่งฟรี|ฟรีส่ง|เก็บเงินปลายทาง|ของแท้|ร้านไทย|ราคาถูก|ถูกมาก/giu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function cleanShopeeProductTitleForContent(productName?: string) {
+  const source = normalizeTextEncoding(productName ?? "").trim();
+  if (!source) return "";
+
+  const segments = source
+    .split(/\s*[|｜]+\s*/u)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  const usefulSegments = segments.length
+    ? segments.filter((segment) => {
+        const cleanedSegment = stripShopeeMarketplaceNoise(segment);
+        if (!cleanedSegment) return false;
+        if (SHOPEE_TITLE_NOISE_SEGMENT_PATTERN.test(segment) && !SHOPEE_PRODUCT_ENTITY_HINT_PATTERN.test(segment)) return false;
+        return true;
+      })
+    : [source];
+
+  const cleaned = stripShopeeMarketplaceNoise(usefulSegments.join(" "));
+  return compactProductText(cleaned || stripShopeeMarketplaceNoise(source), 140);
+}
+
 function getShopeeShortReviewProductName(productName?: string) {
-  const source = normalizeTextEncoding(productName ?? TH.defaultProductName)
+  const source = cleanShopeeProductTitleForContent(productName) || normalizeTextEncoding(productName ?? TH.defaultProductName)
     .replace(/^\s*\[[^\]]*\]\s*/g, "")
     .replace(/(?:ส่งฟรี|พร้อมส่ง|ของแท้|แท้|ลดราคา|โปร|sale|deal|รุ่นใหม่ล่าสุด|ใหม่ล่าสุด)/giu, " ")
     .replace(/\b[A-Z]{1,4}[-_]?\d{2,}\b/giu, " ")
@@ -1582,7 +1617,7 @@ function getShopeeShortReviewProductName(productName?: string) {
     [/สมาร์ทวอทช์|smart\s*watch|watch/iu, () => /awei/.test(haystack) ? "สมาร์ทวอทช์ฟังก์ชันครบ Awei ⌚" : "สมาร์ทวอทช์ฟังก์ชันครบ ⌚"],
     [/เวย์โปรตีน|whey|protein/iu, () => "เวย์โปรตีนชงดื่มหลังออกกำลังกาย 💚"],
     [/ไหมขัดฟัน|floss/iu, () => "ไหมขัดฟันด้ามจับใช้ง่าย 🦷"],
-    [/น้ำยาซักผ้า|detergent|laundry/iu, () => "น้ำยาซักผ้ากลิ่นหอมติดบ้าน 🏠"],
+    [/ผงซักฟอก|น้ำยาซักผ้า|detergent|laundry|สเปรย์ฉีดผ้า|ผ้าหอม|ลดกลิ่นอับ/iu, () => "ผลิตภัณฑ์ซักผ้าและดูแลผ้า 🧺"],
     [/เซรั่ม|serum/iu, () => "เซรั่มบำรุงผิวใช้ประจำวัน ✨"],
     [/กันแดด|sunscreen|spf/iu, () => "กันแดดเนื้อบางเบาใช้ทุกวัน ✨"],
     [/กระเป๋า|bag/iu, () => /คาดอก|crossbody/.test(haystack) ? "กระเป๋าคาดอกจัดของพกพา 🎒" : "กระเป๋าพกพาช่องเก็บของเยอะ 🎒"],
@@ -1868,10 +1903,10 @@ function isForbiddenShopeeHashtag(tag: string) {
 }
 
 function buildRelevantShopeeHashtags(product: ShopeeProductRecord) {
-  const titleTokens = product.productName
+  const titleTokens = cleanShopeeProductTitleForContent(product.productName)
     .split(/[\s/|,()[\]{}]+/)
     .map((part) => part.replace(/[^\p{L}\p{N}_-]/gu, "").trim())
-    .filter((part) => part.length >= 3 && !isGenericShopeeCategoryText(part))
+    .filter((part) => part.length >= 3 && !isGenericShopeeCategoryText(part) && !stripShopeeMarketplaceNoise(part).match(/^$/))
     .slice(0, 3);
 
   const candidates = [...titleTokens, "Shopee"].filter(Boolean);
@@ -2334,10 +2369,11 @@ function getShopeeStoryboardInputText(product: ShopeeProductRecord) {
   const metadata = ["productFeatures", "features", "specifications", "specs", "attributes", "variants"]
     .flatMap((key) => stringifyShopeeMetadataValue(record[key]))
     .join(" ");
+  const cleanedTitle = cleanShopeeProductTitleForContent(product.productName);
   return normalizeTextEncoding([
     getShopeeProductImageSourceText(product),
-    product.productName,
-    product.productDescription,
+    cleanedTitle,
+    stripShopeeMarketplaceNoise(product.productDescription || ""),
     metadata
   ].filter(Boolean).join(" ")).toLowerCase();
 }
@@ -2399,6 +2435,7 @@ function getShopeeStoryboardProductGroup(storyboard: Pick<ShopeeProductStoryboar
   if (/อาหาร|ขนม|น้ำพริก|กาแฟ|ชา|เครื่องดื่ม/i.test(haystack) && !/อาหารเสริม|วิตามิน|เวย์|โปรตีน/i.test(haystack)) return "food";
   if (/สกินแคร์|เซรั่ม|กันแดด|ผิว|เครื่องสำอาง|เวชสำอาง/i.test(haystack)) return "beauty";
   if (/สร้อย|สร้อยคอ|เครื่องประดับ|จี้|ต่างหู|แหวน|กำไล|jewelry|necklace|earring|ring|bracelet/i.test(haystack)) return "jewelry";
+  if (/ซักผ้า|ผงซักฟอก|น้ำยาซัก|detergent|laundry|ปรับผ้านุ่ม|ผ้าหอม|ลดกลิ่นอับ|ฉีดผ้า/i.test(haystack)) return "laundry";
   if (/กล้อง|มือถือ|หูฟัง|สมาร์ทวอทช์|แกดเจ็ต|ลำโพง/i.test(haystack)) return "electronics";
   if (/ครัว|แก้ว|กระติก|ขวดน้ำ|ถาดน้ำแข็ง|หม้อ|กระทะ/i.test(haystack)) return "kitchen";
   if (/กระเป๋า|เดินทาง|แคมป์|เที่ยว/i.test(haystack)) return "travel";
@@ -2454,6 +2491,13 @@ function enrichShopeeStoryboardForAffiliateReview(
       dailyBenefit: "ใส่คู่กับเสื้อผ้าเรียบ ๆ แล้วช่วยให้ลุคดูครบขึ้น",
       emotionalBenefit: "เพิ่มความมั่นใจเวลาแต่งตัวออกไปข้างนอก",
       purchaseReason: "เหมาะกับคนที่ชอบเครื่องประดับโทนเรียบหรูและแมตช์ง่าย"
+    },
+    laundry: {
+      primaryPainPoint: "ซักผ้าแล้วอยากให้ผ้าหอมสะอาดขึ้น",
+      problemSolved: "ช่วยดูแลผ้าในรอบซักประจำวันให้สะดวกขึ้น",
+      dailyBenefit: "ใช้กับมุมซักผ้าในบ้านได้เป็นประจำ",
+      emotionalBenefit: "หยิบใช้แล้วช่วยให้ผ้าที่ซักดูสดชื่นขึ้น",
+      purchaseReason: "เหมาะกับบ้านที่ซักผ้าบ่อยและอยากมีตัวช่วยดูแลผ้าติดไว้"
     },
     electronics: {
       primaryPainPoint: "อยากใช้งานหรือทำคอนเทนต์ให้สะดวกขึ้น",
@@ -2714,15 +2758,15 @@ const SHOPEE_STORYBOARD_RULES: ShopeeStoryboardRule[] = [
     })
   },
   {
-    pattern: /น้ำยาซัก|detergent|laundry|ปรับผ้านุ่ม|ซักผ้า|ทำความสะอาด|ไม้ถู|ชั้นวาง|กล่องเก็บ|จัดระเบียบ/i,
+    pattern: /ผงซักฟอก|น้ำยาซัก|detergent|laundry|ปรับผ้านุ่ม|ซักผ้า|สเปรย์ฉีดผ้า|ผ้าหอม|ลดกลิ่นอับ|ทำความสะอาด|ไม้ถู|ชั้นวาง|กล่องเก็บ|จัดระเบียบ/i,
     build: (product, haystack) => makeShopeeStoryboard(product, {
-      productType: /ซัก|detergent|laundry|ปรับผ้านุ่ม/i.test(haystack) ? "ผลิตภัณฑ์ซักผ้า" : "ของใช้ในบ้าน",
+      productType: /ซัก|ผงซักฟอก|detergent|laundry|ปรับผ้านุ่ม|ผ้าหอม|ฉีดผ้า|ลดกลิ่นอับ/i.test(haystack) ? "ผลิตภัณฑ์ซักผ้าและดูแลผ้า" : "ของใช้ในบ้าน",
       whatItIs: "ของใช้สำหรับดูแลบ้านหรือจัดพื้นที่ใช้งาน",
-      mainUseCase: /ซัก|detergent|laundry|ปรับผ้านุ่ม/i.test(haystack) ? "ใช้ซักผ้าหรือดูแลผ้าในบ้าน" : "ใช้จัดเก็บ ทำความสะอาด หรือช่วยให้บ้านเป็นระเบียบ",
+      mainUseCase: /ซัก|ผงซักฟอก|detergent|laundry|ปรับผ้านุ่ม|ผ้าหอม|ฉีดผ้า|ลดกลิ่นอับ/i.test(haystack) ? "ใช้ซักผ้าหรือดูแลผ้าในบ้าน" : "ใช้จัดเก็บ ทำความสะอาด หรือช่วยให้บ้านเป็นระเบียบ",
       targetUser: "คนที่ดูแลบ้านหรืออยากให้มุมใช้งานสะดวกขึ้น",
-      keySellingPoint: /ซัก|detergent|laundry|ปรับผ้านุ่ม/i.test(haystack) ? "ช่วยให้การซักผ้าในบ้านเป็น routine ที่ง่ายขึ้น" : "ช่วยลดความรกและหยิบของได้เป็นที่",
-      usageScene: /ซัก|detergent|laundry|ปรับผ้านุ่ม/i.test(haystack) ? "มุมซักผ้าหรือเครื่องซักผ้า" : "ห้องครัว ห้องน้ำ หรือมุมเก็บของ",
-      captionAngle: /ซัก|detergent|laundry|ปรับผ้านุ่ม/i.test(haystack)
+      keySellingPoint: /ซัก|ผงซักฟอก|detergent|laundry|ปรับผ้านุ่ม|ผ้าหอม|ฉีดผ้า|ลดกลิ่นอับ/i.test(haystack) ? "ช่วยให้การซักผ้าในบ้านเป็น routine ที่ง่ายขึ้น" : "ช่วยลดความรกและหยิบของได้เป็นที่",
+      usageScene: /ซัก|ผงซักฟอก|detergent|laundry|ปรับผ้านุ่ม|ผ้าหอม|ฉีดผ้า|ลดกลิ่นอับ/i.test(haystack) ? "มุมซักผ้าหรือเครื่องซักผ้า" : "ห้องครัว ห้องน้ำ หรือมุมเก็บของ",
+      captionAngle: /ซัก|ผงซักฟอก|detergent|laundry|ปรับผ้านุ่ม|ผ้าหอม|ฉีดผ้า|ลดกลิ่นอับ/i.test(haystack)
         ? "มีติดบ้านไว้ใช้กับรอบซักผ้าได้สะดวก เหมาะกับบ้านที่ซักผ้าเป็นประจำ"
         : "ช่วยให้มุมที่ใช้บ่อยเป็นระเบียบขึ้น หยิบของง่ายและไม่กินพื้นที่เกินไป"
     })
@@ -2784,7 +2828,8 @@ function inferShopeeFallbackProductType(product: ShopeeProductRecord, haystack: 
     [/กระเป๋า|bag|เป้|คาดอก|crossbody|wallet/i, "กระเป๋าพกพา"],
     [/art\s?toy|อาร์ตทอย|กล่องสุ่ม|blind\s?box|figure|ฟิกเกอร์|โมเดล|ของสะสม|ตุ๊กตา|จุ่ม/i, "Art Toy / ของสะสม"],
     [/สัตว์|pet|แมว|cat|สุนัข|dog|อาหารสัตว์|ทรายแมว|ปลอกคอ/i, "อุปกรณ์สัตว์เลี้ยง"],
-    [/น้ำยาซัก|detergent|laundry|ปรับผ้านุ่ม|ซักผ้า|ทำความสะอาด|ไม้ถู|ชั้นวาง|กล่องเก็บ|จัดระเบียบ/i, "ของใช้ในบ้าน"],
+    [/ผงซักฟอก|น้ำยาซัก|detergent|laundry|ปรับผ้านุ่ม|ซักผ้า|สเปรย์ฉีดผ้า|ผ้าหอม|ลดกลิ่นอับ/i, "ผลิตภัณฑ์ซักผ้าและดูแลผ้า"],
+    [/ทำความสะอาด|ไม้ถู|ชั้นวาง|กล่องเก็บ|จัดระเบียบ/i, "ของใช้ในบ้าน"],
     [/ขนม|snack|อาหาร(?!เสริม)|food|เครื่องดื่ม|drink|กาแฟ|coffee|ชา|tea|เปี๊ยะ|คุกกี้|เค้ก|น้ำพริก/i, /น้ำพริก/i.test(haystack) ? "น้ำพริก / ของกินติดบ้าน" : "ของกินติดบ้าน"]
   ];
 
@@ -2859,6 +2904,19 @@ function validateShopeeProductStoryboard(storyboard?: ShopeeProductStoryboard | 
 }
 
 function getShopeeStoryboardHashtags(product: ShopeeProductRecord, storyboard: ShopeeProductStoryboard) {
+  const group = getShopeeStoryboardProductGroup(storyboard);
+  const groupTags: Record<string, string[]> = {
+    laundry: ["#ผลิตภัณฑ์ซักผ้า", "#ดูแลผ้า", "#ของใช้ในบ้าน"],
+    jewelry: ["#เครื่องประดับ", "#สร้อยคอ", "#แฟชั่น"],
+    automotive: ["#อุปกรณ์รถยนต์", "#ของใช้ติดรถ", "#รถยนต์"],
+    sports: ["#กีฬา", "#ออกกำลังกาย", "#สายสปอร์ต"],
+    beauty: ["#สกินแคร์", "#บำรุงผิว", "#ความงาม"],
+    electronics: ["#แกดเจ็ต", "#ไอที", "#ของใช้น่าใช้"],
+    kitchen: ["#ของใช้ในครัว", "#ของใช้ในบ้าน", "#ครัว"],
+    travel: ["#พกพา", "#เดินทาง", "#ของใช้เดินทาง"],
+    food: ["#ของกิน", "#ของอร่อย", "#ของกินติดบ้าน"],
+    health: ["#อาหารเสริม", "#ดูแลสุขภาพ", "#สุขภาพ"]
+  };
   const typeTags = storyboard.productType
     .split(/[\/\s]+/u)
     .map((part) => normalizeHashtagToken(part))
@@ -2867,12 +2925,13 @@ function getShopeeStoryboardHashtags(product: ShopeeProductRecord, storyboard: S
     .split(/[\/\s]+/u)
     .map((part) => normalizeHashtagToken(part))
     .filter((tag) => tag && !isForbiddenShopeeHashtag(tag));
-  return Array.from(new Set([...typeTags, ...audienceTags, "#Shopee"]))
+  return Array.from(new Set([...(groupTags[group] ?? []), ...typeTags, ...audienceTags, "#Shopee"]))
     .filter((tag) => tag && !isShopeeProductNameDuplicateText(tag.replace(/^#/, ""), storyboard.productSimpleName))
     .slice(0, SHOPEE_MAX_HASHTAGS);
 }
 
 function getShopeeStoryboardBenefitEmojis(productType: string) {
+  if (/ซักผ้า|ผงซักฟอก|น้ำยาซัก|detergent|laundry|ดูแลผ้า|ผ้าหอม/.test(productType)) return ["🧺", "👕", "✨", "🏠"];
   if (/กล้องติดรถ|กล้องหน้ารถ|dash\s?cam|บันทึกภาพรถ/i.test(productType)) return ["📹", "🛣️", "🚘", "🔎"];
   if (/รถ|จัมป์|จั๊ม|ยาง|แบต/.test(productType)) return ["🔋", "💨", "🔦", "📱"];
   if (/ลูกแบด|กีฬา|วิ่ง|รองเท้า|ถุงเท้า/.test(productType)) return ["🏃", "💪", "🎯", "🏸"];
