@@ -1456,18 +1456,18 @@ function getShopeeProductInsight(product: ShopeeProductRecord): ShopeeProductIns
     }, /สัตว์|pet|แมว|cat|สุนัข|dog|อาหารสัตว์|ทรายแมว|ปลอกคอ|ขนสัตว์/i);
   }
 
-  if (/บ้าน|home|จัดระเบียบ|เก็บของ|ทำความสะอาด|ไม้ถู|ถังขยะ|ชั้นวาง|กล่องเก็บ|ซักผ้า|น้ำยาซัก|ปรับผ้านุ่ม|detergent|laundry/.test(haystack)) {
+  if (/บ้าน|home|จัดระเบียบ|เก็บของ|ทำความสะอาด|ไม้ถู|ถังขยะ|ชั้นวาง|กล่องเก็บ/.test(haystack)) {
     return withShopeeProductEvidence(product, {
       type: "ของใช้ในบ้าน",
       recognized: true,
       productCategory: "home_living",
       audience: "คนที่อยากจัดบ้าน ทำความสะอาด หรือแก้ปัญหาของใช้จุกจิกในบ้าน",
-      situation: "ใช้ในบ้าน ห้องน้ำ ห้องครัว มุมซักผ้า หรือมุมจัดเก็บของ",
+      situation: "ใช้ในบ้าน ห้องน้ำ ห้องครัว หรือมุมจัดเก็บของ",
       problem: "ช่วยให้บ้านเป็นระเบียบ สะอาด หรือหยิบใช้งานได้สะดวกขึ้น",
       angle: "เน้นการใช้งานจริง ความสะดวก การจัดระเบียบ การทำความสะอาด และปัญหาในบ้าน",
       fallbackFeatures: ["✅ ช่วยให้บ้านเป็นระเบียบขึ้น", "✅ ใช้งานในบ้านได้สะดวก", "✅ เหมาะกับมุมที่ต้องหยิบใช้บ่อย", "✅ ช่วยประหยัดพื้นที่หรือเวลา"],
       forbiddenAngles: []
-    }, /บ้าน|home|จัดระเบียบ|เก็บของ|ทำความสะอาด|ไม้ถู|ถังขยะ|ชั้นวาง|กล่องเก็บ|ซักผ้า|น้ำยาซัก|ปรับผ้านุ่ม|detergent|laundry|fineline/i);
+    }, /บ้าน|home|จัดระเบียบ|เก็บของ|ทำความสะอาด|ไม้ถู|ถังขยะ|ชั้นวาง|กล่องเก็บ/i);
   }
 
   if (/smart\s?watch|สมาร์ทวอทช์|นาฬิกาอัจฉริยะ|นาฬิกา smart|fitness tracker|tracker/.test(haystack)) {
@@ -1662,7 +1662,6 @@ function getShopeeShortReviewProductName(productName?: string) {
     [/สมาร์ทวอทช์|smart\s*watch|watch/iu, () => /awei/.test(haystack) ? "สมาร์ทวอทช์ฟังก์ชันครบ Awei ⌚" : "สมาร์ทวอทช์ฟังก์ชันครบ ⌚"],
     [/เวย์โปรตีน|whey|protein/iu, () => "เวย์โปรตีนชงดื่มหลังออกกำลังกาย 💚"],
     [/ไหมขัดฟัน|floss/iu, () => "ไหมขัดฟันด้ามจับใช้ง่าย 🦷"],
-    [/ผงซักฟอก|น้ำยาซักผ้า|detergent|laundry|สเปรย์ฉีดผ้า|ผ้าหอม|ลดกลิ่นอับ/iu, () => "ผลิตภัณฑ์ซักผ้าและดูแลผ้า 🧺"],
     [/เซรั่ม|serum/iu, () => "เซรั่มบำรุงผิวใช้ประจำวัน ✨"],
     [/กันแดด|sunscreen|spf/iu, () => "กันแดดเนื้อบางเบาใช้ทุกวัน ✨"],
     [/กระเป๋า|bag/iu, () => /คาดอก|crossbody/.test(haystack) ? "กระเป๋าคาดอกจัดของพกพา 🎒" : "กระเป๋าพกพาช่องเก็บของเยอะ 🎒"],
@@ -2206,7 +2205,6 @@ function buildShopeeProductHook(product: ShopeeProductRecord) {
     if (/กระเป๋า|bag|เป้|คาดอก|wallet/.test(haystack)) return ["เหมาะกับคนที่อยากจัดของจุกจิกให้หยิบง่ายเวลาออกจากบ้าน", "ช่องเก็บและรูปทรงช่วยให้พกของจำเป็นได้เป็นระเบียบขึ้น"];
     if (/พัดลม|fan|ระบายอากาศ/.test(haystack)) return ["เหมาะกับวันที่ต้องการลมช่วยระบายอากาศแบบพกพา", "ขนาดและฟังก์ชันออกแบบมาให้ใช้ในพื้นที่ส่วนตัวได้สะดวก"];
     if (/รองเท้า|shoe|sneaker|แตะ/.test(haystack)) return ["เหมาะกับการใส่เดินหรือทำกิจกรรมตามดีไซน์ของรองเท้า", "รูปทรงและวัสดุช่วยให้เลือกใช้งานได้ตรงกับกิจกรรมมากขึ้น"];
-    if (/ซักผ้า|น้ำยาซัก|ปรับผ้านุ่ม|detergent|laundry|fineline/.test(haystack)) return ["เหมาะกับบ้านที่ซักผ้าบ่อยและอยากมีผลิตภัณฑ์ซักผ้าติดไว้", "แพ็กและปริมาณช่วยให้จัดรอบซักผ้าที่บ้านได้สะดวกขึ้น"];
     if (!SHOPEE_HEALTH_PRODUCT_PATTERN.test(haystack) && /ขนม|snack|อาหาร(?!เสริม)|เปี๊ยะ|คุกกี้|เค้ก/.test(haystack)) return ["แพ็กและขนาดเหมาะกับการแบ่งกินหรือเก็บไว้เป็นของว่าง", "เหมาะกับคนที่อยากมีของว่างติดบ้านแบบหยิบง่าย"];
     return [
       insight.situation,
@@ -2249,7 +2247,6 @@ function buildShopeeUsageSituation(product: ShopeeProductRecord) {
     if (/กระเป๋า|bag|เป้|คาดอก|wallet/.test(haystack)) return ["สะพายออกไปข้างนอกแล้วของจุกจิกอยู่เป็นที่ หยิบง่ายกว่าเดิม"];
     if (/พัดลม|fan|ระบายอากาศ/.test(haystack)) return ["พกติดโต๊ะทำงานหรือใส่กระเป๋าไว้ วันที่ร้อน ๆ ช่วยได้เยอะ"];
     if (/รองเท้า|shoe|sneaker|แตะ/.test(haystack)) return ["ใส่เดินเล่นหรือออกไปทำธุระได้ง่าย แมตช์กับชุดประจำวันได้สบาย"];
-    if (/ซักผ้า|น้ำยาซัก|ปรับผ้านุ่ม|detergent|laundry|fineline/.test(haystack)) return ["ซื้อไว้ใช้ซักผ้าที่บ้าน รอบซักบ่อย ๆ จะรู้สึกว่ามีติดไว้แล้วสะดวก"];
     if (!SHOPEE_HEALTH_PRODUCT_PATTERN.test(haystack) && /ขนม|snack|อาหาร(?!เสริม)|เปี๊ยะ|คุกกี้|เค้ก/.test(haystack)) return ["แยกไว้กินเล่นหรือแบ่งกับคนที่บ้านได้ง่าย เหมาะกับช่วงอยากมีของว่างติดไว้"];
     return [insight.situation];
   })();
@@ -2263,7 +2260,6 @@ function buildShopeeDetailBullets(product: ShopeeProductRecord) {
   const insight = getShopeeProductInsight(product);
   const haystack = normalizeTextEncoding(`${product.productName} ${product.productDescription || ""} ${product.category || ""}`).toLowerCase();
   const fallbackFacts: string[] = [];
-  if (/ซักผ้า|น้ำยาซัก|detergent|laundry|fineline/.test(haystack)) fallbackFacts.push("✅ กลิ่นหอมกำลังดี", "✅ ปริมาณเยอะ ใช้ได้นาน", "✅ เหมาะกับบ้านที่ซักผ้าบ่อย");
   if (/เวย์|whey|protein|โปรตีน/.test(haystack)) fallbackFacts.push("✅ เหมาะกับการเสริมโปรตีน", "✅ ใช้ประกอบ routine ฟิตเนสได้", "✅ ช่วยวางแผนโภชนาการได้สะดวก");
   if (/วิตามิน|supplement|vitamin/.test(haystack)) fallbackFacts.push("✅ เหมาะกับ routine ดูแลโภชนาการ", "✅ ขนาดบรรจุช่วยให้จัดเก็บง่าย", "✅ พกหรือวางไว้หยิบทานตามคำแนะนำบนฉลากได้");
   if (/กางเกง|short|sportswear|วิ่ง|กีฬา|ฟิตเนส|แบด|เทนนิส|ฟุตบอล/.test(haystack)) fallbackFacts.push("✅ เหมาะกับการออกกำลังกายหรือเล่นกีฬา", "✅ ช่วยให้เคลื่อนไหวได้คล่องตัว", "✅ ดีไซน์เข้ากับกิจกรรมที่ต้องขยับตัว");
@@ -2278,7 +2274,7 @@ function getShopeeShortReviewEmoji(product: ShopeeProductRecord) {
   const haystack = normalizeTextEncoding(`${product.productName} ${product.productDescription || ""} ${product.category || ""}`).toLowerCase();
   if (/แก้ว|ขวดน้ำ|กระติก|tumbler|cup|น้ำแข็ง|เก็บความเย็น/.test(haystack)) return randomText(["🥤", "☕", "🧊"]);
   if (/โคมไฟ|lamp|light|led/.test(haystack)) return "💡";
-  if (/ซักผ้า|น้ำยาซัก|จัดระเบียบ|บ้าน|home|detergent|laundry/.test(haystack)) return "🏠";
+  if (/จัดระเบียบ|บ้าน|home/.test(haystack)) return "🏠";
   if (/กีฬา|ถุงเท้า|วิ่ง|ฟิตเนส|บอล|แบด|เทนนิส|sports|running|fitness|sock/.test(haystack)) return randomText(["🏃", "⚽", "🎾"]);
   if (/รถ|car|auto|automotive/.test(haystack)) return "🚗";
   if (/ครัว|กระทะ|หม้อ|ทำอาหาร|kitchen|cook/.test(haystack)) return "🍳";
@@ -2301,9 +2297,6 @@ function buildShopeeShortReviewLine(product: ShopeeProductRecord) {
     }
     if (/กีฬา|ถุงเท้า|วิ่ง|ฟิตเนส|บอล|แบด|เทนนิส|sports|running|fitness|sock/.test(haystack)) {
       return ["ใส่ออกกำลังกายแล้วกระชับเท้า เดินหรือวิ่งนาน ๆ ก็ยังสบาย", "เหมาะกับวันที่ต้องขยับตัวเยอะ ใส่เล่นกีฬาหรือฟิตเนสแล้วคล่องตัว"];
-    }
-    if (/ซักผ้า|น้ำยาซัก|detergent|laundry|fineline/.test(haystack)) {
-      return ["มีติดบ้านไว้แล้วสะดวกกับรอบซักผ้าบ่อย ๆ ใช้งานง่ายและเก็บเข้ามุมได้ดี", "เหมาะกับบ้านที่ซักผ้าเป็นประจำ หยิบใช้ได้เรื่อย ๆ ไม่ต้องคอยซื้อบ่อย"];
     }
     if (/กระเป๋า|bag|เป้|คาดอก|wallet/.test(haystack)) {
       return ["พกของจุกจิกออกจากบ้านได้เป็นระเบียบขึ้น หยิบของที่ใช้บ่อยได้ง่าย", "สะพายออกไปข้างนอกแล้วของสำคัญอยู่ใกล้ตัว ไม่ต้องค้นกระเป๋านาน"];
@@ -2480,7 +2473,6 @@ function getShopeeStoryboardProductGroup(storyboard: Pick<ShopeeProductStoryboar
   if (/อาหาร|ขนม|น้ำพริก|กาแฟ|ชา|เครื่องดื่ม/i.test(haystack) && !/อาหารเสริม|วิตามิน|เวย์|โปรตีน/i.test(haystack)) return "food";
   if (/สกินแคร์|เซรั่ม|กันแดด|ผิว|เครื่องสำอาง|เวชสำอาง/i.test(haystack)) return "beauty";
   if (/สร้อย|สร้อยคอ|เครื่องประดับ|จี้|ต่างหู|แหวน|กำไล|jewelry|necklace|earring|ring|bracelet/i.test(haystack)) return "jewelry";
-  if (/ซักผ้า|ผงซักฟอก|น้ำยาซัก|detergent|laundry|ปรับผ้านุ่ม|ผ้าหอม|ลดกลิ่นอับ|ฉีดผ้า/i.test(haystack)) return "laundry";
   if (/กล้อง|มือถือ|หูฟัง|สมาร์ทวอทช์|แกดเจ็ต|ลำโพง/i.test(haystack)) return "electronics";
   if (/ครัว|แก้ว|กระติก|ขวดน้ำ|ถาดน้ำแข็ง|หม้อ|กระทะ/i.test(haystack)) return "kitchen";
   if (/กระเป๋า|เดินทาง|แคมป์|เที่ยว/i.test(haystack)) return "travel";
@@ -2536,13 +2528,6 @@ function enrichShopeeStoryboardForAffiliateReview(
       dailyBenefit: "ใส่คู่กับเสื้อผ้าเรียบ ๆ แล้วช่วยให้ลุคดูครบขึ้น",
       emotionalBenefit: "เพิ่มความมั่นใจเวลาแต่งตัวออกไปข้างนอก",
       purchaseReason: "เหมาะกับคนที่ชอบเครื่องประดับโทนเรียบหรูและแมตช์ง่าย"
-    },
-    laundry: {
-      primaryPainPoint: "ซักผ้าแล้วอยากให้ผ้าหอมสะอาดขึ้น",
-      problemSolved: "ช่วยดูแลผ้าในรอบซักประจำวันให้สะดวกขึ้น",
-      dailyBenefit: "ใช้กับมุมซักผ้าในบ้านได้เป็นประจำ",
-      emotionalBenefit: "หยิบใช้แล้วช่วยให้ผ้าที่ซักดูสดชื่นขึ้น",
-      purchaseReason: "เหมาะกับบ้านที่ซักผ้าบ่อยและอยากมีตัวช่วยดูแลผ้าติดไว้"
     },
     electronics: {
       primaryPainPoint: "อยากใช้งานหรือทำคอนเทนต์ให้สะดวกขึ้น",
@@ -2803,17 +2788,15 @@ const SHOPEE_STORYBOARD_RULES: ShopeeStoryboardRule[] = [
     })
   },
   {
-    pattern: /ผงซักฟอก|น้ำยาซัก|detergent|laundry|ปรับผ้านุ่ม|ซักผ้า|สเปรย์ฉีดผ้า|ผ้าหอม|ลดกลิ่นอับ|ทำความสะอาด|ไม้ถู|ชั้นวาง|กล่องเก็บ|จัดระเบียบ/i,
-    build: (product, haystack) => makeShopeeStoryboard(product, {
-      productType: /ซัก|ผงซักฟอก|detergent|laundry|ปรับผ้านุ่ม|ผ้าหอม|ฉีดผ้า|ลดกลิ่นอับ/i.test(haystack) ? "ผลิตภัณฑ์ซักผ้าและดูแลผ้า" : "ของใช้ในบ้าน",
+    pattern: /ทำความสะอาด|ไม้ถู|ชั้นวาง|กล่องเก็บ|จัดระเบียบ/i,
+    build: (product) => makeShopeeStoryboard(product, {
+      productType: "ของใช้ในบ้าน",
       whatItIs: "ของใช้สำหรับดูแลบ้านหรือจัดพื้นที่ใช้งาน",
-      mainUseCase: /ซัก|ผงซักฟอก|detergent|laundry|ปรับผ้านุ่ม|ผ้าหอม|ฉีดผ้า|ลดกลิ่นอับ/i.test(haystack) ? "ใช้ซักผ้าหรือดูแลผ้าในบ้าน" : "ใช้จัดเก็บ ทำความสะอาด หรือช่วยให้บ้านเป็นระเบียบ",
+      mainUseCase: "ใช้จัดเก็บ ทำความสะอาด หรือช่วยให้บ้านเป็นระเบียบ",
       targetUser: "คนที่ดูแลบ้านหรืออยากให้มุมใช้งานสะดวกขึ้น",
-      keySellingPoint: /ซัก|ผงซักฟอก|detergent|laundry|ปรับผ้านุ่ม|ผ้าหอม|ฉีดผ้า|ลดกลิ่นอับ/i.test(haystack) ? "ช่วยให้การซักผ้าในบ้านเป็น routine ที่ง่ายขึ้น" : "ช่วยลดความรกและหยิบของได้เป็นที่",
-      usageScene: /ซัก|ผงซักฟอก|detergent|laundry|ปรับผ้านุ่ม|ผ้าหอม|ฉีดผ้า|ลดกลิ่นอับ/i.test(haystack) ? "มุมซักผ้าหรือเครื่องซักผ้า" : "ห้องครัว ห้องน้ำ หรือมุมเก็บของ",
-      captionAngle: /ซัก|ผงซักฟอก|detergent|laundry|ปรับผ้านุ่ม|ผ้าหอม|ฉีดผ้า|ลดกลิ่นอับ/i.test(haystack)
-        ? "มีติดบ้านไว้ใช้กับรอบซักผ้าได้สะดวก เหมาะกับบ้านที่ซักผ้าเป็นประจำ"
-        : "ช่วยให้มุมที่ใช้บ่อยเป็นระเบียบขึ้น หยิบของง่ายและไม่กินพื้นที่เกินไป"
+      keySellingPoint: "ช่วยลดความรกและหยิบของได้เป็นที่",
+      usageScene: "ห้องครัว ห้องน้ำ หรือมุมเก็บของ",
+      captionAngle: "ช่วยให้มุมที่ใช้บ่อยเป็นระเบียบขึ้น หยิบของง่ายและไม่กินพื้นที่เกินไป"
     })
   },
   {
@@ -2873,7 +2856,6 @@ function inferShopeeFallbackProductType(product: ShopeeProductRecord, haystack: 
     [/กระเป๋า|bag|เป้|คาดอก|crossbody|wallet/i, "กระเป๋าพกพา"],
     [/art\s?toy|อาร์ตทอย|กล่องสุ่ม|blind\s?box|figure|ฟิกเกอร์|โมเดล|ของสะสม|ตุ๊กตา|จุ่ม/i, "Art Toy / ของสะสม"],
     [/สัตว์|pet|แมว|cat|สุนัข|dog|อาหารสัตว์|ทรายแมว|ปลอกคอ/i, "อุปกรณ์สัตว์เลี้ยง"],
-    [/ผงซักฟอก|น้ำยาซัก|detergent|laundry|ปรับผ้านุ่ม|ซักผ้า|สเปรย์ฉีดผ้า|ผ้าหอม|ลดกลิ่นอับ/i, "ผลิตภัณฑ์ซักผ้าและดูแลผ้า"],
     [/ทำความสะอาด|ไม้ถู|ชั้นวาง|กล่องเก็บ|จัดระเบียบ/i, "ของใช้ในบ้าน"],
     [/ขนม|snack|อาหาร(?!เสริม)|food|เครื่องดื่ม|drink|กาแฟ|coffee|ชา|tea|เปี๊ยะ|คุกกี้|เค้ก|น้ำพริก/i, /น้ำพริก/i.test(haystack) ? "น้ำพริก / ของกินติดบ้าน" : "ของกินติดบ้าน"]
   ];
@@ -2951,7 +2933,6 @@ function validateShopeeProductStoryboard(storyboard?: ShopeeProductStoryboard | 
 function getShopeeStoryboardHashtags(product: ShopeeProductRecord, storyboard: ShopeeProductStoryboard) {
   const group = getShopeeStoryboardProductGroup(storyboard);
   const groupTags: Record<string, string[]> = {
-    laundry: ["#ผลิตภัณฑ์ซักผ้า", "#ดูแลผ้า", "#ของใช้ในบ้าน"],
     jewelry: ["#เครื่องประดับ", "#สร้อยคอ", "#แฟชั่น"],
     automotive: ["#อุปกรณ์รถยนต์", "#ของใช้ติดรถ", "#รถยนต์"],
     sports: ["#กีฬา", "#ออกกำลังกาย", "#สายสปอร์ต"],
@@ -2976,7 +2957,6 @@ function getShopeeStoryboardHashtags(product: ShopeeProductRecord, storyboard: S
 }
 
 function getShopeeStoryboardBenefitEmojis(productType: string) {
-  if (/ซักผ้า|ผงซักฟอก|น้ำยาซัก|detergent|laundry|ดูแลผ้า|ผ้าหอม/.test(productType)) return ["🧺", "👕", "✨", "🏠"];
   if (/กล้องติดรถ|กล้องหน้ารถ|dash\s?cam|บันทึกภาพรถ/i.test(productType)) return ["📹", "🛣️", "🚘", "🔎"];
   if (/รถ|จัมป์|จั๊ม|ยาง|แบต/.test(productType)) return ["🔋", "💨", "🔦", "📱"];
   if (/ลูกแบด|กีฬา|วิ่ง|รองเท้า|ถุงเท้า/.test(productType)) return ["🏃", "💪", "🎯", "🏸"];
