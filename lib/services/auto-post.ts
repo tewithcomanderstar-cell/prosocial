@@ -1598,6 +1598,22 @@ async function queueShopeeAutoPostsForConfig(
     triggeredAt: triggeredAt.toISOString()
   });
 
+  // Persist the run id before product/package generation. If a later step fails
+  // before page tasks are created, the monitor must still read the exact failed
+  // run instead of showing stale "missing task" data from a previous run.
+  await updateAutoPostState(config._id, {
+    autoPostStatus: "running",
+    jobStatus: "pending",
+    lastStatus: "pending",
+    lastError: null,
+    lastRunAt: triggeredAt,
+    nextRunAt,
+    retryCount: 0,
+    lastWorkflowId: records.workflowId,
+    lastWorkflowRunId: records.workflowRunId,
+    lastContentItemId: records.contentItemId
+  });
+
   await logShopeeStep({
     config,
     step: "FETCH_SHOPEE_PRODUCTS",

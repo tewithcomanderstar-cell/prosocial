@@ -364,6 +364,17 @@ export async function GET() {
       [],
       "publish-jobs"
     )) as LeanJobStatus[];
+    const lastRunAtDate =
+      effectiveConfigDoc?.lastRunAt instanceof Date
+        ? effectiveConfigDoc.lastRunAt
+        : effectiveConfigDoc?.lastRunAt
+          ? new Date(String(effectiveConfigDoc.lastRunAt))
+          : null;
+    const noTaskRunIsStale =
+      runJobs.length === 0 &&
+      lastRunAtDate instanceof Date &&
+      !Number.isNaN(lastRunAtDate.getTime()) &&
+      Date.now() - lastRunAtDate.getTime() > 3 * 60 * 1000;
     const latestProcessingJob = runJobs.find((job) => job.status === "processing") ?? null;
     const latestFailedJob = runJobs.find((job) => job.status === "failed" || job.status === "duplicate_blocked") ?? null;
     const uniqueTargetPageIds = Array.from(new Set(targetPageIds.map((pageId) => String(pageId)).filter(Boolean)));
@@ -386,11 +397,13 @@ export async function GET() {
           pageId,
           pageName: pageNameById.get(pageId) ?? "Facebook Page",
           shortAffiliateLink: null,
-          status: "pending",
+          status: noTaskRunIsStale ? "failed" : "pending",
           rawStatus: "not_created",
           facebookPostId: null,
-          errorCode: null,
-          errorMessage: "Page task creation incomplete",
+          errorCode: noTaskRunIsStale ? "no_page_tasks_created" : null,
+          errorMessage: noTaskRunIsStale
+            ? "No page tasks were created for the latest run. Start Now to retry."
+            : "Page task is being prepared",
           startedAt: null,
           scheduledAt: null,
           finishedAt: null
@@ -531,7 +544,7 @@ export async function GET() {
         name: String(page.name ?? page.pageName ?? "Facebook Page")
       })).filter((page: { pageId: string; name: string }) => page.pageId.length > 0),
       currentJobId: latestProcessingJob ? String(latestProcessingJob._id) : runJobs[0]?._id ? String(runJobs[0]._id) : null,
-      currentStep: isFindingValidProduct ? "FINDING_VALID_PRODUCT" : currentStep,
+      currentStep: isFindingValidProduct ? "FINDING_VALID_PRODUCT" : noTaskRunIsStale ? "PAGE_TASK_CREATION_FAILED" : currentStep,
       currentAttempt,
       maxProductAttempts,
       skippedProductsCount,
@@ -541,10 +554,12 @@ export async function GET() {
         : null,
       selectedPagesCount,
       createdTasksCount,
-      queueHealth: isFindingValidProduct ? "finding_valid_product" : missingTasksCount > 0 ? "missing_tasks" : "ok",
+      queueHealth: isFindingValidProduct ? "finding_valid_product" : noTaskRunIsStale ? "no_tasks_created" : missingTasksCount > 0 ? "missing_tasks" : "ok",
       missingTasksCount: isFindingValidProduct ? 0 : missingTasksCount,
       missingTasksWarning: isFindingValidProduct
         ? null
+        : noTaskRunIsStale
+        ? `No page tasks were created for the latest run. Expected: ${selectedPagesCount}, Created: ${createdTasksCount}. Start Now to retry.`
         : missingTasksCount > 0
         ? `Missing Tasks Detected. Expected: ${selectedPagesCount}, Created: ${createdTasksCount}`
         : null,
