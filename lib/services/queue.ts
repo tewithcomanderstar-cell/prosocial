@@ -941,104 +941,110 @@ async function validateShopeeAffiliatePublishPayload(input: {
   imageCount: number;
 }) {
   const reasons: string[] = [];
+  const failureDetails: Array<{
+    failedRule: string;
+    matchedText?: string;
+    validatorName: string;
+  }> = [];
+  const validatorName = "validateShopeeAffiliatePublishPayload";
+  const enabledRules = [
+    "caption_exists",
+    "caption_encoding_valid",
+    "generated_images_complete",
+    "shopee_short_link_exists",
+    "shopee_link_same_line_as_pin",
+    "no_internal_redirect_url",
+    "no_affiliate_disclosure",
+    "facebook_caption_length_limit",
+    "no_forbidden_hallucination_phrases"
+  ];
   const normalizedMessage = normalizeTextEncoding(input.message);
   const encodingValidation = validateTextEncoding(normalizedMessage, "Shopee publish caption");
   const shopeeLinkMatch = normalizedMessage.match(/https:\/\/s\.shopee\.co\.th\/\S+/);
-  const shopeePinLinkMatch = normalizedMessage.match(/📍\s*พิกัด\s+https:\/\/s\.shopee\.co\.th\/\S+/);
+  const shopeePinLinkMatch = normalizedMessage.match(/📍\s*พิกัด\s+https:\/\/s\.shopee\.co\.th\/\S+/u);
   const payloadAffiliateLink = typeof input.job.payload?.affiliateLink === "string" ? input.job.payload.affiliateLink : "";
-  const hardSellPatterns = [
-    /สินค้าคุณภาพดี/i,
-    /โปรโมชั่นสุดคุ้ม/i,
-    /รีบสั่งซื้อ/i,
-    /พลาดไม่ได้/i,
-    /รีบซื้อด่วน/i,
-    /โปรโมชั่นห้ามพลาด/i,
-    /รีบกดก่อนหมด/i,
-    /ของมันต้องมี/i,
-    /ซื้อเลยตอนนี้/i
+  const forbiddenHallucinationPatterns = [
+    /จากรูปสินค้า/iu,
+    /จากภาพสินค้า/iu,
+    /จากภาพ/iu,
+    /จากชื่อสินค้า/iu,
+    /จากข้อมูลสินค้า/iu,
+    /จากข้อมูลที่ระบุ/iu,
+    /จากรายละเอียดสินค้า/iu,
+    /จากคำอธิบายสินค้า/iu,
+    /ตามข้อมูล/iu,
+    /ตามภาพ/iu,
+    /เห็นได้จากภาพ/iu,
+    /วิเคราะห์จากภาพ/iu,
+    /กระบวนการวิเคราะห์/iu
   ];
-  const forbiddenGenericPatterns = [
-    /เลือกจากรายละเอียดสินค้าแล้วดูใช้งานได้จริง/i,
-    /เหมาะกับหมวด\s*(?:General|Lifestyle|Beauty|Home)?/i,
-    /เหมาะกับการใช้งานทั่วไป/i,
-    /คุ้มค่ากับราคา/i,
-    /จากข้อมูลสินค้า/i,
-    /จากรายละเอียดสินค้า/i,
-    /ใช้งานได้จริง/i,
-    /คุณสมบัติสินค้า/i,
-    /สินค้าประเภท/i,
-    /(^|\s)(?:General|Lifestyle|Beauty|Home)(\s|$)/i
-  ];
-  const forbiddenOpeners = [
-    /^เข้าใจแล้วว่าทำไม/i,
-    /^ตอนแรกคิดว่า/i,
-    /^ตอนแรกไม่ได้/i,
-    /^อันนี้คือ/i,
-    /^เห็นคนรีวิวเยอะ/i,
-    /^ใช้แล้วเข้าใจเลย/i,
-    /^ของจริงสวยกว่า/i,
-    /^โคตรเหมาะกับ/i,
-    /^Stop scrolling/i,
-    /^Here are Shopee finds/i
-  ];
-  const nonEmptyLines = normalizedMessage
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const firstHashtagLineIndex = nonEmptyLines.findIndex((line) => /#[^\s#]+/.test(line));
-  const linkLineIndex = nonEmptyLines.findIndex((line) => /https:\/\/s\.shopee\.co\.th\/\S+/.test(line));
-  const hashtagCount = normalizedMessage.match(/#[^\s#]+/g)?.length ?? 0;
+  const addFailure = (failedRule: string, message: string, matchedText?: string) => {
+    reasons.push(message);
+    failureDetails.push({ failedRule, matchedText, validatorName });
+  };
 
+  console.info("[SHOPEE_POST_VALIDATION_RULES]", {
+    validatorName,
+    enabledRules
+  });
+
+  if (!normalizedMessage.trim()) {
+    addFailure("caption_exists", "Caption is empty");
+  }
   if (!encodingValidation.ok) {
-    reasons.push(`Caption encoding is corrupted: ${encodingValidation.markers.join(", ")}`);
+    addFailure(
+      "caption_encoding_valid",
+      `Caption encoding is corrupted: ${encodingValidation.markers.join(", ")}`,
+      encodingValidation.markers.join(", ")
+    );
   }
   if (input.imageCount !== 4) {
-    reasons.push("Shopee Affiliate post requires exactly 4 generated images");
+    addFailure("generated_images_complete", "Shopee Affiliate post requires exactly 4 generated images");
   }
   if (!shopeeLinkMatch || !isShopeeShortLink(shopeeLinkMatch[0])) {
-    reasons.push("Caption must include a valid Shopee short link starting with https://s.shopee.co.th/");
+    addFailure(
+      "shopee_short_link_exists",
+      "Caption must include a valid Shopee short link starting with https://s.shopee.co.th/",
+      shopeeLinkMatch?.[0]
+    );
   }
   if (!shopeePinLinkMatch) {
-    reasons.push("Shopee short link must be on the same line as 📍 พิกัด");
+    addFailure("shopee_link_same_line_as_pin", "Shopee short link must be on the same line as 📍 พิกัด");
   }
   if (/📍\s*พิกัด\s*\r?\n\s*https:\/\/s\.shopee\.co\.th\//iu.test(normalizedMessage)) {
-    reasons.push("Caption uses old two-line Shopee link format");
+    addFailure("shopee_link_same_line_as_pin", "Caption uses old two-line Shopee link format");
   }
   if (payloadAffiliateLink && !isShopeeShortLink(payloadAffiliateLink)) {
-    reasons.push("Queued affiliate link is not a Shopee short link");
+    addFailure("shopee_short_link_exists", "Queued affiliate link is not a Shopee short link", payloadAffiliateLink);
   }
   if (/prosocial-app-theta\.vercel\.app|\/api\/s\//i.test(normalizedMessage)) {
-    reasons.push("Caption contains an internal redirect URL");
+    addFailure("no_internal_redirect_url", "Caption contains an internal redirect URL");
   }
   if (normalizedMessage.includes("\u0e2b\u0e21\u0e32\u0e22\u0e40\u0e2b\u0e15\u0e38")) {
-    reasons.push("Caption contains forbidden disclosure word: \u0e2b\u0e21\u0e32\u0e22\u0e40\u0e2b\u0e15\u0e38");
+    addFailure(
+      "no_affiliate_disclosure",
+      "Caption contains forbidden disclosure word: \u0e2b\u0e21\u0e32\u0e22\u0e40\u0e2b\u0e15\u0e38",
+      "\u0e2b\u0e21\u0e32\u0e22\u0e40\u0e2b\u0e15\u0e38"
+    );
   }
   if (normalizedMessage.toLowerCase().includes("affiliate")) {
-    reasons.push("Caption contains forbidden disclosure word: affiliate");
+    addFailure("no_affiliate_disclosure", "Caption contains forbidden disclosure word: affiliate", "affiliate");
   }
-  if (normalizedMessage.length > 700) {
-    reasons.push(`Caption is too long (${normalizedMessage.length}/700 characters)`);
+  if (normalizedMessage.length > 63000) {
+    addFailure(
+      "facebook_caption_length_limit",
+      `Caption exceeds Facebook post length limit (${normalizedMessage.length}/63000 characters)`
+    );
   }
-  if (hardSellPatterns.some((pattern) => pattern.test(normalizedMessage))) {
-    reasons.push("Caption contains hard-sell wording that is not allowed for Shopee UGC review style");
-  }
-  if (forbiddenGenericPatterns.some((pattern) => pattern.test(normalizedMessage))) {
-    reasons.push("Caption contains forbidden generic AI review wording");
-  }
-  if (forbiddenOpeners.some((pattern) => pattern.test(nonEmptyLines[0] ?? ""))) {
-    reasons.push("Caption starts with a forbidden old hook style");
-  }
-  if (linkLineIndex === -1) {
-    reasons.push("Caption must place the Shopee short link before hashtags");
-  }
-  if (firstHashtagLineIndex !== -1 && firstHashtagLineIndex !== nonEmptyLines.length - 1) {
-    reasons.push("Hashtags must be on the final line only");
-  }
-  if (firstHashtagLineIndex !== -1 && linkLineIndex !== -1 && firstHashtagLineIndex < linkLineIndex) {
-    reasons.push("Hashtags must be placed after the Shopee short link");
-  }
-  if (hashtagCount > 5) {
-    reasons.push(`Caption has too many hashtags (${hashtagCount}/5 max)`);
+  for (const pattern of forbiddenHallucinationPatterns) {
+    const matchedText = normalizedMessage.match(pattern)?.[0];
+    if (matchedText) {
+      addFailure(
+        "no_forbidden_hallucination_phrases",
+        "Caption contains forbidden source/hallucination wording",
+        matchedText
+      );
+    }
   }
 
   if (reasons.length === 0) {
@@ -1059,8 +1065,14 @@ async function validateShopeeAffiliatePublishPayload(input: {
       ...getAutoPostLogFlags(input.job),
       targetPageId: input.job.targetPageId,
       imageCount: input.imageCount,
-      reasons
+      reasons,
+      failedRules: failureDetails
     }
+  });
+
+  console.warn("[SHOPEE_POST_VALIDATION_FAILED_DETAIL]", {
+    validatorName,
+    failedRules: failureDetails
   });
 
   throw new Error(`Shopee Affiliate post validation failed: ${reasons.join("; ")}`);
