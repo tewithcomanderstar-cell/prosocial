@@ -93,6 +93,29 @@ async function runQueueRouteStage<T>(
   }
 }
 
+async function runOptionalQueueRouteStage<T>(
+  stage: string,
+  metadata: Record<string, unknown>,
+  fallback: T,
+  fn: () => Promise<T> | T
+) {
+  try {
+    return await runQueueRouteStage(stage, metadata, fn);
+  } catch (error) {
+    const serialized = serializeQueueRouteError(error);
+    console.error("[QUEUE_ROUTE_OPTIONAL_STAGE_SKIPPED]", {
+      route: "/api/shopee/queue",
+      stage,
+      ...metadata,
+      fallbackUsed: true,
+      errorMessage: serialized.message,
+      errorStack: serialized.stack,
+      errorJson: serialized.json
+    });
+    return fallback;
+  }
+}
+
 export async function GET() {
   const routeStartedAt = Date.now();
   logQueueRoute("QUEUE_ROUTE_STARTED", { method: "GET" });
@@ -133,30 +156,66 @@ export async function GET() {
       });
     }
 
-    const [products, aiPosts, posts] = await runQueueRouteStage(
-      "RELATED_DB_QUERY",
-      {
-        userId,
-        productIdsCount: productIds.length,
-        aiPostIdsCount: aiPostIds.valid.length,
-        postIdsCount: postIds.valid.length
-      },
-      () => Promise.all([
-        ShopeeProduct.find({ userId, productId: { $in: productIds } })
-          .select("productId productName productPrice discountPrice discountPercent productImageUrl productImageUrls category rating salesCount reviewCount shopName")
-          .lean(),
-        aiPostIds.valid.length
-          ? AiGeneratedPost.find({ userId, _id: { $in: aiPostIds.valid } })
-              .select("caption affiliateLink generationMetaJson generatedImageUrl status")
-              .lean()
-          : Promise.resolve([]),
-        postIds.valid.length
-          ? Post.find({ userId, _id: { $in: postIds.valid } })
-              .select("content imageUrls status")
-              .lean()
-          : Promise.resolve([])
-      ])
-    );
+    const relatedStartedAt = Date.now();
+    logQueueRoute("QUEUE_ROUTE_STAGE_STARTED", {
+      stage: "RELATED_DB_QUERY",
+      userId,
+      productIdsCount: productIds.length,
+      aiPostIdsCount: aiPostIds.valid.length,
+      postIdsCount: postIds.valid.length
+    });
+
+    const [products, aiPosts, posts] = await Promise.all([
+      productIds.length
+        ? runOptionalQueueRouteStage(
+            "RELATED_DB_QUERY_SHOPEE_PRODUCTS",
+            { userId, productIdsCount: productIds.length, maxTimeMS: 8000 },
+            [],
+            () =>
+              ShopeeProduct.find({ userId, productId: { $in: productIds } })
+                .select("productId productName productPrice discountPrice discountPercent productImageUrl productImageUrls category rating salesCount reviewCount shopName")
+                .maxTimeMS(8000)
+                .lean()
+          )
+        : Promise.resolve([]),
+      aiPostIds.valid.length
+        ? runOptionalQueueRouteStage(
+            "RELATED_DB_QUERY_AI_POSTS",
+            { userId, aiPostIdsCount: aiPostIds.valid.length, maxTimeMS: 8000 },
+            [],
+            () =>
+              AiGeneratedPost.find({ userId, _id: { $in: aiPostIds.valid } })
+                .select("caption affiliateLink generationMetaJson generatedImageUrl status")
+                .maxTimeMS(8000)
+                .lean()
+          )
+        : Promise.resolve([]),
+      postIds.valid.length
+        ? runOptionalQueueRouteStage(
+            "RELATED_DB_QUERY_POSTS",
+            { userId, postIdsCount: postIds.valid.length, maxTimeMS: 8000 },
+            [],
+            () =>
+              Post.find({ userId, _id: { $in: postIds.valid } })
+                .select("content imageUrls status")
+                .maxTimeMS(8000)
+                .lean()
+          )
+        : Promise.resolve([])
+    ]);
+
+    const relatedDurationMs = Date.now() - relatedStartedAt;
+    logQueueRoute("QUEUE_ROUTE_STAGE_COMPLETED", {
+      stage: "RELATED_DB_QUERY",
+      userId,
+      durationMs: relatedDurationMs,
+      productIdsCount: productIds.length,
+      aiPostIdsCount: aiPostIds.valid.length,
+      postIdsCount: postIds.valid.length,
+      productsFound: products.length,
+      aiPostsFound: aiPosts.length,
+      postsFound: posts.length
+    });
     logQueueRoute("QUEUE_ROUTE_INPUT", {
       userId,
       productIdsCount: productIds.length,
