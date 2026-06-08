@@ -4678,6 +4678,50 @@ function isOpenAiImageTimeoutError(error: unknown) {
   return message.toLowerCase().includes("openai image request timeout");
 }
 
+function getErrorMessage(error: unknown, fallback = "Unknown error") {
+  return error instanceof Error ? error.message : String(error ?? fallback);
+}
+
+function getErrorStack(error: unknown) {
+  return error instanceof Error ? error.stack?.slice(0, 3000) : undefined;
+}
+
+function classifyImageFailureSource(error: unknown, fallback: string) {
+  const message = getErrorMessage(error, "").toLowerCase();
+  const code = error instanceof ShopeeProviderError ? error.code : "";
+  const providerSource = error instanceof ShopeeProviderError ? error.source : "";
+
+  if (
+    fallback === "openai" ||
+    code.includes("openai") ||
+    message.includes("openai") ||
+    message.includes("image request timeout")
+  ) {
+    return "openai";
+  }
+
+  if (
+    fallback === "validation" ||
+    code.includes("validation") ||
+    message.includes("duplicate ugc") ||
+    message.includes("original shopee product image") ||
+    message.includes("reference image") ||
+    message.includes("expected")
+  ) {
+    return "validation";
+  }
+
+  if (fallback === "blob" || providerSource.includes("blob") || message.includes("blob")) {
+    return "blob_upload";
+  }
+
+  if (fallback === "mongo" || message.includes("mongo") || message.includes("mongoose")) {
+    return "mongo_save";
+  }
+
+  return fallback;
+}
+
 function withOpenAiImageTimeout<T>(producer: () => Promise<T>, timeoutMs: number) {
   let timeout: ReturnType<typeof setTimeout> | null = null;
   return new Promise<T>((resolve, reject) => {
@@ -4879,6 +4923,8 @@ async function generateShopeeUgcImageDocs(input: {
     loggingDurationMs: number;
   };
   const imageDocs = [];
+  let imageTaskSuccessCount = 0;
+  let imageTaskFailedCount = 0;
 
   await timedLog({
     userId: input.userId,
@@ -4907,11 +4953,34 @@ async function generateShopeeUgcImageDocs(input: {
     imagePromptLengths[`IMAGE_${index + 1}_PROMPT_LENGTH`] = prompt.length;
 
     return async (): Promise<GeneratedUgcImage> => {
+      const imageIndex = index + 1;
+      const imageTaskId = crypto.randomUUID();
+      const imageTaskStartedAt = Date.now();
       let generatedBuffer: Buffer | null = null;
       let lastError: unknown = null;
       let imageLoggingDurationMs = 0;
       let requestDurationMs = 0;
 
+      await timedLog({
+        userId: input.userId,
+        jobId: input.jobId,
+        product: input.product,
+        step: "IMAGE_TASK_STARTED",
+        status: "started",
+        message: `UGC image task ${imageIndex}/${input.promptSet.prompts.length} started`,
+        metadata: {
+          imageTaskId,
+          imageIndex,
+          imageCount: input.promptSet.prompts.length,
+          expectedImageCount: input.promptSet.prompts.length,
+          source: "openai",
+          promptLength: prompt.length,
+          referenceImageCount: referenceImages.length,
+          maxAttempts: OPENAI_IMAGE_MAX_ATTEMPTS
+        }
+      });
+
+      try {
       await timedLog({
         userId: input.userId,
         jobId: input.jobId,
@@ -4952,6 +5021,30 @@ async function generateShopeeUgcImageDocs(input: {
           if (sourceHashes.has(generatedHash)) {
             throw new Error("OpenAI returned the original Shopee product image instead of a new UGC lifestyle image");
           }
+          imageTaskSuccessCount += 1;
+          await timedLog({
+            userId: input.userId,
+            jobId: input.jobId,
+            product: input.product,
+            step: "IMAGE_TASK_COMPLETED",
+            status: "success",
+            message: `UGC image task ${imageIndex}/${input.promptSet.prompts.length} completed`,
+            metadata: {
+              imageTaskId,
+              imageIndex,
+              imageCount: input.promptSet.prompts.length,
+              expectedImageCount: input.promptSet.prompts.length,
+              successCount: imageTaskSuccessCount,
+              failedCount: imageTaskFailedCount,
+              attempt,
+              retryCount: Math.max(0, attempt - 1),
+              source: "openai",
+              requestDurationMs,
+              imageTaskDurationMs: Date.now() - imageTaskStartedAt,
+              sizeBytes: generatedBuffer.length,
+              hash: generatedHash
+            }
+          });
           return {
             index,
             promptItem,
@@ -4967,16 +5060,115 @@ async function generateShopeeUgcImageDocs(input: {
         }
       }
 
-      throw new ShopeeProviderError(
+      const taskError = new ShopeeProviderError(
         `Shopee UGC image generation failed: ${lastError instanceof Error ? lastError.message : "OpenAI did not return a usable UGC image"}`,
         500,
         "shopee_ugc_image_generation_failed",
         "internal_api"
       );
+      throw taskError;
+      } catch (error) {
+        imageTaskFailedCount += 1;
+        const source = classifyImageFailureSource(error, classifyImageFailureSource(lastError, "openai"));
+        const reason = getErrorMessage(error, "UGC image task failed");
+        await timedLog({
+          userId: input.userId,
+          jobId: input.jobId,
+          product: input.product,
+          step: "IMAGE_TASK_FAILED",
+          status: "failed",
+          message: `UGC image task ${imageIndex}/${input.promptSet.prompts.length} failed`,
+          metadata: {
+            imageTaskId,
+            imageIndex,
+            imageCount: input.promptSet.prompts.length,
+            expectedImageCount: input.promptSet.prompts.length,
+            successCount: imageTaskSuccessCount,
+            failedCount: imageTaskFailedCount,
+            source,
+            reason,
+            stack: getErrorStack(error),
+            lastAttemptErrorMessage: lastError ? getErrorMessage(lastError) : null,
+            lastAttemptErrorSource: lastError ? classifyImageFailureSource(lastError, "openai") : null,
+            imageTaskDurationMs: Date.now() - imageTaskStartedAt
+          },
+          error
+        });
+        throw error;
+      }
     };
   });
 
-  const generatedImages = await Promise.all(generationTasks.map((task) => task()));
+  let generatedImages: GeneratedUgcImage[];
+  try {
+    generatedImages = await Promise.all(generationTasks.map((task) => task()));
+  } catch (error) {
+    await timedLog({
+      userId: input.userId,
+      jobId: input.jobId,
+      product: input.product,
+      step: "IMAGE_BATCH_FAILED",
+      status: "failed",
+      message: "Shopee UGC image batch failed during parallel generation",
+      metadata: {
+        expectedImageCount: input.promptSet.prompts.length,
+        successCount: imageTaskSuccessCount,
+        failedCount: imageTaskFailedCount,
+        generatedImages: imageTaskSuccessCount,
+        source: classifyImageFailureSource(error, "openai"),
+        reason: getErrorMessage(error, "Parallel image generation failed"),
+        stack: getErrorStack(error),
+        mode: "parallel"
+      },
+      error
+    });
+    throw error;
+  }
+
+  await timedLog({
+    userId: input.userId,
+    jobId: input.jobId,
+    product: input.product,
+    step: "IMAGE_COUNT_CHECK",
+    status: "success",
+    message: "Parallel UGC image generation count checked before validation",
+    metadata: {
+      expectedImageCount: input.promptSet.prompts.length,
+      generatedImages: generatedImages.length,
+      successCount: imageTaskSuccessCount,
+      failedCount: imageTaskFailedCount,
+      source: "validation",
+      mode: "parallel"
+    }
+  });
+  if (generatedImages.length < input.promptSet.prompts.length) {
+    const countError = new ShopeeProviderError(
+      `Shopee UGC image generation incomplete: expected ${input.promptSet.prompts.length}, generated ${generatedImages.length}`,
+      500,
+      "shopee_image_generation_incomplete",
+      "internal_api"
+    );
+    await timedLog({
+      userId: input.userId,
+      jobId: input.jobId,
+      product: input.product,
+      step: "IMAGE_COUNT_CHECK_FAILED",
+      status: "failed",
+      message: "Parallel UGC image generation count was incomplete before validation",
+      metadata: {
+        expectedImageCount: input.promptSet.prompts.length,
+        generatedImages: generatedImages.length,
+        successCount: imageTaskSuccessCount,
+        failedCount: imageTaskFailedCount,
+        source: "validation",
+        reason: countError.message,
+        stack: getErrorStack(countError),
+        mode: "parallel"
+      },
+      error: countError
+    });
+    throw countError;
+  }
 
   await runShopeeTimedStage({
     userId: input.userId,
@@ -4986,6 +5178,9 @@ async function generateShopeeUgcImageDocs(input: {
     metadata: {
       validationStep: "parallel_generated_hash_compare",
       imageCount: generatedImages.length,
+      generatedImages: generatedImages.length,
+      expectedImageCount: input.promptSet.prompts.length,
+      successCount: imageTaskSuccessCount,
       sourceHashCount: sourceHashes.size
     },
     fn: () => {
@@ -5016,7 +5211,9 @@ async function generateShopeeUgcImageDocs(input: {
       metadata: {
         imageIndex: index + 1,
         imageCount: input.promptSet.prompts.length,
-        sizeBytes: generated.buffer.length
+        expectedImageCount: input.promptSet.prompts.length,
+        sizeBytes: generated.buffer.length,
+        source: "blob_upload"
       }
     });
 
@@ -5031,7 +5228,9 @@ async function generateShopeeUgcImageDocs(input: {
         metadata: {
           imageIndex: index + 1,
           imageCount: input.promptSet.prompts.length,
-          sizeBytes: generated.buffer.length
+          expectedImageCount: input.promptSet.prompts.length,
+          sizeBytes: generated.buffer.length,
+          source: "blob_upload"
         },
         fn: () => uploadAutoPostImage({
           jobId: input.jobId ?? `shopee-${Date.now()}`,
@@ -5054,7 +5253,11 @@ async function generateShopeeUgcImageDocs(input: {
         message: `Failed to upload UGC image ${index + 1} to Vercel Blob`,
         metadata: {
           imageIndex: index + 1,
-          imageCount: input.promptSet.prompts.length
+          imageCount: input.promptSet.prompts.length,
+          expectedImageCount: input.promptSet.prompts.length,
+          source: "blob_upload",
+          reason: getErrorMessage(error, "Blob upload failed"),
+          stack: getErrorStack(error)
         },
         error
       });
@@ -5071,12 +5274,14 @@ async function generateShopeeUgcImageDocs(input: {
       metadata: {
         imageIndex: index + 1,
         imageCount: input.promptSet.prompts.length,
+        expectedImageCount: input.promptSet.prompts.length,
         imageUrl: uploadedImage.url,
         pathname: uploadedImage.pathname,
         contentType: uploadedImage.contentType,
         sizeBytes: uploadedImage.sizeBytes,
         blobUploadDurationMs: Date.now() - blobStartedAt,
-        imageLoggingDurationMs: generated.loggingDurationMs
+        imageLoggingDurationMs: generated.loggingDurationMs,
+        source: "blob_upload"
       }
     });
 
@@ -5104,19 +5309,78 @@ async function generateShopeeUgcImageDocs(input: {
       ]
     };
     assertNoLargeMongoFields(imagePayload, "AiGeneratedImage");
-    return runShopeeTimedStage({
+    await timedLog({
       userId: input.userId,
       jobId: input.jobId,
       product: input.product,
-      stage: "DATABASE_SAVE",
+      step: "MONGO_SAVE_STARTED",
+      status: "started",
+      message: `Saving UGC image ${index + 1} metadata to MongoDB`,
       metadata: {
         collection: "AiGeneratedImage",
         imageIndex: index + 1,
         imageCount: input.promptSet.prompts.length,
-        pathname: uploadedImage.pathname
-      },
-      fn: () => AiGeneratedImage.create(imagePayload)
+        expectedImageCount: input.promptSet.prompts.length,
+        pathname: uploadedImage.pathname,
+        source: "mongo_save"
+      }
     });
+    try {
+      const imageDoc = await runShopeeTimedStage({
+        userId: input.userId,
+        jobId: input.jobId,
+        product: input.product,
+        stage: "DATABASE_SAVE",
+        metadata: {
+          collection: "AiGeneratedImage",
+          imageIndex: index + 1,
+          imageCount: input.promptSet.prompts.length,
+          expectedImageCount: input.promptSet.prompts.length,
+          pathname: uploadedImage.pathname,
+          source: "mongo_save"
+        },
+        fn: () => AiGeneratedImage.create(imagePayload)
+      });
+      await timedLog({
+        userId: input.userId,
+        jobId: input.jobId,
+        product: input.product,
+        step: "MONGO_SAVE_COMPLETED",
+        status: "success",
+        message: `Saved UGC image ${index + 1} metadata to MongoDB`,
+        metadata: {
+          collection: "AiGeneratedImage",
+          imageIndex: index + 1,
+          imageCount: input.promptSet.prompts.length,
+          expectedImageCount: input.promptSet.prompts.length,
+          imageId: String(imageDoc._id),
+          pathname: uploadedImage.pathname,
+          source: "mongo_save"
+        }
+      });
+      return imageDoc;
+    } catch (error) {
+      await timedLog({
+        userId: input.userId,
+        jobId: input.jobId,
+        product: input.product,
+        step: "MONGO_SAVE_FAILED",
+        status: "failed",
+        message: `Failed to save UGC image ${index + 1} metadata to MongoDB`,
+        metadata: {
+          collection: "AiGeneratedImage",
+          imageIndex: index + 1,
+          imageCount: input.promptSet.prompts.length,
+          expectedImageCount: input.promptSet.prompts.length,
+          pathname: uploadedImage.pathname,
+          source: "mongo_save",
+          reason: getErrorMessage(error, "Mongo save failed"),
+          stack: getErrorStack(error)
+        },
+        error
+      });
+      throw error;
+    }
   }));
   imageDocs.push(...uploadedImageDocs);
   imageDocs.sort((left, right) => {
@@ -5126,6 +5390,49 @@ async function generateShopeeUgcImageDocs(input: {
     const rightLayout = Number(String(rightHistory.find((item: unknown) => String(item).startsWith("layout=")) ?? "layout=0").replace("layout=", ""));
     return leftLayout - rightLayout;
   });
+
+  await timedLog({
+    userId: input.userId,
+    jobId: input.jobId,
+    product: input.product,
+    step: "IMAGE_DOC_COUNT_CHECK",
+    status: "success",
+    message: "Saved UGC image document count checked before marking image generation complete",
+    metadata: {
+      expectedImageCount: input.promptSet.prompts.length,
+      generatedImages: imageDocs.length,
+      successCount: imageDocs.length,
+      source: "mongo_save",
+      mode: "parallel"
+    }
+  });
+  if (imageDocs.length < input.promptSet.prompts.length) {
+    const countError = new ShopeeProviderError(
+      `Shopee UGC image document save incomplete: expected ${input.promptSet.prompts.length}, saved ${imageDocs.length}`,
+      500,
+      "shopee_image_document_save_incomplete",
+      "internal_api"
+    );
+    await timedLog({
+      userId: input.userId,
+      jobId: input.jobId,
+      product: input.product,
+      step: "IMAGE_DOC_COUNT_CHECK_FAILED",
+      status: "failed",
+      message: "Saved UGC image document count was incomplete before completion",
+      metadata: {
+        expectedImageCount: input.promptSet.prompts.length,
+        generatedImages: imageDocs.length,
+        successCount: imageDocs.length,
+        source: "mongo_save",
+        reason: countError.message,
+        stack: getErrorStack(countError),
+        mode: "parallel"
+      },
+      error: countError
+    });
+    throw countError;
+  }
 
   const totalImageDurationMs = Date.now() - totalStartedAt;
   await timedLog({
@@ -5255,7 +5562,8 @@ export async function buildShopeePostPackage(input: {
     status: "started",
     message: "Generating Shopee UGC images",
     metadata: {
-      expectedImages: 4,
+      expectedImages: imagePromptSet.prompts.length,
+      expectedImageCount: imagePromptSet.prompts.length,
       sourceImageCount: sourceImageUrls.length,
       promptCount: imagePromptSet.prompts.length
     }
@@ -5280,9 +5588,13 @@ export async function buildShopeePostPackage(input: {
       status: "failed",
       message: "Shopee UGC image generation failed",
       metadata: {
-        expectedImages: 4,
+        expectedImages: imagePromptSet.prompts.length,
+        expectedImageCount: imagePromptSet.prompts.length,
         sourceImageCount: sourceImageUrls.length,
-        promptCount: imagePromptSet.prompts.length
+        promptCount: imagePromptSet.prompts.length,
+        source: classifyImageFailureSource(error, "openai"),
+        reason: getErrorMessage(error, "Shopee UGC image generation failed"),
+        stack: getErrorStack(error)
       },
       error
     });
@@ -5404,8 +5716,49 @@ export async function buildShopeePostPackage(input: {
   });
   const generatedImageUrls = imageDocs.map((imageDoc) => `ai-image:${String(imageDoc._id)}`);
 
-  if (generatedImageUrls.length < 4) {
-    throw new ShopeeProviderError("AI image generation failed: expected 4 post images", 500, "shopee_image_generation_incomplete", "internal_api");
+  await logShopeePackageStage({
+    userId: input.userId,
+    jobId: input.jobId,
+    pageId: input.pageId,
+    product: input.product,
+    step: "PACKAGE_IMAGE_COUNT_CHECK",
+    status: "success",
+    message: "Post package image count checked before package completion",
+    metadata: {
+      expectedImageCount: imagePromptSet.prompts.length,
+      generatedImages: generatedImageUrls.length,
+      successCount: generatedImageUrls.length,
+      source: "validation",
+      imageUrls: generatedImageUrls
+    }
+  });
+  if (generatedImageUrls.length < imagePromptSet.prompts.length) {
+    const countError = new ShopeeProviderError(
+      `AI image generation failed: expected ${imagePromptSet.prompts.length} post images, generated ${generatedImageUrls.length}`,
+      500,
+      "shopee_image_generation_incomplete",
+      "internal_api"
+    );
+    await logShopeePackageStage({
+      userId: input.userId,
+      jobId: input.jobId,
+      pageId: input.pageId,
+      product: input.product,
+      step: "PACKAGE_IMAGE_COUNT_CHECK_FAILED",
+      status: "failed",
+      message: "Post package image count was incomplete before package completion",
+      metadata: {
+        expectedImageCount: imagePromptSet.prompts.length,
+        generatedImages: generatedImageUrls.length,
+        successCount: generatedImageUrls.length,
+        source: "validation",
+        reason: countError.message,
+        stack: getErrorStack(countError),
+        imageUrls: generatedImageUrls
+      },
+      error: countError
+    });
+    throw countError;
   }
 
   return {

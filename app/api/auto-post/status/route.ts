@@ -210,6 +210,47 @@ function getStageStatusSummary(logs: StageLog[], input: {
   return "pending";
 }
 
+function getMetadataString(metadata: Record<string, unknown>, key: string) {
+  return typeof metadata[key] === "string" ? String(metadata[key]) : null;
+}
+
+function getSerializedErrorMetadata(metadata: Record<string, unknown>) {
+  return metadata.serializedError && typeof metadata.serializedError === "object"
+    ? (metadata.serializedError as Record<string, unknown>)
+    : null;
+}
+
+function getStageFailureDetails(log: StageLog | null, fallback?: { source?: string; reason?: string }) {
+  if (!log) {
+    return {
+      step: null,
+      source: fallback?.source ?? null,
+      reason: fallback?.reason ?? null,
+      stack: null
+    };
+  }
+
+  const metadata = (log.metadata ?? {}) as Record<string, unknown>;
+  const serializedError = getSerializedErrorMetadata(metadata);
+  const reason =
+    getMetadataString(metadata, "reason") ??
+    getMetadataString(metadata, "errorMessage") ??
+    (typeof serializedError?.message === "string" ? serializedError.message : null) ??
+    (typeof log.message === "string" ? log.message : null) ??
+    fallback?.reason ??
+    null;
+  const stack =
+    getMetadataString(metadata, "stack") ??
+    (typeof serializedError?.stack === "string" ? serializedError.stack : null);
+
+  return {
+    step: getStageStep(log),
+    source: getMetadataString(metadata, "source") ?? fallback?.source ?? null,
+    reason,
+    stack
+  };
+}
+
 function derivePreTaskBlockingStep(logs: StageLog[]) {
   const allRelevantSteps = [
     "TEMPLATE_POST_CREATED",
@@ -573,6 +614,18 @@ export async function GET() {
       "OPENAI_IMAGE_TIMEOUT",
       "OPENAI_IMAGE_REQUEST_START"
     ]);
+    const latestImageFailureLog = getLatestStageLog(runStageLogs, [
+      "PACKAGE_IMAGE_COUNT_CHECK_FAILED",
+      "IMAGE_DOC_COUNT_CHECK_FAILED",
+      "MONGO_SAVE_FAILED",
+      "BLOB_UPLOAD_FAILED",
+      "IMAGE_COUNT_CHECK_FAILED",
+      "IMAGE_BATCH_FAILED",
+      "IMAGE_TASK_FAILED",
+      "UGC_IMAGES_FAILED",
+      "OPENAI_IMAGE_REQUEST_FAILED",
+      "OPENAI_IMAGE_TIMEOUT"
+    ]);
     if (
       blobStatus === "pending" &&
       latestImageRequestLog &&
@@ -582,6 +635,24 @@ export async function GET() {
       blobStatus = "failed";
     }
     const latestImageRequestMetadata = (latestImageRequestLog?.metadata ?? {}) as Record<string, unknown>;
+    const imageStartedLogIsStale =
+      Boolean(latestImageRequestLog) &&
+      getStageStep(latestImageRequestLog as StageLog) === "OPENAI_IMAGE_REQUEST_START" &&
+      isStageLogOlderThan(latestImageRequestLog, 195_000);
+    const imageFailureDetails = getStageFailureDetails(
+      latestImageFailureLog,
+      imageStatus === "failed" && imageStartedLogIsStale
+        ? {
+            source: "status_mapping",
+            reason: "imageStatus was derived as failed because the latest OPENAI_IMAGE_REQUEST_START log is stale and no later image failure log was found"
+          }
+        : imageStatus === "failed"
+          ? {
+              source: "status_mapping",
+              reason: "imageStatus was derived as failed by stage status mapping without a failure log containing an error"
+            }
+          : undefined
+    );
     const imageDurationMs =
       typeof latestImageRequestMetadata.durationMs === "number"
         ? latestImageRequestMetadata.durationMs
@@ -599,7 +670,9 @@ export async function GET() {
         ? latestImageRequestMetadata.errorMessage
         : typeof latestImageRequestMetadata.serializedError === "object" && latestImageRequestMetadata.serializedError
           ? String((latestImageRequestMetadata.serializedError as Record<string, unknown>).message ?? "")
-          : null;
+          : imageStatus === "failed"
+            ? imageFailureDetails.reason
+            : null;
     const latestStoryboardRequestLog = getLatestStageLog(runStageLogs, [
       "STORYBOARD_CREATED",
       "OPENAI_STORYBOARD_REQUEST_END",
@@ -878,6 +951,10 @@ export async function GET() {
           : null,
       imageRetryCount: imageRetryCount !== null && Number.isFinite(imageRetryCount) ? imageRetryCount : null,
       imageLastError: imageLastError ? sanitizeLegacyMessage(imageLastError) : null,
+      imageFailureStep: imageFailureDetails.step,
+      imageFailureSource: imageFailureDetails.source,
+      imageFailureReason: imageFailureDetails.reason ? sanitizeLegacyMessage(imageFailureDetails.reason) : null,
+      imageFailureStack: imageFailureDetails.stack ? String(imageFailureDetails.stack).slice(0, 3000) : null,
       lastSkippedReason: latestSkippedProductLog
         ? sanitizeLegacyMessage(String(latestSkippedMetadata.reason ?? latestSkippedProductLog.message ?? "Product skipped"))
         : null,

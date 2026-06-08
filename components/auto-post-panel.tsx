@@ -87,6 +87,10 @@ type ControlPanelStatus = {
   imageProvider?: string | null;
   imageRetryCount?: number | null;
   imageLastError?: string | null;
+  imageFailureStep?: string | null;
+  imageFailureSource?: string | null;
+  imageFailureReason?: string | null;
+  imageFailureStack?: string | null;
   lastSkippedReason?: string | null;
   selectedPagesCount?: number;
   createdTasksCount?: number;
@@ -1362,6 +1366,9 @@ export function AutoPostPanel() {
           <div className="auto-post-metric-card"><span className="muted">Image provider</span><strong>{controlPanel?.imageProvider ? sanitizeText(controlPanel.imageProvider) : "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Image retry count</span><strong>{controlPanel?.imageRetryCount ?? "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Image last error</span><strong>{controlPanel?.imageLastError ? sanitizeText(controlPanel.imageLastError) : "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Image failure source</span><strong>{controlPanel?.imageFailureSource ? sanitizeText(controlPanel.imageFailureSource) : "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Image failure step</span><strong>{controlPanel?.imageFailureStep ? sanitizeText(controlPanel.imageFailureStep) : "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Image failure reason</span><strong>{controlPanel?.imageFailureReason ? sanitizeText(controlPanel.imageFailureReason) : "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Blob status</span><strong>{controlPanel?.blobStatus ?? "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Selected pages</span><strong>{controlPanel?.selectedPagesCount ?? config.targetPageIds.length}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Created tasks</span><strong>{controlPanel?.createdTasksCount ?? controlPanel?.pageResults?.filter((result) => result.jobId).length ?? 0}</strong></div>
