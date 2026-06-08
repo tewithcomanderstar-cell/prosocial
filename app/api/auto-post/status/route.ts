@@ -184,6 +184,12 @@ function getLatestStageLog(logs: StageLog[], steps: string[]) {
   return logs.find((log) => stepSet.has(getStageStep(log))) ?? null;
 }
 
+function isStageLogOlderThan(log: StageLog | null, staleAfterMs: number) {
+  if (!log?.createdAt) return false;
+  const createdAtMs = new Date(String(log.createdAt)).getTime();
+  return Number.isFinite(createdAtMs) && Date.now() - createdAtMs > staleAfterMs;
+}
+
 function getStageStatusSummary(logs: StageLog[], input: {
   started: string[];
   completed: string[];
@@ -196,12 +202,7 @@ function getStageStatusSummary(logs: StageLog[], input: {
   if (input.failed.includes(latestStep)) return "failed";
   if (input.completed.includes(latestStep)) return "created";
   if (input.started.includes(latestStep)) {
-    const createdAtMs = latest.createdAt ? new Date(String(latest.createdAt)).getTime() : NaN;
-    if (
-      input.staleStartedAfterMs &&
-      Number.isFinite(createdAtMs) &&
-      Date.now() - createdAtMs > input.staleStartedAfterMs
-    ) {
+    if (input.staleStartedAfterMs && isStageLogOlderThan(latest, input.staleStartedAfterMs)) {
       return "failed";
     }
     return "started";
@@ -271,7 +272,9 @@ function derivePreTaskBlockingStep(logs: StageLog[]) {
   if (latestStep === "TEMPLATE_POST_CREATE_STARTED") return "WAITING_FOR_TEMPLATE_POST";
   if (latestStep === "UGC_IMAGES_CREATED") return "WAITING_FOR_TEMPLATE_POST";
   if (latestStep === "OPENAI_IMAGE_REQUEST_END") return "WAITING_FOR_BLOB_UPLOAD";
-  if (latestStep === "OPENAI_IMAGE_REQUEST_START") return "WAITING_FOR_OPENAI_IMAGE";
+  if (latestStep === "OPENAI_IMAGE_REQUEST_START") {
+    return isStageLogOlderThan(latestRelevant, 195_000) ? "OPENAI_IMAGE_TIMEOUT" : "WAITING_FOR_OPENAI_IMAGE";
+  }
   if (latestStep === "UGC_IMAGES_STARTED") return "WAITING_FOR_UGC_IMAGES";
   if (latestStep === "BLOB_UPLOAD_STARTED") return "WAITING_FOR_BLOB_UPLOAD";
   if (latestStep === "BLOB_UPLOAD_COMPLETED") return "WAITING_FOR_UGC_IMAGES";
@@ -554,7 +557,8 @@ export async function GET() {
     const imageStatus = getStageStatusSummary(runStageLogs, {
       started: ["UGC_IMAGES_STARTED", "OPENAI_IMAGE_REQUEST_START"],
       completed: ["UGC_IMAGES_CREATED", "OPENAI_IMAGE_REQUEST_END"],
-      failed: ["UGC_IMAGES_FAILED", "OPENAI_IMAGE_REQUEST_FAILED", "OPENAI_IMAGE_TIMEOUT", "shopee_ugc_image_generation_failed"]
+      failed: ["UGC_IMAGES_FAILED", "OPENAI_IMAGE_REQUEST_FAILED", "OPENAI_IMAGE_TIMEOUT", "shopee_ugc_image_generation_failed"],
+      staleStartedAfterMs: 195_000
     });
     const blobStatus = getStageStatusSummary(runStageLogs, {
       started: ["BLOB_UPLOAD_STARTED"],

@@ -102,6 +102,7 @@ export async function generateProductReferenceImage(input: {
   mimeType: string;
   prompt: string;
   userId?: string;
+  timeoutMs?: number;
   referenceImages?: Array<{
     imageBytes: ArrayBuffer;
     mimeType: string;
@@ -139,6 +140,12 @@ export async function generateProductReferenceImage(input: {
     "If you cannot preserve the brand or packaging text accurately, keep the original product area visually close to the reference or softly out of focus rather than hallucinating alien text."
   ].join("\n");
 
+  const timeoutMs = Math.max(30_000, Number(input.timeoutMs ?? process.env.OPENAI_IMAGE_TIMEOUT_MS ?? "180000"));
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort(new Error(`OpenAI image edit aborted after ${timeoutMs}ms`));
+  }, timeoutMs);
+
   try {
     const referenceInputs = [
       { imageBytes: input.imageBytes, mimeType: input.mimeType },
@@ -161,7 +168,8 @@ export async function generateProductReferenceImage(input: {
         metadata: {
           model: imageModel,
           requestedModel: requestedImageModel,
-          referenceImages: productFiles.length
+          referenceImages: productFiles.length,
+          timeoutMs
         }
       },
       () => client.images.edit({
@@ -172,6 +180,10 @@ export async function generateProductReferenceImage(input: {
         quality: "medium",
         background: "opaque",
         n: 1
+      }, {
+        signal: controller.signal,
+        timeout: timeoutMs,
+        maxRetries: 0
       })
     );
 
@@ -182,15 +194,23 @@ export async function generateProductReferenceImage(input: {
     return Buffer.from(b64, "base64");
   } catch (error) {
     const { message, status, code, type } = getSafeOpenAiErrorDetails(error);
+    const aborted = controller.signal.aborted || /abort|timeout|timed out/i.test(message);
     console.warn("[ai/image] product reference image edit failed", {
       message,
       status,
       code,
       type,
       model: imageModel,
-      requestedModel: requestedImageModel
+      requestedModel: requestedImageModel,
+      timeoutMs,
+      aborted
     });
+    if (aborted) {
+      throw new Error(`OpenAI image edit timeout after ${timeoutMs}ms (model=${imageModel}, requestedModel=${requestedImageModel})`);
+    }
     throw new Error(`OpenAI image edit failed: ${message} (status=${status}, code=${code}, type=${type}, model=${imageModel}, requestedModel=${requestedImageModel})`);
+  } finally {
+    clearTimeout(timeout);
   }
 }
 

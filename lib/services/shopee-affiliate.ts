@@ -37,9 +37,10 @@ const STORYBOARD_TIMEOUT_MS = Math.max(
   Number(process.env.STORYBOARD_TIMEOUT_MS ?? "90000")
 );
 const STORYBOARD_MAX_ATTEMPTS = 2;
-const OPENAI_IMAGE_REQUEST_TIMEOUT_MS = Math.max(
-  30_000,
-  Number(process.env.OPENAI_IMAGE_TIMEOUT_MS ?? "180000")
+const OPENAI_IMAGE_REQUEST_HARD_TIMEOUT_MS = 180_000;
+const OPENAI_IMAGE_REQUEST_TIMEOUT_MS = Math.min(
+  OPENAI_IMAGE_REQUEST_HARD_TIMEOUT_MS,
+  Math.max(30_000, Number(process.env.OPENAI_IMAGE_TIMEOUT_MS ?? String(OPENAI_IMAGE_REQUEST_HARD_TIMEOUT_MS)))
 );
 const OPENAI_IMAGE_MAX_ATTEMPTS = 2;
 const AUTO_POST_SLOW_STAGE_WARNING_MS = 30_000;
@@ -4467,26 +4468,34 @@ function isOpenAiImageTimeoutError(error: unknown) {
   return message.toLowerCase().includes("openai image request timeout");
 }
 
-function withOpenAiImageTimeout<T>(promise: Promise<T>, timeoutMs: number) {
+function withOpenAiImageTimeout<T>(producer: () => Promise<T>, timeoutMs: number) {
   let timeout: ReturnType<typeof setTimeout> | null = null;
   return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const settle = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      if (timeout) clearTimeout(timeout);
+      callback();
+    };
+
     timeout = setTimeout(() => {
-      reject(
-        new ShopeeProviderError(
-          `OpenAI image request timeout after ${timeoutMs}ms`,
-          504,
-          "openai_image_timeout",
-          "internal_api"
+      settle(() =>
+        reject(
+          new ShopeeProviderError(
+            `OpenAI image request timeout after ${timeoutMs}ms`,
+            504,
+            "openai_image_timeout",
+            "internal_api"
+          )
         )
       );
     }, timeoutMs);
 
-    promise
-      .then(resolve)
-      .catch(reject)
-      .finally(() => {
-        if (timeout) clearTimeout(timeout);
-      });
+    Promise.resolve()
+      .then(producer)
+      .then((value) => settle(() => resolve(value)))
+      .catch((error) => settle(() => reject(error)));
   });
 }
 
@@ -4537,11 +4546,12 @@ async function generateShopeeUgcImageWithTracing(input: {
 
   try {
     const generatedBuffer = await withOpenAiImageTimeout(
-      generateProductReferenceImage({
+      () => generateProductReferenceImage({
         imageBytes: bufferToArrayBuffer(input.primaryReference.bytes),
         mimeType: input.primaryReference.mimeType,
         prompt: input.prompt,
         userId: input.userId,
+        timeoutMs: OPENAI_IMAGE_REQUEST_TIMEOUT_MS,
         referenceImages: input.referenceImages.map((reference) => ({
           imageBytes: bufferToArrayBuffer(reference.bytes),
           mimeType: reference.mimeType
