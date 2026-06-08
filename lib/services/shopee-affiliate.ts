@@ -5515,6 +5515,77 @@ export async function buildShopeePostPackage(input: {
   trackingId?: string;
   jobId?: string;
 }) {
+  const contextStartedAt = new Date();
+  await logShopeePackageStage({
+    userId: input.userId,
+    jobId: input.jobId,
+    pageId: input.pageId,
+    product: input.product,
+    step: "PRODUCT_CONTEXT_CREATE_STARTED",
+    status: "started",
+    message: "Creating Shopee product context before package generation",
+    metadata: {
+      productId: input.product.productId,
+      productName: input.product.productName,
+      pageId: input.pageId,
+      captionStyle: input.captionStyle ?? "soft_sell",
+      trackingId: input.trackingId ?? "",
+      scheduledAt: input.scheduledAt.toISOString(),
+      reason: "waiting_for_product_context"
+    }
+  });
+
+  const sourceImageUrls = (input.product.productImageUrls?.length ? input.product.productImageUrls : [input.product.productImageUrl])
+    .filter((url): url is string => Boolean(url?.trim()));
+  const imagePromptSet = buildShopeeImagePromptSet(input.product, input.captionStyle ?? "soft_sell");
+  const imagePrompts = imagePromptSet.prompts.map((item) => item.prompt);
+  const imagePrompt = imagePrompts[0] ?? buildShopeeImagePrompt(input.product, input.captionStyle ?? "soft_sell");
+
+  if (sourceImageUrls.length === 0) {
+    const error = new ShopeeProviderError(
+      "Shopee UGC image generation failed: product image is missing",
+      422,
+      "shopee_ugc_reference_image_unavailable",
+      "internal_api"
+    );
+    await logShopeePackageStage({
+      userId: input.userId,
+      jobId: input.jobId,
+      pageId: input.pageId,
+      product: input.product,
+      step: "PRODUCT_CONTEXT_CREATE_FAILED",
+      status: "failed",
+      message: "Shopee product context creation failed before package generation",
+      metadata: {
+        productId: input.product.productId,
+        reason: "missing_product_image",
+        sourceImageCount: sourceImageUrls.length,
+        promptCount: imagePromptSet.prompts.length,
+        durationMs: Date.now() - contextStartedAt.getTime()
+      },
+      error
+    });
+    throw error;
+  }
+
+  await logShopeePackageStage({
+    userId: input.userId,
+    jobId: input.jobId,
+    pageId: input.pageId,
+    product: input.product,
+    step: "PRODUCT_CONTEXT_CREATE_COMPLETED",
+    status: "success",
+    message: "Shopee product context created before package generation",
+    metadata: {
+      productId: input.product.productId,
+      sourceImageCount: sourceImageUrls.length,
+      promptCount: imagePromptSet.prompts.length,
+      expectedImageCount: imagePromptSet.prompts.length,
+      imagePromptLength: imagePrompt.length,
+      durationMs: Date.now() - contextStartedAt.getTime()
+    }
+  });
+
   const linkResult = await createOrReuseAffiliateShortLink({
     userId: input.userId,
     product: input.product,
@@ -5531,9 +5602,6 @@ export async function buildShopeePostPackage(input: {
       "config"
     );
   }
-  const imagePromptSet = buildShopeeImagePromptSet(input.product, input.captionStyle ?? "soft_sell");
-  const imagePrompts = imagePromptSet.prompts.map((item) => item.prompt);
-  const imagePrompt = imagePrompts[0] ?? buildShopeeImagePrompt(input.product, input.captionStyle ?? "soft_sell");
   const caption = await generateShopeeCaption({
     userId: input.userId,
     product: input.product,
@@ -5541,17 +5609,6 @@ export async function buildShopeePostPackage(input: {
     style: input.captionStyle,
     jobId: input.jobId
   });
-
-  const sourceImageUrls = (input.product.productImageUrls?.length ? input.product.productImageUrls : [input.product.productImageUrl])
-    .filter((url): url is string => Boolean(url?.trim()));
-  if (sourceImageUrls.length === 0) {
-    throw new ShopeeProviderError(
-      "Shopee UGC image generation failed: product image is missing",
-      422,
-      "shopee_ugc_reference_image_unavailable",
-      "internal_api"
-    );
-  }
 
   await logShopeePackageStage({
     userId: input.userId,

@@ -1079,7 +1079,7 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
         ? input.initialSelectedProducts
         : await selectShopeeProductsForPages({
             userId: input.config.userId,
-            pageIds: input.eligiblePageIds,
+            pageIds: input.eligiblePageIds.slice(0, 1),
             sourceTag: input.config.shopeeSourceTag ?? "trending",
             keyword: input.config.shopeeKeyword,
             category: normalizeShopeeCategory(input.config.shopeeCategory),
@@ -1192,6 +1192,24 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
     let lastError: unknown = null;
     for (let sameProductAttempt = 1; sameProductAttempt <= AUTO_POST_SAME_PRODUCT_RETRIES; sameProductAttempt += 1) {
       try {
+        await logShopeeStep({
+          config: input.config,
+          step: "PRODUCT_PACKAGE_LOOP_ITEM_STARTED",
+          status: "started",
+          message: `Starting product package creation attempt ${attempt}/${AUTO_POST_MAX_PRODUCT_ATTEMPTS}`,
+          pageId: selected.pageId,
+          productId,
+          metadata: {
+            mode: "same_product_all_pages",
+            attempt,
+            maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
+            sameProductAttempt,
+            sameProductRetries: AUTO_POST_SAME_PRODUCT_RETRIES,
+            selectedPagesCount: input.eligiblePageIds.length,
+            reason: "waiting_for_product_context",
+            workflowRunId: input.records.workflowRunId
+          }
+        });
         const packageResult = await buildShopeePostPackage({
           userId: input.config.userId,
           pageId: selected.pageId,
@@ -1200,6 +1218,25 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
           captionStyle: input.config.shopeeCaptionStyle ?? "soft_sell",
           trackingId,
           jobId: input.records.workflowRunId
+        });
+
+        await logShopeeStep({
+          config: input.config,
+          step: "PRODUCT_PACKAGE_LOOP_ITEM_COMPLETED",
+          status: "success",
+          message: `Product package creation attempt ${attempt}/${AUTO_POST_MAX_PRODUCT_ATTEMPTS} completed`,
+          pageId: selected.pageId,
+          productId,
+          metadata: {
+            mode: "same_product_all_pages",
+            attempt,
+            maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
+            sameProductAttempt,
+            selectedPagesCount: input.eligiblePageIds.length,
+            generatedImages: packageResult.generatedImageUrls.length,
+            hasShortLink: Boolean(packageResult.shortAffiliateLink),
+            workflowRunId: input.records.workflowRunId
+          }
         });
 
         await logShopeeStep({
@@ -1247,6 +1284,26 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
         const classification = classifyAutoPostError(error);
         const rejectReason = getShopeeAttemptFailureReason(error);
         const captionFailedRules = getStoryboardCaptionFailedRules(error);
+
+        await logShopeeStep({
+          config: input.config,
+          step: "PRODUCT_PACKAGE_LOOP_ITEM_FAILED",
+          status: "failed",
+          message: `Product package creation attempt ${attempt}/${AUTO_POST_MAX_PRODUCT_ATTEMPTS} failed`,
+          pageId: selected.pageId,
+          productId,
+          error,
+          metadata: {
+            mode: "same_product_all_pages",
+            attempt,
+            maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
+            sameProductAttempt,
+            classification,
+            reason: getShopeeAttemptFailureReason(error),
+            selectedPagesCount: input.eligiblePageIds.length,
+            workflowRunId: input.records.workflowRunId
+          }
+        });
 
         await logShopeeStep({
           config: input.config,
@@ -1792,9 +1849,12 @@ async function queueShopeeAutoPostsForConfig(
       pageCount: eligiblePageIds.length
     }
   });
-  const selectedProducts = await selectShopeeProductsForPages({
+  const productSelectionPageIds = SHOPEE_BATCH_PRODUCT_MODE === "single"
+    ? eligiblePageIds.slice(0, 1)
+    : eligiblePageIds;
+  let selectedProducts = await selectShopeeProductsForPages({
     userId: config.userId,
-    pageIds: eligiblePageIds,
+    pageIds: productSelectionPageIds,
     sourceTag: config.shopeeSourceTag ?? "trending",
     keyword: config.shopeeKeyword,
     category: normalizeShopeeCategory(config.shopeeCategory),
@@ -1807,6 +1867,7 @@ async function queueShopeeAutoPostsForConfig(
     minSales: config.shopeeMinSales ?? 0,
       minDiscountPercent: config.shopeeMinDiscountPercent ?? 0
   });
+  const selectedProductsBeforeModeGuard = selectedProducts.length;
   await logShopeeStep({
     config,
     step: "PRODUCT_FETCHED",
@@ -1816,6 +1877,9 @@ async function queueShopeeAutoPostsForConfig(
       selectedCount: selectedProducts.length,
       productIds: selectedProducts.map((selected) => selected.product.productId),
       productNames: selectedProducts.map((selected) => selected.product.productName),
+      selectedPagesCount: eligiblePageIds.length,
+      selectionPageCount: productSelectionPageIds.length,
+      batchProductMode: SHOPEE_BATCH_PRODUCT_MODE === "single" ? "same_product_all_pages" : "product_per_page",
       workflowRunId: records.workflowRunId
     }
   });
@@ -1824,7 +1888,53 @@ async function queueShopeeAutoPostsForConfig(
     step: "SELECT_PRODUCT",
     status: selectedProducts.length ? "success" : "failed",
     message: selectedProducts.length ? `Selected ${selectedProducts.length} product(s)` : "No eligible product found",
-    metadata: { selectedCount: selectedProducts.length }
+    metadata: {
+      selectedCount: selectedProducts.length,
+      selectedPagesCount: eligiblePageIds.length,
+      selectionPageCount: productSelectionPageIds.length,
+      batchProductMode: SHOPEE_BATCH_PRODUCT_MODE === "single" ? "same_product_all_pages" : "product_per_page",
+      productIds: selectedProducts.map((selected) => selected.product.productId),
+      workflowRunId: records.workflowRunId
+    }
+  });
+  if (SHOPEE_BATCH_PRODUCT_MODE === "single" && selectedProducts.length > 1) {
+    await logShopeeStep({
+      config,
+      step: "PRODUCT_SELECTION_MODE_WARNING",
+      status: "skipped",
+      message: "same_product_all_pages selected more than one product; trimming to one product before package creation",
+      productId: selectedProducts[0]?.product.productId,
+      metadata: {
+        reason: "same_product_mode_selected_too_many_products",
+        selectedPagesCount: eligiblePageIds.length,
+        selectedCount: selectedProducts.length,
+        effectiveSelectedCount: 1,
+        productIds: selectedProducts.map((selected) => selected.product.productId),
+        workflowRunId: records.workflowRunId
+      }
+    });
+    selectedProducts = selectedProducts.slice(0, 1);
+  }
+  await logShopeeStep({
+    config,
+    step: "AFTER_SELECT_PRODUCT_STARTED",
+    status: "started",
+    message: "Continuing immediately after Shopee product selection",
+    productId: selectedProducts[0]?.product.productId,
+    metadata: {
+      selectedPagesCount: eligiblePageIds.length,
+      selectedCount: selectedProductsBeforeModeGuard,
+      effectiveSelectedCount: selectedProducts.length,
+      selectionPageCount: productSelectionPageIds.length,
+      batchProductMode: SHOPEE_BATCH_PRODUCT_MODE === "single" ? "same_product_all_pages" : "product_per_page",
+      reason:
+        SHOPEE_BATCH_PRODUCT_MODE === "single" && selectedProductsBeforeModeGuard > 1
+          ? "same_product_mode_selected_too_many_products"
+          : selectedProducts.length
+            ? "package_creation_not_started"
+            : "product_per_page_queue_not_created",
+      workflowRunId: records.workflowRunId
+    }
   });
 
   let queued = 0;
@@ -1858,6 +1968,37 @@ async function queueShopeeAutoPostsForConfig(
   let sharedSingleProductPackageKey: string | null = null;
 
   if (SHOPEE_BATCH_PRODUCT_MODE === "single" && selectedProducts.length > 0) {
+    await logShopeeStep({
+      config,
+      step: "PRODUCT_PACKAGE_LOOP_STARTED",
+      status: "started",
+      message: "Starting same-product package creation for all selected pages",
+      productId: selectedProducts[0].product.productId,
+      metadata: {
+        mode: "same_product_all_pages",
+        concurrency: 1,
+        selectedPagesCount: eligiblePageIds.length,
+        selectedProductCount: selectedProducts.length,
+        packageItemCount: 1,
+        reason: "same_product_all_pages",
+        workflowRunId: records.workflowRunId
+      }
+    });
+    await logShopeeStep({
+      config,
+      step: "PRODUCT_PACKAGE_LOOP_ITEM_STARTED",
+      status: "started",
+      message: "Starting same-product package item",
+      pageId: selectedProducts[0].pageId,
+      productId: selectedProducts[0].product.productId,
+      metadata: {
+        mode: "same_product_all_pages",
+        itemIndex: 1,
+        itemCount: 1,
+        selectedPagesCount: eligiblePageIds.length,
+        workflowRunId: records.workflowRunId
+      }
+    });
     const prepared = await prepareSingleShopeePackageWithProductAttempts({
       config,
       eligiblePageIds,
@@ -1869,6 +2010,35 @@ async function queueShopeeAutoPostsForConfig(
     selectedProductsForQueue = prepared.selectedProductsForQueue;
     sharedSingleProductPackage = prepared.packageResult;
     sharedSingleProductPackageKey = prepared.packageCacheKey;
+    await logShopeeStep({
+      config,
+      step: "PRODUCT_PACKAGE_LOOP_ITEM_COMPLETED",
+      status: "success",
+      message: "Same-product package item completed",
+      pageId: selectedProducts[0].pageId,
+      productId: sharedSingleProductPackage.product.productId,
+      metadata: {
+        mode: "same_product_all_pages",
+        itemIndex: 1,
+        itemCount: 1,
+        selectedPagesCount: eligiblePageIds.length,
+        generatedImages: sharedSingleProductPackage.generatedImageUrls.length,
+        workflowRunId: records.workflowRunId
+      }
+    });
+    await logShopeeStep({
+      config,
+      step: "PRODUCT_PACKAGE_LOOP_COMPLETED",
+      status: "success",
+      message: "Same-product package loop completed",
+      productId: sharedSingleProductPackage.product.productId,
+      metadata: {
+        mode: "same_product_all_pages",
+        itemCount: 1,
+        selectedPagesCount: eligiblePageIds.length,
+        workflowRunId: records.workflowRunId
+      }
+    });
   }
 
   // A Shopee auto-post run is a page batch: once one product passes selection,
@@ -2081,6 +2251,23 @@ async function queueShopeeAutoPostsForConfig(
   }
 
   if (!batchTaskCreationHandled) {
+  await logShopeeStep({
+    config,
+    step: "PRODUCT_PACKAGE_LOOP_STARTED",
+    status: selectedProductsForQueue.length ? "started" : "failed",
+    message: selectedProductsForQueue.length
+      ? "Starting per-page Shopee package loop with sequential processing"
+      : "Per-page Shopee package loop was not created",
+    metadata: {
+      mode: "product_per_page",
+      concurrency: 1,
+      selectedPagesCount: eligiblePageIds.length,
+      selectedProductCount: selectedProductsForQueue.length,
+      packageItemCount: selectedProductsForQueue.length,
+      reason: selectedProductsForQueue.length ? "product_per_page_queue_created" : "product_per_page_queue_not_created",
+      workflowRunId: records.workflowRunId
+    }
+  });
   const selectedProductPageIds = new Set(selectedProductsForQueue.map((selected) => selected.pageId));
   for (let index = 0; index < eligiblePageIds.length; index += 1) {
     const pageId = eligiblePageIds[index];
@@ -2121,6 +2308,24 @@ async function queueShopeeAutoPostsForConfig(
       workflowRunId: records.workflowRunId
     });
     try {
+      await logShopeeStep({
+        config,
+        step: "PRODUCT_PACKAGE_LOOP_ITEM_STARTED",
+        status: "started",
+        message: "Starting per-page product package item",
+        pageId: selected.pageId,
+        productId: selected.product.productId,
+        metadata: {
+          mode: "product_per_page",
+          concurrency: 1,
+          itemIndex: index + 1,
+          itemCount: selectedProductsForQueue.length,
+          pageIndex: Math.max(pageIndex, index) + 1,
+          selectedPagesCount: eligiblePageIds.length,
+          reason: "waiting_for_product_context",
+          workflowRunId: records.workflowRunId
+        }
+      });
       await logShopeeStep({
         config,
         step: "GENERATE_POST_PACKAGE",
@@ -2438,8 +2643,45 @@ async function queueShopeeAutoPostsForConfig(
         }
       });
 
+      await logShopeeStep({
+        config,
+        step: "PRODUCT_PACKAGE_LOOP_ITEM_COMPLETED",
+        status: "success",
+        message: "Per-page product package item completed",
+        pageId: selected.pageId,
+        productId: selected.product.productId,
+        metadata: {
+          mode: "product_per_page",
+          itemIndex: index + 1,
+          itemCount: selectedProductsForQueue.length,
+          pageIndex: Math.max(pageIndex, index) + 1,
+          selectedPagesCount: eligiblePageIds.length,
+          queuedForPost,
+          templatePostId,
+          workflowRunId: records.workflowRunId
+        }
+      });
+
       queued += queuedForPost;
     } catch (error) {
+      await logShopeeStep({
+        config,
+        step: "PRODUCT_PACKAGE_LOOP_ITEM_FAILED",
+        status: "failed",
+        message: "Per-page product package item failed",
+        pageId: selected.pageId,
+        productId: selected.product.productId,
+        error,
+        metadata: {
+          mode: "product_per_page",
+          itemIndex: index + 1,
+          itemCount: selectedProductsForQueue.length,
+          pageIndex: Math.max(pageIndex, index) + 1,
+          selectedPagesCount: eligiblePageIds.length,
+          reason: getShopeeAttemptFailureReason(error),
+          workflowRunId: records.workflowRunId
+        }
+      });
       await logShopeeStep({
         config,
         step: "CAPTION_GENERATION_RESULT",
@@ -2511,6 +2753,24 @@ async function queueShopeeAutoPostsForConfig(
       });
     }
   }
+  }
+
+  if (!batchTaskCreationHandled) {
+    await logShopeeStep({
+      config,
+      step: "PRODUCT_PACKAGE_LOOP_COMPLETED",
+      status: "success",
+      message: "Per-page Shopee package loop completed",
+      metadata: {
+        mode: "product_per_page",
+        concurrency: 1,
+        selectedPagesCount: eligiblePageIds.length,
+        selectedProductCount: selectedProductsForQueue.length,
+        queued,
+        failedPageCount,
+        workflowRunId: records.workflowRunId
+      }
+    });
   }
 
   const expectedPreparedPageCount = eligiblePageIds.length;
