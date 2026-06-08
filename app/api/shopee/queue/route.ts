@@ -143,12 +143,16 @@ export async function GET(request: Request) {
   let userId = "";
   try {
     const url = new URL(request.url);
-    const includeAiPostPreview = url.searchParams.get("includeAiPostPreview") === "true";
+    const requestedAiPostPreview = url.searchParams.get("includeAiPostPreview") === "true";
+    const aiPostPreviewEnabled = process.env.SHOPEE_QUEUE_AI_POST_PREVIEW_ENABLED === "true";
+    const includeAiPostPreview = requestedAiPostPreview && aiPostPreviewEnabled;
     userId = await runQueueRouteStage("REQUIRE_AUTH", {}, () => requireAuth());
     logQueueRoute("QUEUE_ROUTE_INPUT", {
       userId,
       authenticated: true,
-      includeAiPostPreview
+      includeAiPostPreview,
+      requestedAiPostPreview,
+      aiPostPreviewEnabled
     });
 
     const queue = await runQueueRouteStage("QUEUE_DB_QUERY", { userId, limit: 100 }, () =>
@@ -170,6 +174,14 @@ export async function GET(request: Request) {
 
     const productIds = [...new Set(queue.map((item) => item.productId).filter(Boolean))];
     const aiPostIds = includeAiPostPreview ? safeObjectIdStrings(queue.map((item) => item.aiGeneratedPostId)) : { valid: [], invalid: [] };
+    if (requestedAiPostPreview && !aiPostPreviewEnabled) {
+      logQueueRoute("QUEUE_ROUTE_OPTIONAL_STAGE_SKIPPED", {
+        stage: "RELATED_DB_QUERY_AI_POSTS",
+        userId,
+        reason: "disabled_by_default_to_keep_queue_route_fast",
+        env: "SHOPEE_QUEUE_AI_POST_PREVIEW_ENABLED"
+      });
+    }
     const postIds = safeObjectIdStrings(queue.map((item) => item.postId));
     if (aiPostIds.invalid.length || postIds.invalid.length) {
       logQueueRoute("QUEUE_ROUTE_INPUT", {

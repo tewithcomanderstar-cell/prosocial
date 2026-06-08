@@ -43,6 +43,11 @@ const OPENAI_IMAGE_REQUEST_TIMEOUT_MS = Math.max(
 );
 const OPENAI_IMAGE_MAX_ATTEMPTS = 2;
 const AUTO_POST_SLOW_STAGE_WARNING_MS = 30_000;
+const SHOPEE_ACTION_LOG_TIMEOUT_MS = Math.max(
+  500,
+  Number(process.env.SHOPEE_ACTION_LOG_TIMEOUT_MS ?? "2500")
+);
+const SHOPEE_AUTOMATION_LOG_MIRROR_ENABLED = process.env.SHOPEE_AUTOMATION_LOG_MIRROR_ENABLED === "true";
 const DISABLED_STORYBOARD_PRESENTATION_VALIDATION_RULES = [
   "storyboard_caption_max_4_benefit_bullets",
   "storyboard_caption_min_benefit_bullets",
@@ -5239,33 +5244,55 @@ export async function logShopeeAutomationEvent(input: {
   pageId?: string;
   metadata?: Record<string, unknown>;
 }) {
-  await AutomationLog.create({
-    userId: input.userId,
-    source: "shopee-affiliate",
-    level: input.level,
-    message: input.message,
+  const metadata = {
+    autoPost: true,
+    shopeeAffiliate: true,
     productId: input.productId,
     pageId: input.pageId,
-    metadata: {
-      autoPost: true,
-      shopeeAffiliate: true,
-      ...(input.metadata ?? {})
-    }
-  });
+    ...(input.metadata ?? {})
+  };
 
-  await logAction({
+  const withLogTimeout = async (label: string, promise: Promise<unknown>) => {
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    try {
+      await Promise.race([
+        promise,
+        new Promise((_, reject) => {
+          timeout = setTimeout(() => reject(new Error(`${label} timed out after ${SHOPEE_ACTION_LOG_TIMEOUT_MS}ms`)), SHOPEE_ACTION_LOG_TIMEOUT_MS);
+        })
+      ]);
+    } catch (error) {
+      console.warn("[SHOPEE_LOG_WRITE_SKIPPED]", {
+        label,
+        message: error instanceof Error ? error.message : String(error),
+        eventMessage: input.message,
+        productId: input.productId,
+        pageId: input.pageId
+      });
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
+  };
+
+  await withLogTimeout("ActionLog", logAction({
     userId: input.userId,
     type: "queue",
     level: input.level,
     message: input.message,
-    metadata: {
-      autoPost: true,
-      shopeeAffiliate: true,
+    metadata
+  }));
+
+  if (SHOPEE_AUTOMATION_LOG_MIRROR_ENABLED) {
+    await withLogTimeout("AutomationLog", AutomationLog.create({
+      userId: input.userId,
+      source: "shopee-affiliate",
+      level: input.level,
+      message: input.message,
       productId: input.productId,
       pageId: input.pageId,
-      ...(input.metadata ?? {})
-    }
-  });
+      metadata
+    }));
+  }
 }
 
 

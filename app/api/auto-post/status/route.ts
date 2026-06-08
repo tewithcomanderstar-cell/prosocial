@@ -188,13 +188,24 @@ function getStageStatusSummary(logs: StageLog[], input: {
   started: string[];
   completed: string[];
   failed: string[];
+  staleStartedAfterMs?: number;
 }) {
   const latest = getLatestStageLog(logs, [...input.failed, ...input.completed, ...input.started]);
   if (!latest) return "pending";
   const latestStep = getStageStep(latest);
   if (input.failed.includes(latestStep)) return "failed";
   if (input.completed.includes(latestStep)) return "created";
-  if (input.started.includes(latestStep)) return "started";
+  if (input.started.includes(latestStep)) {
+    const createdAtMs = latest.createdAt ? new Date(String(latest.createdAt)).getTime() : NaN;
+    if (
+      input.staleStartedAfterMs &&
+      Number.isFinite(createdAtMs) &&
+      Date.now() - createdAtMs > input.staleStartedAfterMs
+    ) {
+      return "failed";
+    }
+    return "started";
+  }
   return "pending";
 }
 
@@ -537,7 +548,8 @@ export async function GET() {
     const captionStatus = getStageStatusSummary(runStageLogs, {
       started: ["CAPTION_STARTED"],
       completed: ["CAPTION_CREATED"],
-      failed: ["CAPTION_FAILED", "CAPTION_VALIDATION_FAILED_DETAIL"]
+      failed: ["CAPTION_FAILED", "CAPTION_VALIDATION_FAILED_DETAIL"],
+      staleStartedAfterMs: 120_000
     });
     const imageStatus = getStageStatusSummary(runStageLogs, {
       started: ["UGC_IMAGES_STARTED", "OPENAI_IMAGE_REQUEST_START"],
