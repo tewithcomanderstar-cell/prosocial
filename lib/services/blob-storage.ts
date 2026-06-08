@@ -26,6 +26,10 @@ type BlobCleanupCounts = {
 
 const HOUR_MS = 60 * 60 * 1000;
 const LARGE_STRING_LIMIT = 250_000;
+const BLOB_UPLOAD_TIMEOUT_MS = Math.min(
+  90_000,
+  Math.max(10_000, envNumber("BLOB_UPLOAD_TIMEOUT_MS", 60_000))
+);
 
 function envNumber(name: string, fallback: number) {
   const value = Number(process.env[name]);
@@ -80,6 +84,36 @@ function isBlobAlreadyExistsError(error: unknown) {
   return error instanceof Error && /already exists|allowOverwrite|addRandomSuffix/i.test(error.message);
 }
 
+function createBlobTimeoutError(pathname: string, timeoutMs: number) {
+  const error = new Error(`Vercel Blob upload timeout after ${timeoutMs}ms for ${pathname}`);
+  (error as Error & Record<string, unknown>).code = "vercel_blob_upload_timeout";
+  (error as Error & Record<string, unknown>).source = "vercel_blob";
+  return error;
+}
+
+function withBlobUploadTimeout<T>(pathname: string, run: () => Promise<T>) {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  let settled = false;
+
+  return new Promise<T>((resolve, reject) => {
+    const settle = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      if (timeout) clearTimeout(timeout);
+      callback();
+    };
+
+    timeout = setTimeout(() => {
+      settle(() => reject(createBlobTimeoutError(pathname, BLOB_UPLOAD_TIMEOUT_MS)));
+    }, BLOB_UPLOAD_TIMEOUT_MS);
+
+    Promise.resolve()
+      .then(run)
+      .then((value) => settle(() => resolve(value)))
+      .catch((error) => settle(() => reject(error)));
+  });
+}
+
 async function putUniqueBlob(
   pathname: string,
   body: Buffer,
@@ -89,22 +123,26 @@ async function putUniqueBlob(
   }
 ) {
   try {
-    return await traceExternalRequest(
-      {
-        step: "VERCEL_BLOB_UPLOAD",
-        url: `vercel-blob://${pathname}`,
-        fn: "putUniqueBlob",
-        source: "vercel_blob",
-        metadata: {
+    return await withBlobUploadTimeout(
+      pathname,
+      () => traceExternalRequest(
+        {
+          step: "VERCEL_BLOB_UPLOAD",
+          url: `vercel-blob://${pathname}`,
+          fn: "putUniqueBlob",
+          source: "vercel_blob",
+          metadata: {
+            contentType: options.contentType,
+            bytes: body.byteLength,
+            timeoutMs: BLOB_UPLOAD_TIMEOUT_MS
+          }
+        },
+        () => put(pathname, body, {
+          access: "public",
           contentType: options.contentType,
-          bytes: body.byteLength
-        }
-      },
-      () => put(pathname, body, {
-        access: "public",
-        contentType: options.contentType,
-        addRandomSuffix: true
-      })
+          addRandomSuffix: true
+        })
+      )
     );
   } catch (error) {
     if (!isBlobAlreadyExistsError(error)) {
@@ -112,23 +150,27 @@ async function putUniqueBlob(
     }
 
     const fallbackPathname = options.fallbackPathname();
-    return traceExternalRequest(
-      {
-        step: "VERCEL_BLOB_UPLOAD_RETRY",
-        url: `vercel-blob://${fallbackPathname}`,
-        fn: "putUniqueBlob",
-        source: "vercel_blob",
-        metadata: {
+    return withBlobUploadTimeout(
+      fallbackPathname,
+      () => traceExternalRequest(
+        {
+          step: "VERCEL_BLOB_UPLOAD_RETRY",
+          url: `vercel-blob://${fallbackPathname}`,
+          fn: "putUniqueBlob",
+          source: "vercel_blob",
+          metadata: {
+            contentType: options.contentType,
+            bytes: body.byteLength,
+            retryReason: "blob_already_exists",
+            timeoutMs: BLOB_UPLOAD_TIMEOUT_MS
+          }
+        },
+        () => put(fallbackPathname, body, {
+          access: "public",
           contentType: options.contentType,
-          bytes: body.byteLength,
-          retryReason: "blob_already_exists"
-        }
-      },
-      () => put(fallbackPathname, body, {
-        access: "public",
-        contentType: options.contentType,
-        addRandomSuffix: true
-      })
+          addRandomSuffix: true
+        })
+      )
     );
   }
 }

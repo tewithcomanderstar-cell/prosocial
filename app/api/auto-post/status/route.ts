@@ -271,7 +271,9 @@ function derivePreTaskBlockingStep(logs: StageLog[]) {
   if (latestStep === "TEMPLATE_POST_CREATED") return "WAITING_FOR_PAGE_TASKS";
   if (latestStep === "TEMPLATE_POST_CREATE_STARTED") return "WAITING_FOR_TEMPLATE_POST";
   if (latestStep === "UGC_IMAGES_CREATED") return "WAITING_FOR_TEMPLATE_POST";
-  if (latestStep === "OPENAI_IMAGE_REQUEST_END") return "WAITING_FOR_BLOB_UPLOAD";
+  if (latestStep === "OPENAI_IMAGE_REQUEST_END") {
+    return isStageLogOlderThan(latestRelevant, 120_000) ? "BLOB_UPLOAD_TIMEOUT" : "WAITING_FOR_BLOB_UPLOAD";
+  }
   if (latestStep === "OPENAI_IMAGE_REQUEST_START") {
     return isStageLogOlderThan(latestRelevant, 195_000) ? "OPENAI_IMAGE_TIMEOUT" : "WAITING_FOR_OPENAI_IMAGE";
   }
@@ -560,7 +562,7 @@ export async function GET() {
       failed: ["UGC_IMAGES_FAILED", "OPENAI_IMAGE_REQUEST_FAILED", "OPENAI_IMAGE_TIMEOUT", "shopee_ugc_image_generation_failed"],
       staleStartedAfterMs: 195_000
     });
-    const blobStatus = getStageStatusSummary(runStageLogs, {
+    let blobStatus = getStageStatusSummary(runStageLogs, {
       started: ["BLOB_UPLOAD_STARTED"],
       completed: ["BLOB_UPLOAD_COMPLETED", "UGC_IMAGES_CREATED"],
       failed: ["BLOB_UPLOAD_FAILED"]
@@ -571,6 +573,14 @@ export async function GET() {
       "OPENAI_IMAGE_TIMEOUT",
       "OPENAI_IMAGE_REQUEST_START"
     ]);
+    if (
+      blobStatus === "pending" &&
+      latestImageRequestLog &&
+      getStageStep(latestImageRequestLog) === "OPENAI_IMAGE_REQUEST_END" &&
+      isStageLogOlderThan(latestImageRequestLog, 120_000)
+    ) {
+      blobStatus = "failed";
+    }
     const latestImageRequestMetadata = (latestImageRequestLog?.metadata ?? {}) as Record<string, unknown>;
     const imageDurationMs =
       typeof latestImageRequestMetadata.durationMs === "number"
