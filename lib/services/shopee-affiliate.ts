@@ -4659,7 +4659,15 @@ async function generateShopeeUgcImageDocs(input: {
     },
     fn: () => new Set(referenceImages.map((image) => hashImageBuffer(image.bytes)))
   });
-  const generatedHashes = new Set<string>();
+  type GeneratedUgcImage = {
+    index: number;
+    promptItem: (typeof input.promptSet.prompts)[number];
+    prompt: string;
+    buffer: Buffer;
+    hash: string;
+    requestDurationMs: number;
+    loggingDurationMs: number;
+  };
   const imageDocs = [];
 
   await timedLog({
@@ -4668,21 +4676,18 @@ async function generateShopeeUgcImageDocs(input: {
     product: input.product,
     step: "IMAGE_GENERATION_MODE",
     status: "started",
-    message: "Shopee UGC images will be generated sequentially",
+    message: "Shopee UGC images will be generated in parallel",
     metadata: {
-      mode: "sequential",
-      reason: "Each image uses prior duplicate/source validation and Blob upload before the next image",
+      mode: "parallel",
+      reason: "OpenAI image edits run concurrently, then validation/upload/database save run as batch stages",
       expectedImages: input.promptSet.prompts.length,
       referenceImageCount: referenceImages.length,
       maxAttemptsPerImage: OPENAI_IMAGE_MAX_ATTEMPTS
     }
   });
 
-  for (const [index, promptItem] of input.promptSet.prompts.entries()) {
+  const generationTasks = input.promptSet.prompts.map((promptItem, index) => {
     const primaryReference = referenceImages[index % referenceImages.length];
-    let generatedBuffer: Buffer | null = null;
-    let lastError: unknown = null;
-    let imageLoggingDurationMs = 0;
     const prompt = [
       promptItem.prompt,
       `Generate image ${index + 1} of 4 only. This image must have a unique angle, environment, distance, camera framing, hand position, and usage context compared with the other three images.`,
@@ -4691,94 +4696,105 @@ async function generateShopeeUgcImageDocs(input: {
     ].join("\n");
     imagePromptLengths[`IMAGE_${index + 1}_PROMPT_LENGTH`] = prompt.length;
 
-    await timedLog({
-      userId: input.userId,
-      jobId: input.jobId,
-      product: input.product,
-      step: "IMAGE_PROMPT_LENGTH",
-      status: "success",
-      message: `UGC image ${index + 1} prompt length measured`,
-      metadata: {
-        imageIndex: index + 1,
-        imageCount: input.promptSet.prompts.length,
-        promptLength: prompt.length,
-        basePromptLength: promptItem.prompt.length,
-        addedInstructionLength: prompt.length - promptItem.prompt.length,
-        referenceImageCount: referenceImages.length
-      }
-    });
+    return async (): Promise<GeneratedUgcImage> => {
+      let generatedBuffer: Buffer | null = null;
+      let lastError: unknown = null;
+      let imageLoggingDurationMs = 0;
+      let requestDurationMs = 0;
 
-    for (let attempt = 1; attempt <= OPENAI_IMAGE_MAX_ATTEMPTS; attempt += 1) {
-      try {
-        imageRequestCount += 1;
-        const imageResult = await generateShopeeUgcImageWithTracing({
-          userId: input.userId,
-          jobId: input.jobId,
-          product: input.product,
+      await timedLog({
+        userId: input.userId,
+        jobId: input.jobId,
+        product: input.product,
+        step: "IMAGE_PROMPT_LENGTH",
+        status: "success",
+        message: `UGC image ${index + 1} prompt length measured`,
+        metadata: {
           imageIndex: index + 1,
           imageCount: input.promptSet.prompts.length,
-          attempt,
-          primaryReference,
-          referenceImages: referenceImages.filter((_, referenceIndex) => referenceIndex !== index % referenceImages.length),
-          prompt
-        });
-        generatedBuffer = imageResult.buffer;
-        imageLoggingDurationMs += imageResult.loggingDurationMs;
-        loggingDurationMs += imageResult.loggingDurationMs;
-        imageDurations[`IMAGE_${index + 1}_DURATION`] = imageResult.requestDurationMs;
-        await runShopeeTimedStage({
-          userId: input.userId,
-          jobId: input.jobId,
-          product: input.product,
-          stage: "IMAGE_VALIDATION",
-          metadata: {
-            validationStep: "generated_hash_compare",
-            imageIndex: index + 1,
-            attempt,
-            sourceHashCount: sourceHashes.size,
-            generatedHashCount: generatedHashes.size
-          },
-          fn: () => {
-            const generatedHash = hashImageBuffer(generatedBuffer as Buffer);
-            if (sourceHashes.has(generatedHash)) {
-              throw new Error("OpenAI returned the original Shopee product image instead of a new UGC lifestyle image");
-            }
-            if (generatedHashes.has(generatedHash)) {
-              throw new Error("OpenAI returned duplicate UGC images");
-            }
-            return generatedHash;
-          }
-        });
-        break;
-      } catch (error) {
-        lastError = error;
-        generatedBuffer = null;
-      }
-    }
+          promptLength: prompt.length,
+          basePromptLength: promptItem.prompt.length,
+          addedInstructionLength: prompt.length - promptItem.prompt.length,
+          referenceImageCount: referenceImages.length
+        }
+      });
 
-    if (!generatedBuffer) {
+      for (let attempt = 1; attempt <= OPENAI_IMAGE_MAX_ATTEMPTS; attempt += 1) {
+        try {
+          imageRequestCount += 1;
+          const imageResult = await generateShopeeUgcImageWithTracing({
+            userId: input.userId,
+            jobId: input.jobId,
+            product: input.product,
+            imageIndex: index + 1,
+            imageCount: input.promptSet.prompts.length,
+            attempt,
+            primaryReference,
+            referenceImages: referenceImages.filter((_, referenceIndex) => referenceIndex !== index % referenceImages.length),
+            prompt
+          });
+          generatedBuffer = imageResult.buffer;
+          imageLoggingDurationMs += imageResult.loggingDurationMs;
+          loggingDurationMs += imageResult.loggingDurationMs;
+          requestDurationMs = imageResult.requestDurationMs;
+          imageDurations[`IMAGE_${index + 1}_DURATION`] = imageResult.requestDurationMs;
+          const generatedHash = hashImageBuffer(generatedBuffer);
+          if (sourceHashes.has(generatedHash)) {
+            throw new Error("OpenAI returned the original Shopee product image instead of a new UGC lifestyle image");
+          }
+          return {
+            index,
+            promptItem,
+            prompt,
+            buffer: generatedBuffer,
+            hash: generatedHash,
+            requestDurationMs,
+            loggingDurationMs: imageLoggingDurationMs
+          };
+        } catch (error) {
+          lastError = error;
+          generatedBuffer = null;
+        }
+      }
+
       throw new ShopeeProviderError(
         `Shopee UGC image generation failed: ${lastError instanceof Error ? lastError.message : "OpenAI did not return a usable UGC image"}`,
         500,
         "shopee_ugc_image_generation_failed",
         "internal_api"
       );
+    };
+  });
+
+  const generatedImages = await Promise.all(generationTasks.map((task) => task()));
+
+  await runShopeeTimedStage({
+    userId: input.userId,
+    jobId: input.jobId,
+    product: input.product,
+    stage: "IMAGE_VALIDATION",
+    metadata: {
+      validationStep: "parallel_generated_hash_compare",
+      imageCount: generatedImages.length,
+      sourceHashCount: sourceHashes.size
+    },
+    fn: () => {
+      const generatedHashes = new Set<string>();
+      for (const generated of generatedImages) {
+        if (sourceHashes.has(generated.hash)) {
+          throw new Error("OpenAI returned the original Shopee product image instead of a new UGC lifestyle image");
+        }
+        if (generatedHashes.has(generated.hash)) {
+          throw new Error("OpenAI returned duplicate UGC images");
+        }
+        generatedHashes.add(generated.hash);
+      }
+      return generatedHashes;
     }
-    const generatedHash = await runShopeeTimedStage({
-      userId: input.userId,
-      jobId: input.jobId,
-      product: input.product,
-      stage: "IMAGE_VALIDATION",
-      metadata: {
-        validationStep: "final_generated_hash",
-        imageIndex: index + 1,
-        imageCount: input.promptSet.prompts.length
-      },
-      fn: () => hashImageBuffer(generatedBuffer as Buffer)
-    });
+  });
 
-    generatedHashes.add(generatedHash);
-
+  const uploadedImageDocs = await Promise.all(generatedImages.map(async (generated) => {
+    const index = generated.index;
     const blobStartedAt = Date.now();
     await timedLog({
       userId: input.userId,
@@ -4790,7 +4806,7 @@ async function generateShopeeUgcImageDocs(input: {
       metadata: {
         imageIndex: index + 1,
         imageCount: input.promptSet.prompts.length,
-        sizeBytes: generatedBuffer.length
+        sizeBytes: generated.buffer.length
       }
     });
 
@@ -4805,13 +4821,13 @@ async function generateShopeeUgcImageDocs(input: {
         metadata: {
           imageIndex: index + 1,
           imageCount: input.promptSet.prompts.length,
-          sizeBytes: generatedBuffer.length
+          sizeBytes: generated.buffer.length
         },
         fn: () => uploadAutoPostImage({
           jobId: input.jobId ?? `shopee-${Date.now()}`,
           productId: input.product.productId,
           index: index + 1,
-          buffer: generatedBuffer as Buffer,
+          buffer: generated.buffer,
           mimeType: "image/png",
           kind: "image"
         })
@@ -4850,14 +4866,14 @@ async function generateShopeeUgcImageDocs(input: {
         contentType: uploadedImage.contentType,
         sizeBytes: uploadedImage.sizeBytes,
         blobUploadDurationMs: Date.now() - blobStartedAt,
-        imageLoggingDurationMs
+        imageLoggingDurationMs: generated.loggingDurationMs
       }
     });
 
     const imagePayload = {
       userId: input.userId,
       productId: input.product.productId,
-      prompt: promptItem.prompt,
+      prompt: generated.promptItem.prompt,
       status: "generated",
       generatedImageUrl: uploadedImage.url,
       pathname: uploadedImage.pathname,
@@ -4866,8 +4882,8 @@ async function generateShopeeUgcImageDocs(input: {
       contentType: uploadedImage.contentType,
       sizeBytes: uploadedImage.sizeBytes,
       promptHistory: [
-        promptItem.title,
-        `concept=${promptItem.concept}`,
+        generated.promptItem.title,
+        `concept=${generated.promptItem.concept}`,
         `layout=${index + 1}`,
         `reference_count=${referenceImages.length}`,
         "source=openai-image-edit-multi-reference",
@@ -4878,7 +4894,7 @@ async function generateShopeeUgcImageDocs(input: {
       ]
     };
     assertNoLargeMongoFields(imagePayload, "AiGeneratedImage");
-    const imageDoc = await runShopeeTimedStage({
+    return runShopeeTimedStage({
       userId: input.userId,
       jobId: input.jobId,
       product: input.product,
@@ -4891,8 +4907,15 @@ async function generateShopeeUgcImageDocs(input: {
       },
       fn: () => AiGeneratedImage.create(imagePayload)
     });
-    imageDocs.push(imageDoc);
-  }
+  }));
+  imageDocs.push(...uploadedImageDocs);
+  imageDocs.sort((left, right) => {
+    const leftHistory = Array.isArray(left.promptHistory) ? left.promptHistory : [];
+    const rightHistory = Array.isArray(right.promptHistory) ? right.promptHistory : [];
+    const leftLayout = Number(String(leftHistory.find((item: unknown) => String(item).startsWith("layout=")) ?? "layout=0").replace("layout=", ""));
+    const rightLayout = Number(String(rightHistory.find((item: unknown) => String(item).startsWith("layout=")) ?? "layout=0").replace("layout=", ""));
+    return leftLayout - rightLayout;
+  });
 
   const totalImageDurationMs = Date.now() - totalStartedAt;
   await timedLog({
@@ -4906,7 +4929,7 @@ async function generateShopeeUgcImageDocs(input: {
       imageRequestCount,
       expectedImages: input.promptSet.prompts.length,
       maxAttemptsPerImage: OPENAI_IMAGE_MAX_ATTEMPTS,
-      mode: "sequential"
+      mode: "parallel"
     }
   });
   await timedLog({
@@ -4917,7 +4940,7 @@ async function generateShopeeUgcImageDocs(input: {
     status: "success",
     message: "Shopee UGC image generation performance summary",
     metadata: {
-      mode: "sequential",
+      mode: "parallel",
       imageRequestCount,
       expectedImages: input.promptSet.prompts.length,
       generatedImages: imageDocs.length,
