@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // @ts-ignore Node strip-types runner resolves the .ts module directly in tests.
 import {
@@ -34,6 +37,18 @@ const sampleProduct: ShopeeProductRecord = {
   sourceTag: "trending",
   fetchedAt: new Date("2026-05-17T00:00:00.000Z")
 };
+
+function readShopeeAffiliateServiceSource() {
+  return readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "shopee-affiliate.ts"), "utf8");
+}
+
+function sourceBetween(source: string, start: string, end: string) {
+  const startIndex = source.indexOf(start);
+  const endIndex = source.indexOf(end, startIndex + start.length);
+  assert.ok(startIndex >= 0, `Missing source marker: ${start}`);
+  assert.ok(endIndex > startIndex, `Missing source marker: ${end}`);
+  return source.slice(startIndex, endIndex);
+}
 
 async function testMockProviderReturnsProducts() {
   const provider = new MockShopeeProvider();
@@ -159,6 +174,29 @@ function testImagePromptSetCreatesFourConsistentPrompts() {
   console.log("PASS Shopee image prompt set creates 4 consistent CTR prompts");
 }
 
+function testStoryboardCaptionSourceUsesProductEntityGuards() {
+  const source = readShopeeAffiliateServiceSource();
+  const entitySource = sourceBetween(source, "function extractShopeeProductEntity", "function getShopeeStoryboardInputText");
+  const groupSource = sourceBetween(source, "function getShopeeStoryboardProductGroup", "function enrichShopeeStoryboardForAffiliateReview");
+  const captionSource = sourceBetween(source, "function buildShopeeStoryboardCaption", "function createValidatedShopeeProductStoryboard");
+  const validationSource = sourceBetween(source, "const SHOPEE_GENERIC_CAPTION_TEMPLATE_PATTERN", "function getStoryboardCaptionDebugPayload");
+
+  assert.ok(entitySource.includes("กระบอกน้ำ"));
+  assert.ok(entitySource.includes("พกน้ำหรือเครื่องดื่มไปทำงาน เดินทาง หรือออกกำลังกาย"));
+  assert.ok(entitySource.includes("เสื้อ"));
+  assert.ok(entitySource.includes("ใส่แมตช์กับกางเกงหรือกระโปรง"));
+  assert.ok(groupSource.includes('return "generic_product"'));
+  const groupReturns = Array.from(groupSource.matchAll(/return "([^"]+)";/g)).map((match) => match[1]);
+  assert.equal(groupReturns.at(-1), "generic_product");
+  assert.ok(captionSource.includes("buildShopeeStoryboardSolutionLine"));
+  assert.equal(captionSource.includes("มีตัวช่วยไว้สะดวกกว่าเดิม"), false);
+  assert.ok(source.includes("NO_GENERIC_CATEGORY_TEMPLATE"));
+  for (const phrase of ["ของใช้ในบ้าน", "หยิบใช้", "ช่วยให้บ้านดูใช้งานง่าย", "ช่วงใช้งานในชีวิตประจำวัน"]) {
+    assert.ok(validationSource.includes(phrase), `Missing generic phrase validation for ${phrase}`);
+  }
+  console.log("PASS Shopee storyboard caption source uses product-entity guards");
+}
+
 await testMockProviderReturnsProducts();
 testShopeeCategoryNormalization();
 testScoringRewardsStrongProducts();
@@ -170,3 +208,4 @@ testDuplicateProductNameLineRemoval();
 testProductNameOccurrenceCounting();
 testImagePromptIncludesSafetyRules();
 testImagePromptSetCreatesFourConsistentPrompts();
+testStoryboardCaptionSourceUsesProductEntityGuards();
