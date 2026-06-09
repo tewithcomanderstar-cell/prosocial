@@ -5,7 +5,12 @@ import {
   removeDuplicateShopeeProductNameLines,
   stripShopeeProductNameFromText
 } from "@/lib/services/shopee-affiliate-core";
-import { generateFacebookContent, generateProductReferenceImage } from "@/lib/services/ai";
+import {
+  analyzeShopeeProductImageUnderstanding,
+  generateFacebookContent,
+  generateProductReferenceImage,
+  type ShopeeVisionUnderstandingResult
+} from "@/lib/services/ai";
 import { assertNoLargeMongoFields, uploadAutoPostImage } from "@/lib/services/blob-storage";
 import { logAction, serializeError } from "@/lib/services/logging";
 import { logExternalResponseFailure, traceExternalRequest } from "@/lib/services/request-debug";
@@ -43,6 +48,7 @@ const OPENAI_IMAGE_REQUEST_TIMEOUT_MS = Math.min(
   Math.max(30_000, Number(process.env.OPENAI_IMAGE_TIMEOUT_MS ?? String(OPENAI_IMAGE_REQUEST_HARD_TIMEOUT_MS)))
 );
 const OPENAI_IMAGE_MAX_ATTEMPTS = 2;
+const VISION_RESCUE_TIMEOUT_MS = 30_000;
 const AUTO_POST_SLOW_STAGE_WARNING_MS = 30_000;
 const SHOPEE_ACTION_LOG_TIMEOUT_MS = Math.max(
   500,
@@ -2564,73 +2570,174 @@ type ShopeeProductEntity = {
 type ShopeeProductUnderstanding = ShopeeProductEntity & {
   targetAudience: string;
   confidence: number;
-  source: "rule_entity_extraction";
+  source: "text" | "vision_rescue" | "merged";
+  fallbackUsed: boolean;
+  recognitionStatus: "recognized" | "fallback" | "failed";
   failureReasons: string[];
+  visualEvidence?: string[];
 };
 
-const SHOPEE_KNOWN_PRODUCT_TYPES = [
-  "apparel",
-  "sport_shirt",
-  "skincare",
-  "drinkware",
-  "travel_pillow",
-  "home_storage",
-  "kitchenware",
-  "pet_supply",
-  "automotive_accessory",
-  "electronics_accessory",
-  "beauty_tool",
-  "jewelry",
-  "bag",
-  "shoes",
-  "food",
-  "water_purifier_accessory",
-  "water_purifier",
-  "shirt",
-  "skirt",
-  "dress",
-  "pants",
-  "dashcam",
-  "running_shoes",
-  "sport_shoes",
-  "desk_lamp",
-  "audio_gadget",
-  "health_supplement",
-  "sports_equipment",
-  "collectible"
-] as const;
-
-const SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE: Record<string, string> = {
-  apparel: "สวมใส่ในชีวิตประจำวันหรือแต่งตัวตามโอกาส",
-  sport_shirt: "สวมใส่ออกกำลังกายหรือทำกิจกรรมกลางแจ้ง",
-  skincare: "ใช้บำรุงและดูแลผิว",
-  drinkware: "ใส่เครื่องดื่มและพกพาระหว่างวัน",
-  travel_pillow: "รองคอระหว่างเดินทาง",
-  home_storage: "จัดเก็บของให้เป็นระเบียบ",
-  kitchenware: "ใช้เตรียมอาหารหรือใช้งานในครัว",
-  pet_supply: "ใช้ดูแลสัตว์เลี้ยง",
-  automotive_accessory: "ใช้กับรถยนต์หรือพกไว้ในรถ",
-  electronics_accessory: "ใช้ร่วมกับอุปกรณ์อิเล็กทรอนิกส์",
-  beauty_tool: "ใช้แต่งหน้า ดูแลผิว หรือดูแลความงาม",
-  jewelry: "สวมใส่เป็นเครื่องประดับและแมตช์ลุค",
-  bag: "ใช้ใส่ของและพกพาระหว่างวัน",
-  shoes: "สวมใส่เดินหรือทำกิจกรรมต่าง ๆ",
-  food: "ใช้รับประทานเป็นอาหารหรือของทานเล่น",
-  water_purifier_accessory: "ใช้เปลี่ยนหรือใช้งานร่วมกับเครื่องกรองน้ำเพื่อกรองน้ำดื่ม",
-  water_purifier: "กดน้ำดื่มสะอาดไว้ใช้ในบ้าน",
-  shirt: "สวมใส่และแมตช์กับลุคตามโอกาส",
-  skirt: "สวมใส่และแมตช์กับเสื้อผ้าตามโอกาส",
-  dress: "สวมใส่แต่งตัวไปทำงาน ไปเที่ยว หรือโอกาสพิเศษ",
-  pants: "สวมใส่และแต่งตัวให้เข้ากับกิจกรรมระหว่างวัน",
-  dashcam: "ติดหน้ารถเพื่อบันทึกเส้นทางและเหตุการณ์ระหว่างขับขี่",
-  running_shoes: "สวมใส่วิ่ง เดิน หรือทำกิจกรรมที่ต้องเคลื่อนไหว",
-  sport_shoes: "สวมใส่ออกกำลังกายหรือทำกิจกรรมที่ต้องเคลื่อนไหว",
-  desk_lamp: "เพิ่มแสงสว่างตอนอ่านหนังสือ ทำงาน หรือใช้คอม",
-  audio_gadget: "ใช้ฟังเสียงระหว่างเดินทาง ทำงาน หรือพักผ่อน",
-  health_supplement: "ใช้เสริมการดูแลสุขภาพหรือโภชนาการตามคำแนะนำบนสินค้า",
-  sports_equipment: "ใช้เล่นกีฬา ฝึกซ้อม หรือออกกำลังกาย",
-  collectible: "สะสม ตั้งโชว์ หรือใช้ตกแต่งมุมโปรด"
+type ShopeeProductTypeProfile = {
+  productType: string;
+  mainUseCase: string;
+  targetAudience: string;
+  painPoint: string;
+  dailyBenefit: string;
 };
+
+const SHOPEE_PRODUCT_TYPE_LIBRARY = [
+  ["scented_candle", "เพิ่มกลิ่นหอมในห้องหรือมุมพักผ่อน", "คนที่อยากให้ห้องมีกลิ่นหอม", "ห้องมีกลิ่นอับหรืออยากสร้างบรรยากาศผ่อนคลาย", "จุดหรือวางไว้ให้มุมห้องหอมและน่านั่งขึ้น"],
+  ["waterproof_tablecloth", "ปูโต๊ะเพื่อกันน้ำและคราบเปื้อน", "คนที่ใช้โต๊ะกินข้าว โต๊ะทำงาน หรือโต๊ะอเนกประสงค์", "โต๊ะเปื้อนง่ายหรือเช็ดคราบยาก", "ปูโต๊ะแล้วเช็ดน้ำหรือคราบอาหารได้ง่ายขึ้น"],
+  ["tablecloth", "ปูโต๊ะเพื่อแต่งโต๊ะและช่วยลดคราบเปื้อน", "คนที่อยากให้โต๊ะดูเรียบร้อยและดูแลทำความสะอาดง่าย", "โต๊ะดูโล่งหรือเลอะง่าย", "ช่วยให้โต๊ะดูเป็นระเบียบและใช้งานได้สบายขึ้น"],
+  ["storage_box", "จัดเก็บของให้เป็นระเบียบ", "คนที่อยากจัดของในบ้านหรือโต๊ะทำงาน", "ของกระจัดกระจายและหาไม่เจอ", "แยกของเป็นหมวดและหยิบใช้ง่ายขึ้น"],
+  ["shoe_rack", "จัดเก็บรองเท้าให้เป็นระเบียบ", "คนที่มีรองเท้าหลายคู่หรือพื้นที่หน้าบ้านจำกัด", "รองเท้าวางกองและกินพื้นที่", "วางรองเท้าเป็นชั้น ช่วยให้มุมหน้าบ้านดูเรียบร้อย"],
+  ["drawer_organizer", "แบ่งช่องเก็บของในลิ้นชัก", "คนที่อยากจัดของจุกจิกให้หยิบง่าย", "ลิ้นชักรกและหาไอเทมเล็ก ๆ ยาก", "แยกของเล็ก ๆ ให้เป็นช่องชัดเจนขึ้น"],
+  ["closet_organizer", "จัดเสื้อผ้าหรือของในตู้ให้เป็นระเบียบ", "คนที่อยากจัดตู้เสื้อผ้า", "ตู้แน่นและหยิบของยาก", "ช่วยแยกหมวดเสื้อผ้าและประหยัดพื้นที่"],
+  ["laundry_basket", "ใส่ผ้ารอซักหรือจัดแยกผ้า", "คนที่ซักผ้าเป็นประจำ", "ผ้ากองรวมกันและแยกประเภทลำบาก", "รวบรวมผ้าให้เป็นที่ก่อนซัก"],
+  ["trash_bin", "ทิ้งขยะให้เป็นที่ในบ้านหรือโต๊ะทำงาน", "คนที่อยากให้พื้นที่ใช้งานสะอาด", "ขยะชิ้นเล็ก ๆ กระจายตามโต๊ะหรือมุมห้อง", "มีที่ทิ้งขยะใกล้มือและเก็บกวาดง่ายขึ้น"],
+  ["cleaning_mop", "ถูพื้นและทำความสะอาดบ้าน", "คนที่ดูแลบ้าน คอนโด หรือห้องพัก", "พื้นเปื้อนฝุ่นหรือคราบน้ำ", "ทำความสะอาดพื้นได้สะดวกขึ้น"],
+  ["cleaning_brush", "ขัดล้างคราบในห้องน้ำ ครัว หรือของใช้", "คนที่ทำความสะอาดบ้านเอง", "คราบตามซอกเล็ก ๆ ล้างยาก", "ช่วยขัดซอกและคราบเฉพาะจุดได้ง่ายขึ้น"],
+  ["pet_feeder", "ใส่อาหารหรือน้ำให้สัตว์เลี้ยง", "คนเลี้ยงแมว สุนัข หรือสัตว์เลี้ยงในบ้าน", "ให้อาหารน้องไม่เป็นที่หรือหกง่าย", "จัดมุมกินอาหารของสัตว์เลี้ยงให้เป็นระเบียบ"],
+  ["pet_bed", "เป็นที่นอนหรือมุมพักของสัตว์เลี้ยง", "คนเลี้ยงสัตว์ที่อยากให้น้องมีมุมพัก", "สัตว์เลี้ยงไม่มีที่นอนประจำ", "ช่วยให้น้องมีมุมพักผ่อนเป็นของตัวเอง"],
+  ["pet_toy", "ให้สัตว์เลี้ยงเล่นหรือออกกำลัง", "คนเลี้ยงสัตว์ที่อยากให้น้องไม่เบื่อ", "สัตว์เลี้ยงเบื่อง่ายหรืออยากหาอะไรให้เล่น", "เพิ่มกิจกรรมให้น้องเล่นระหว่างวัน"],
+  ["pet_grooming_tool", "แปรงขนหรือดูแลความสะอาดสัตว์เลี้ยง", "คนเลี้ยงสัตว์ที่ดูแลขนน้องเอง", "ขนร่วงหรือพันกันง่าย", "ช่วยดูแลขนน้องให้เรียบร้อยขึ้น"],
+  ["cat_litter", "ใช้รองรับขับถ่ายของแมว", "คนเลี้ยงแมว", "กลิ่นและความสะอาดของกระบะทรายจัดการยาก", "ช่วยจัดการมุมขับถ่ายของแมวให้สะอาดขึ้น"],
+  ["car_phone_holder", "ยึดมือถือในรถเพื่อดูเส้นทางหรือรับสาย", "คนขับรถที่ใช้มือถือดูแผนที่", "วางมือถือในรถแล้วเลื่อนหรือหยิบยาก", "ช่วยให้ดูแผนที่ได้สะดวกและเป็นตำแหน่ง"],
+  ["car_vacuum", "ดูดฝุ่นและเศษเล็ก ๆ ในรถ", "คนใช้รถที่อยากทำความสะอาดภายในรถเอง", "ฝุ่น เศษขนม หรือทรายสะสมในรถ", "ทำความสะอาดเบาะและพื้นรถได้ง่ายขึ้น"],
+  ["car_charger", "ชาร์จมือถือหรืออุปกรณ์ระหว่างขับรถ", "คนใช้รถและเดินทางบ่อย", "แบตมือถือหมดระหว่างทาง", "ชาร์จอุปกรณ์ในรถได้สะดวกขึ้น"],
+  ["dashcam", "ติดหน้ารถเพื่อบันทึกเส้นทางและเหตุการณ์ระหว่างขับขี่", "คนใช้รถที่อยากมีหลักฐานเวลาเดินทาง", "เกิดเหตุบนถนนแล้วไม่มีหลักฐาน", "บันทึกเหตุการณ์ขับขี่ไว้ดูย้อนหลังได้"],
+  ["jump_starter", "พกไว้ช่วยสตาร์ทรถเมื่อแบตหมด", "คนใช้รถที่เดินทางหรือจอดรถนาน", "รถสตาร์ทไม่ติดตอนฉุกเฉิน", "มีตัวช่วยในรถเวลาแบตมีปัญหา"],
+  ["tire", "ใช้เปลี่ยนยางรถเพื่อการขับขี่", "คนใช้รถที่ต้องเลือกยางใหม่", "ยางเดิมเสื่อมหรือไม่เหมาะกับการใช้งาน", "เลือกยางให้เข้ากับรถและการขับขี่"],
+  ["phone_case", "ใส่ปกป้องมือถือและแต่งลุคเครื่อง", "คนใช้มือถือที่อยากกันรอยหรือเปลี่ยนสไตล์", "มือถือเป็นรอยหรือจับไม่ถนัด", "ช่วยกันรอยและทำให้มือถือจับถนัดขึ้น"],
+  ["screen_protector", "ติดหน้าจอเพื่อช่วยกันรอย", "คนใช้มือถือหรือแท็บเล็ต", "หน้าจอเป็นรอยจากการใช้งาน", "ช่วยปกป้องหน้าจอจากรอยขีดข่วน"],
+  ["charging_cable", "ใช้ชาร์จแบตหรือเชื่อมต่ออุปกรณ์", "คนใช้มือถือ แท็บเล็ต หรืออุปกรณ์อิเล็กทรอนิกส์", "สายชาร์จไม่พอหรือชาร์จไม่สะดวก", "มีสายสำรองไว้ชาร์จที่บ้าน ที่ทำงาน หรือพกไปข้างนอก"],
+  ["power_bank", "ชาร์จอุปกรณ์ระหว่างเดินทาง", "คนเดินทางหรือใช้งานมือถือนอกบ้านนาน", "แบตหมดระหว่างวัน", "พกไว้สำรองแบตเวลาออกจากบ้าน"],
+  ["usb_hub", "เพิ่มช่องเชื่อมต่อให้คอมพิวเตอร์หรือโน้ตบุ๊ก", "คนทำงานกับอุปกรณ์หลายชิ้น", "พอร์ตเชื่อมต่อไม่พอ", "ต่ออุปกรณ์หลายอย่างได้สะดวกขึ้น"],
+  ["earbuds", "ใช้ฟังเพลง คุยสาย หรือประชุมออนไลน์", "คนใช้มือถือ ฟังเพลง หรือทำงานออนไลน์", "ต้องการฟังเสียงส่วนตัวระหว่างวัน", "พกฟังเสียงหรือคุยสายได้สะดวก"],
+  ["speaker", "เปิดเพลงหรือเสียงในห้องหรือระหว่างกิจกรรม", "คนที่อยากฟังเพลงร่วมกันหรือเพิ่มเสียงให้พื้นที่", "เสียงมือถือไม่พอหรือฟังร่วมกันยาก", "เปิดเสียงให้มุมพักผ่อนหรือกิจกรรมสนุกขึ้น"],
+  ["smartwatch", "ใส่ดูเวลา การแจ้งเตือน หรือข้อมูลกิจกรรม", "คนที่อยากมีแกดเจ็ตติดข้อมือ", "หยิบมือถือบ่อยหรืออยากดูข้อมูลเร็วขึ้น", "ดูข้อมูลบนข้อมือได้สะดวกระหว่างวัน"],
+  ["tripod", "ตั้งกล้องหรือมือถือเพื่อถ่ายภาพและวิดีโอ", "คนทำคอนเทนต์หรือถ่ายภาพเอง", "ถ่ายเองแล้วมุมไม่นิ่ง", "ช่วยตั้งมุมถ่ายให้มั่นคงขึ้น"],
+  ["action_camera", "ถ่ายกิจกรรม เดินทาง หรือคอนเทนต์มุมกว้าง", "คนทำคอนเทนต์หรือชอบเดินทาง", "อยากเก็บภาพมุมแอคชั่นหรือมุมกว้าง", "พกถ่ายกิจกรรมได้คล่องตัวขึ้น"],
+  ["kitchen_container", "เก็บอาหาร วัตถุดิบ หรือของแห้ง", "คนทำอาหารหรือจัดครัว", "วัตถุดิบเปิดถุงแล้วเก็บยาก", "เก็บของในครัวให้เป็นหมวดและหยิบง่าย"],
+  ["ice_tray", "ทำน้ำแข็งและแยกก้อนออกมาใช้", "คนที่ทำเครื่องดื่มหรือใช้ตู้เย็นที่บ้าน", "น้ำแข็งหมดหรือแกะออกยาก", "เตรียมน้ำแข็งไว้ใช้กับเครื่องดื่มได้ง่าย"],
+  ["lunch_box", "ใส่อาหารเพื่อพกไปทำงาน โรงเรียน หรือเดินทาง", "คนที่เตรียมอาหารเอง", "พกอาหารแล้วหกหรือแยกช่องยาก", "พกมื้ออาหารให้เป็นระเบียบขึ้น"],
+  ["pan", "ใช้ผัด ทอด หรือทำอาหารในครัว", "คนทำอาหารที่บ้าน", "อุปกรณ์ครัวไม่พอกับเมนูที่ทำ", "ช่วยเตรียมอาหารประจำวันได้สะดวกขึ้น"],
+  ["pot", "ใช้ต้ม แกง หรือทำอาหารในครัว", "คนทำอาหารที่บ้าน", "ต้องการหม้อสำหรับเมนูต้มและแกง", "ทำอาหารเมนูน้ำได้ง่ายขึ้น"],
+  ["knife", "ใช้หั่น สับ หรือเตรียมวัตถุดิบ", "คนทำอาหารที่บ้าน", "เตรียมวัตถุดิบช้าเพราะอุปกรณ์ไม่ถนัด", "หั่นวัตถุดิบได้คล่องขึ้น"],
+  ["cutting_board", "รองหั่นวัตถุดิบในครัว", "คนทำอาหารที่บ้าน", "หั่นของแล้วเลอะโต๊ะหรือไม่ถูกสุขลักษณะ", "เตรียมวัตถุดิบได้เป็นที่มากขึ้น"],
+  ["water_filter", "กรองหรือกดน้ำดื่มสะอาดไว้ใช้ในบ้าน", "คนอยู่บ้าน คอนโด หรือครอบครัว", "ต้องซื้อน้ำขวดบ่อยหรืออยากมีน้ำดื่มพร้อมใช้", "มีน้ำดื่มพร้อมกดใช้ในบ้าน"],
+  ["water_purifier", "กดน้ำดื่มสะอาดไว้ใช้ในบ้าน", "คนอยู่บ้านหรือคอนโด", "อยากมีน้ำดื่มสะอาดพร้อมใช้", "กดน้ำดื่มระหว่างวันได้สะดวก"],
+  ["water_purifier_accessory", "ใช้เปลี่ยนหรือใช้งานร่วมกับเครื่องกรองน้ำเพื่อกรองน้ำดื่ม", "ผู้ใช้เครื่องกรองน้ำ", "ไส้กรองหรืออะไหล่ต้องเปลี่ยนตามรอบ", "ช่วยให้เครื่องกรองน้ำพร้อมใช้งานต่อเนื่อง"],
+  ["travel_bottle", "ใส่ของเหลวหรือสกินแคร์ขนาดพกพา", "คนเดินทางหรือพกของใช้ส่วนตัว", "พกขวดใหญ่แล้วกินพื้นที่", "แบ่งของใช้ลงขวดเล็กเพื่อพกง่ายขึ้น"],
+  ["thermal_cup", "ใส่เครื่องดื่มและช่วยเก็บอุณหภูมิ", "คนทำงาน เดินทาง หรือชอบพกเครื่องดื่ม", "เครื่องดื่มหายเย็นหรือหายร้อนเร็ว", "มีเครื่องดื่มไว้จิบระหว่างวันได้สะดวก"],
+  ["drinkware", "ใส่เครื่องดื่มและพกพาระหว่างวัน", "คนทำงาน คนเดินทาง หรือคนออกกำลังกาย", "ไม่มีภาชนะพกเครื่องดื่มที่ใช้ง่าย", "พกน้ำหรือเครื่องดื่มไปข้างนอกได้ง่าย"],
+  ["water_bottle", "ใส่น้ำดื่มและพกพาระหว่างวัน", "คนที่อยากพกน้ำติดตัว", "ดื่มน้ำน้อยหรือไม่มีขวดพกสะดวก", "มีน้ำไว้จิบระหว่างทำงานหรือเดินทาง"],
+  ["mug", "ใส่เครื่องดื่มร้อนหรือเย็นบนโต๊ะทำงาน", "คนทำงานหรือคนที่ชอบดื่มกาแฟ ชา", "อยากมีแก้วประจำโต๊ะ", "วางเครื่องดื่มไว้จิบระหว่างวัน"],
+  ["sport_shirt", "สวมใส่ออกกำลังกายหรือทำกิจกรรมกลางแจ้ง", "คนออกกำลังกายหรือชอบลุคสปอร์ต", "เสื้อทั่วไปเคลื่อนไหวไม่คล่อง", "ใส่เล่นกีฬา เดินทาง หรือวันลำลองได้"],
+  ["shirt", "สวมใส่และแมตช์กับลุคตามโอกาส", "คนที่หาเสื้อใส่ง่าย", "ไม่รู้จะหยิบเสื้อตัวไหนให้เข้ากับวัน", "แมตช์กับกางเกงหรือกระโปรงได้ง่าย"],
+  ["apparel", "สวมใส่ในชีวิตประจำวันหรือแต่งตัวตามโอกาส", "คนที่หาเสื้อผ้าใส่ง่าย", "แต่งตัวให้เข้ากับโอกาสไม่ลงตัว", "เลือกใส่ทำงาน ไปเที่ยว หรือวันลำลองได้"],
+  ["dress", "สวมใส่แต่งตัวไปทำงาน ไปเที่ยว หรือโอกาสพิเศษ", "คนที่ชอบชุดใส่ง่ายครบลุค", "อยากแต่งตัวให้จบในชิ้นเดียว", "ใส่แล้วได้ลุคพร้อมออกจากบ้าน"],
+  ["skirt", "สวมใส่และแมตช์กับเสื้อผ้าตามโอกาส", "คนที่ชอบแต่งตัวหลายลุค", "อยากได้ชิ้นที่แมตช์กับเสื้อได้หลายแบบ", "ใส่คู่กับเสื้อทำงานหรือวันเที่ยวได้"],
+  ["pants", "สวมใส่และแต่งตัวให้เข้ากับกิจกรรมระหว่างวัน", "คนที่ต้องการกางเกงใส่ง่าย", "กางเกงไม่เข้ากับกิจกรรมหรือเคลื่อนไหวไม่สะดวก", "ใส่ทำงาน เดินทาง หรือทำกิจกรรมได้คล่องขึ้น"],
+  ["shorts", "สวมใส่ลำลอง เล่นกีฬา หรือพักผ่อน", "คนที่อยากได้กางเกงใส่สบาย", "ใส่ขายาวแล้วร้อนหรือเคลื่อนไหวไม่สะดวก", "ใส่วันสบาย ๆ หรือออกกำลังกายได้ง่าย"],
+  ["running_shoes", "สวมใส่วิ่ง เดิน หรือทำกิจกรรมที่ต้องเคลื่อนไหว", "คนวิ่ง ออกกำลังกาย หรือเดินเยอะ", "รองเท้าไม่เข้ากับการเคลื่อนไหว", "ช่วยให้เดินหรือวิ่งได้คล่องขึ้น"],
+  ["sport_shoes", "สวมใส่ออกกำลังกายหรือทำกิจกรรมที่ต้องเคลื่อนไหว", "คนออกกำลังกายหรือเล่นกีฬา", "รองเท้าไม่เหมาะกับกิจกรรม", "ใส่ขยับตัวและออกกำลังกายได้มั่นใจขึ้น"],
+  ["sandals", "สวมใส่เดินลำลองหรือใช้งานในวันสบาย ๆ", "คนที่อยากได้รองเท้าใส่ง่าย", "ใส่รองเท้าหุ้มส้นแล้วร้อนหรือไม่สะดวก", "หยิบใส่ออกไปทำธุระหรือเดินเล่นได้ง่าย"],
+  ["socks", "สวมใส่กับรองเท้าเพื่อลดการเสียดสี", "คนที่ใส่รองเท้าหรือเล่นกีฬา", "เท้าเสียดสีกับรองเท้าหรือไม่กระชับ", "ใส่รองเท้าได้สบายและกระชับขึ้น"],
+  ["travel_pillow", "รองคอระหว่างเดินทาง", "นักเดินทางหรือคนที่นั่งรถและเครื่องบินนาน", "เดินทางนานแล้วปวดคอหรือหลับไม่สบาย", "ช่วยรองรับต้นคอระหว่างเดินทาง"],
+  ["necklace", "สวมใส่เป็นเครื่องประดับและแมตช์ลุค", "คนที่ชอบเครื่องประดับ", "ลุคเรียบเกินไปและอยากเพิ่มดีเทล", "เติมดีเทลช่วงคอให้ลุคดูครบขึ้น"],
+  ["earring", "สวมใส่เป็นเครื่องประดับบนใบหู", "คนที่ชอบต่างหูหรือแต่งลุค", "อยากให้ใบหน้าหรือลุคดูมีดีเทล", "ใส่เพิ่มจุดเด่นให้ลุคประจำวัน"],
+  ["bracelet", "สวมใส่เป็นเครื่องประดับข้อมือ", "คนที่ชอบเครื่องประดับข้อมือ", "ข้อมือดูโล่งหรืออยากเพิ่มดีเทลเล็ก ๆ", "แมตช์กับนาฬิกาหรือชุดประจำวันได้"],
+  ["ring", "สวมใส่เป็นเครื่องประดับนิ้วมือ", "คนที่ชอบแหวนหรือเครื่องประดับเล็ก", "อยากเพิ่มดีเทลให้มือและลุค", "ใส่เพิ่มความเรียบร้อยให้การแต่งตัว"],
+  ["jewelry", "สวมใส่เป็นเครื่องประดับและแมตช์ลุค", "คนที่ชอบเครื่องประดับ", "แต่งตัวแล้วลุคยังขาดดีเทล", "ช่วยให้ลุคดูมีอะไรขึ้นโดยไม่ต้องแต่งเยอะ"],
+  ["wallet", "ใส่เงิน บัตร และของชิ้นเล็ก", "คนที่พกเงินสดหรือบัตรหลายใบ", "บัตรและเงินกระจัดกระจายในกระเป๋า", "จัดของสำคัญให้หยิบใช้ง่ายขึ้น"],
+  ["backpack", "ใส่ของและพกพาระหว่างเรียน ทำงาน หรือเดินทาง", "คนที่พกของเยอะหรือเดินทาง", "ของเยอะและถือไม่สะดวก", "สะพายของจำเป็นได้เป็นระเบียบ"],
+  ["handbag", "ใส่ของส่วนตัวและแมตช์กับลุค", "คนที่อยากมีกระเป๋าใช้ประจำวัน", "พกของจุกจิกแล้วลุคไม่ลงตัว", "ถือหรือสะพายออกจากบ้านได้พร้อมลุค"],
+  ["crossbody_bag", "ใส่ของจำเป็นและสะพายติดตัวระหว่างวัน", "คนเดินทางหรือออกไปข้างนอกบ่อย", "หยิบของสำคัญในกระเป๋าใหญ่ยาก", "เก็บมือถือ กระเป๋าสตางค์ และของจำเป็นใกล้ตัว"],
+  ["tote_bag", "ใส่ของใช้ประจำวันและพกพาออกจากบ้าน", "คนที่ชอบกระเป๋าใส่ง่ายและจุของ", "ของใช้หลายชิ้นไม่มีที่รวม", "ใส่ของจำเป็นไปทำงานหรือคาเฟ่ได้ง่าย"],
+  ["bag", "ใช้ใส่ของและพกพาระหว่างวัน", "คนที่เดินทางหรือพกของออกจากบ้านบ่อย", "ของจุกจิกกระจัดกระจาย", "รวมของจำเป็นไว้หยิบง่ายขึ้น"],
+  ["skincare", "ใช้บำรุงและดูแลผิว", "คนที่มองหาไอเทมดูแลผิว", "ผิวดูแห้งหรืออยากเพิ่มขั้นตอนดูแลผิว", "ใช้หลังล้างหน้าหรือก่อนแต่งหน้าได้"],
+  ["sunscreen", "ทาก่อนออกแดดหรือก่อนแต่งหน้าเพื่อช่วยดูแลผิว", "คนที่ต้องออกแดดหรืออยู่ห้องแอร์", "แดดและสภาพแวดล้อมทำให้ผิวดูเหนื่อยล้า", "ทาช่วงเช้าก่อนออกจากบ้านได้"],
+  ["serum", "ทาบำรุงผิวหลังล้างหน้า", "คนที่อยากเพิ่มขั้นตอนบำรุงผิว", "ผิวดูแห้งหรือไม่สดใส", "เติมสกินแคร์บางเบาก่อนลงครีมหรือแต่งหน้า"],
+  ["moisturizer", "ทาเพื่อเติมความชุ่มชื้นให้ผิว", "คนที่ผิวแห้งหรืออยู่ห้องแอร์บ่อย", "ผิวแห้งตึงระหว่างวัน", "ช่วยให้ผิวรู้สึกชุ่มชื้นขึ้น"],
+  ["cleanser", "ใช้ล้างหน้าและทำความสะอาดผิว", "คนที่ล้างหน้าทุกวันหรือแต่งหน้า", "ผิวหน้ามีคราบกันแดดหรือความมัน", "ล้างหน้าให้พร้อมลงสกินแคร์ขั้นต่อไป"],
+  ["makeup_brush", "ใช้แต่งหน้าและเกลี่ยเครื่องสำอาง", "คนแต่งหน้าหรือเริ่มฝึกแต่งหน้า", "แต่งหน้าแล้วเกลี่ยไม่เนียน", "ช่วยลงเมคอัพได้เป็นจังหวะมากขึ้น"],
+  ["makeup_sponge", "ใช้เกลี่ยรองพื้นหรือคอนซีลเลอร์", "คนแต่งหน้าที่อยากให้งานผิวดูเนียน", "รองพื้นเป็นคราบหรือเกลี่ยยาก", "เกลี่ยงานผิวให้ดูเรียบขึ้น"],
+  ["hair_dryer", "ใช้เป่าผมหลังสระหรือจัดทรงเบื้องต้น", "คนที่สระผมบ่อยหรือรีบออกจากบ้าน", "ผมแห้งช้าและจัดทรงยาก", "ช่วยให้ผมแห้งไวขึ้นก่อนออกจากบ้าน"],
+  ["hair_styler", "ใช้จัดแต่งทรงผมหรือม้วนผม", "คนที่จัดทรงผมเอง", "ผมไม่เป็นทรงในวันที่ต้องออกไปข้างนอก", "ช่วยจัดทรงให้พร้อมก่อนออกจากบ้าน"],
+  ["beauty_tool", "ใช้แต่งหน้า ดูแลผิว หรือดูแลความงาม", "คนที่ดูแลผิวหรือแต่งหน้าเอง", "ขั้นตอนความงามทำได้ไม่ถนัด", "ช่วยให้ดูแลตัวเองได้เป็นระบบขึ้น"],
+  ["lipstick", "ใช้แต่งริมฝีปากและเติมสีให้ลุค", "คนแต่งหน้าหรืออยากเติมสีปาก", "ลุคดูซีดหรืออยากเติมความสดใส", "ทาเติมระหว่างวันให้หน้าดูมีสีสัน"],
+  ["perfume", "ใช้เพิ่มกลิ่นหอมให้ร่างกาย", "คนที่อยากมีกลิ่นหอมติดตัว", "อยากเพิ่มความมั่นใจก่อนออกจากบ้าน", "ฉีดก่อนออกไปทำงานหรือพบคน"],
+  ["snack", "ใช้รับประทานเป็นของทานเล่น", "คนที่อยากมีของว่างติดบ้าน", "อยากกินของว่างหรือแบ่งกินระหว่างวัน", "เก็บไว้กินเล่นหรือแบ่งกับคนที่บ้าน"],
+  ["instant_food", "ใช้รับประทานหรือเตรียมมื้ออาหารแบบสะดวก", "คนที่อยากมีอาหารเตรียมง่าย", "ไม่มีเวลาเตรียมอาหารนาน", "มีมื้อสะดวกไว้กินตอนรีบ"],
+  ["beverage", "ใช้ดื่มหรือชงเป็นเครื่องดื่ม", "คนที่ชอบเครื่องดื่มหรืออยากมีไว้ติดบ้าน", "อยากมีเครื่องดื่มพร้อมชงหรือพร้อมดื่ม", "เก็บไว้ดื่มระหว่างวันได้"],
+  ["food", "ใช้รับประทานเป็นอาหารหรือของทานเล่น", "คนที่อยากมีของกินติดบ้าน", "อยากมีของกินที่หยิบง่าย", "เก็บไว้กินกับมื้ออาหารหรือเป็นของว่าง"],
+  ["supplement", "ใช้เสริมการดูแลสุขภาพตามคำแนะนำบนสินค้า", "คนที่ดูแลสุขภาพหรือโภชนาการ", "อยากจัด routine ดูแลตัวเองให้เป็นระบบ", "หยิบทานตามคำแนะนำบนฉลากได้"],
+  ["protein_powder", "ใช้เสริมโปรตีนในวันที่ออกกำลังกายหรือจัดโภชนาการ", "คนออกกำลังกายหรือคุมโปรตีน", "โปรตีนในมื้ออาหารไม่พอ", "ชงเสริมโปรตีนหลังออกกำลังกายได้"],
+  ["vitamin", "ใช้เสริมวิตามินตามคำแนะนำบนสินค้า", "คนที่ดูแลสุขภาพหรือเลือกวิตามินประจำวัน", "อยากเติมสารอาหารบางอย่างให้ routine", "หยิบทานตามรอบที่ระบุบนสินค้า"],
+  ["health_supplement", "ใช้เสริมการดูแลสุขภาพหรือโภชนาการตามคำแนะนำบนสินค้า", "คนที่ดูแลสุขภาพ", "อยากมีตัวช่วยดูแลโภชนาการ", "จัด routine ดูแลสุขภาพได้ง่ายขึ้น"],
+  ["badminton_shuttlecock", "ใช้ซ้อมตีแบดหรือเล่นแบดมินตัน", "คนเล่นแบดมินตัน", "ลูกแบดไม่พอสำหรับซ้อมหรือเล่น", "หยิบใช้ซ้อมหรือเล่นกับเพื่อนได้"],
+  ["yoga_mat", "ใช้รองออกกำลังกาย โยคะ หรือยืดกล้ามเนื้อ", "คนออกกำลังกายที่บ้านหรือฟิตเนส", "พื้นแข็งหรือลื่นเวลาออกกำลังกาย", "ปูรองพื้นให้เคลื่อนไหวได้มั่นคงขึ้น"],
+  ["fitness_equipment", "ใช้ฝึกกล้ามเนื้อหรือออกกำลังกาย", "คนออกกำลังกายที่บ้านหรือฟิตเนส", "อยากเพิ่มอุปกรณ์ให้การซ้อม", "ช่วยให้ซ้อมได้หลากหลายขึ้น"],
+  ["sports_equipment", "ใช้เล่นกีฬา ฝึกซ้อม หรือออกกำลังกาย", "คนเล่นกีฬาและออกกำลังกาย", "อุปกรณ์ไม่พร้อมสำหรับกิจกรรม", "ช่วยให้เล่นหรือซ้อมได้สะดวกขึ้น"],
+  ["desk_lamp", "เพิ่มแสงสว่างตอนอ่านหนังสือ ทำงาน หรือใช้คอม", "คนทำงาน อ่านหนังสือ หรือจัดโต๊ะ", "แสงไม่พอหรือมุมโต๊ะมืด", "ช่วยให้โต๊ะทำงานสว่างและใช้งานง่ายขึ้น"],
+  ["office_chair", "ใช้รองรับการนั่งทำงาน อ่านหนังสือ หรือใช้งานคอมพิวเตอร์", "คนทำงานหน้าคอมหรือจัดมุมทำงาน", "นั่งทำงานนานแล้วไม่สบาย", "ช่วยให้มุมทำงานนั่งใช้งานได้นานขึ้น"],
+  ["desk_accessory", "จัดโต๊ะทำงานหรือช่วยให้ใช้งานสะดวก", "คนทำงานหรือเรียนที่โต๊ะ", "โต๊ะรกหรือหยิบของยาก", "ช่วยให้โต๊ะเป็นระเบียบและทำงานคล่องขึ้น"],
+  ["fan", "ช่วยเพิ่มลมและระบายอากาศ", "คนที่อยู่ห้องร้อนหรือทำงานที่โต๊ะ", "อากาศร้อนหรืออับระหว่างวัน", "เปิดใช้ให้รู้สึกสบายขึ้นในพื้นที่ส่วนตัว"],
+  ["humidifier", "เพิ่มความชื้นในห้องหรือมุมพักผ่อน", "คนอยู่ห้องแอร์หรือห้องแห้ง", "อากาศแห้งจนรู้สึกไม่สบาย", "ช่วยให้มุมห้องรู้สึกสบายขึ้น"],
+  ["home_fragrance", "เพิ่มกลิ่นหอมในห้องหรือมุมใช้งาน", "คนที่อยากปรับบรรยากาศห้อง", "ห้องมีกลิ่นอับหรืออยากให้มุมพักผ่อนหอมขึ้น", "ทำให้ห้องมีกลิ่นหอมและน่าอยู่ขึ้น"],
+  ["decorative_light", "ตกแต่งและเพิ่มบรรยากาศให้มุมห้อง", "คนที่แต่งห้องหรือจัดมุมถ่ายรูป", "มุมห้องดูเรียบหรือแสงไม่พอ", "ช่วยให้มุมห้องดูมีบรรยากาศขึ้น"],
+  ["wall_hook", "แขวนของให้เป็นที่", "คนที่อยากจัดของโดยไม่กินพื้นที่", "ของใช้แขวนไม่เป็นที่และหาไม่เจอ", "แขวนของที่ใช้บ่อยให้หยิบง่ายขึ้น"],
+  ["bathroom_accessory", "จัดของหรือใช้งานในห้องน้ำ", "คนที่ดูแลห้องน้ำหรือจัดของใช้ส่วนตัว", "ของในห้องน้ำวางไม่เป็นที่", "ช่วยให้มุมห้องน้ำเรียบร้อยและหยิบง่าย"],
+  ["pillow", "รองศีรษะหรือใช้พักผ่อน", "คนที่ต้องการหมอนสำหรับนอนหรือพัก", "นอนพักแล้วรองรับไม่สบาย", "ช่วยให้มุมพักผ่อนสบายขึ้น"],
+  ["bedding", "ใช้กับเตียงเพื่อการนอนหรือพักผ่อน", "คนที่จัดห้องนอนหรือเปลี่ยนชุดเครื่องนอน", "เครื่องนอนเก่าหรือไม่เข้ากับห้อง", "ทำให้เตียงพร้อมใช้งานและดูเรียบร้อย"],
+  ["blanket", "ใช้ห่มเพื่อเพิ่มความอบอุ่นหรือความสบาย", "คนที่นอนห้องแอร์หรือพักผ่อนบนโซฟา", "รู้สึกหนาวหรืออยากมีผ้าห่มใกล้ตัว", "หยิบห่มตอนพักผ่อนได้ง่าย"],
+  ["curtain", "ใช้บังแสง เพิ่มความเป็นส่วนตัว หรือแต่งห้อง", "คนที่จัดห้องนอนหรือห้องนั่งเล่น", "แสงเข้าห้องมากหรืออยากเพิ่มความเป็นส่วนตัว", "ช่วยคุมแสงและทำให้ห้องดูเรียบร้อยขึ้น"],
+  ["rug", "ปูพื้นเพื่อกันลื่น ตกแต่ง หรือเพิ่มความสบาย", "คนที่แต่งห้องหรือจัดมุมใช้งาน", "พื้นโล่ง ลื่น หรืออยากให้มุมห้องดูอุ่นขึ้น", "ช่วยให้มุมพื้นใช้งานสบายและดูมีสไตล์ขึ้น"],
+  ["umbrella", "ใช้กันฝนหรือกันแดดระหว่างเดินทาง", "คนที่เดินทางและต้องเจอฝนหรือแดด", "ฝนตกหรือแดดแรงตอนออกจากบ้าน", "พกไว้ใช้เวลาฝนตกหรือแดดจัด"],
+  ["raincoat", "สวมใส่กันฝนระหว่างเดินทาง", "คนที่เดินทางด้วยมอเตอร์ไซค์หรือเดินกลางแจ้ง", "ฝนตกแล้วเสื้อผ้าเปียก", "ช่วยกันฝนระหว่างทางได้"],
+  ["travel_bag", "ใส่ของสำหรับเดินทางหรือทริปสั้น", "คนเดินทางหรือจัดกระเป๋าไปทริป", "ของเดินทางเยอะและจัดยาก", "ช่วยรวมของจำเป็นสำหรับทริปให้เป็นที่"],
+  ["luggage", "ใส่เสื้อผ้าและของใช้สำหรับเดินทาง", "คนเดินทางต่างจังหวัดหรือต่างประเทศ", "จัดของเดินทางไม่เป็นระเบียบ", "ช่วยแพ็กของเดินทางได้ง่ายขึ้น"],
+  ["camera_bag", "ใส่กล้องและอุปกรณ์ถ่ายภาพ", "คนถ่ายรูปหรือทำคอนเทนต์", "อุปกรณ์กล้องกระจัดกระจายและเสี่ยงกระแทก", "พกกล้องและอุปกรณ์ได้เป็นสัดส่วน"],
+  ["baby_bottle", "ใส่นมหรือน้ำให้เด็กเล็ก", "พ่อแม่หรือผู้ดูแลเด็ก", "เตรียมนมให้เด็กระหว่างวันไม่สะดวก", "ช่วยเตรียมขวดนมไว้ใช้งานได้ง่าย"],
+  ["baby_toy", "ให้เด็กเล่นหรือฝึกพัฒนาการตามวัย", "พ่อแม่หรือผู้ดูแลเด็ก", "อยากหาไอเทมให้เด็กเล่นอย่างเหมาะสม", "เพิ่มกิจกรรมเล่นระหว่างวัน"],
+  ["stationery", "ใช้จด เขียน วาด หรือจัดงานเอกสาร", "นักเรียน นักศึกษา หรือคนทำงาน", "อุปกรณ์เขียนไม่พร้อมเวลาต้องใช้งาน", "ช่วยให้จดงานหรือจัดเอกสารได้สะดวกขึ้น"],
+  ["notebook", "ใช้จดบันทึก วางแผน หรือเรียน", "นักเรียน นักศึกษา หรือคนทำงาน", "ไอเดียหรืองานกระจัดกระจาย", "จดสิ่งที่ต้องทำและวางแผนได้เป็นที่"],
+  ["pen", "ใช้เขียน จด หรือเซ็นเอกสาร", "นักเรียน นักศึกษา หรือคนทำงาน", "ไม่มีปากกาที่เขียนถนัด", "หยิบจดงานหรือเซ็นเอกสารได้ทันที"],
+  ["art_supply", "ใช้วาด ระบายสี หรือทำงานศิลปะ", "คนวาดรูป นักเรียน หรือสายงานคราฟต์", "อุปกรณ์ศิลปะไม่ครบสำหรับชิ้นงาน", "ช่วยสร้างงานวาดหรืองานคราฟต์ได้สะดวกขึ้น"],
+  ["toy", "ใช้เล่นหรือสะสมเพื่อความเพลิดเพลิน", "เด็ก คนสะสม หรือคนที่ซื้อเป็นของขวัญ", "อยากหาไอเทมเล่นหรือของขวัญ", "เพิ่มความสนุกหรือเติมมุมสะสม"],
+  ["collectible", "สะสม ตั้งโชว์ หรือใช้ตกแต่งมุมโปรด", "สายสะสมหรือคนชอบของตกแต่ง", "มุมโชว์ยังขาดคาแรกเตอร์", "วางตั้งโชว์ให้มุมโต๊ะหรือชั้นดูมีเรื่องราว"],
+  ["book", "ใช้อ่านเพื่อความรู้ ความบันเทิง หรือพัฒนาตัวเอง", "คนอ่านหนังสือ นักเรียน หรือคนทำงาน", "อยากมีเนื้อหาอ่านเพิ่มตามความสนใจ", "หยิบอ่านในเวลาว่างหรือใช้ประกอบการเรียนรู้"],
+  ["plant_pot", "ใช้ปลูกต้นไม้หรือแต่งมุมสวน", "คนปลูกต้นไม้หรือแต่งบ้าน", "ต้นไม้ไม่มีภาชนะที่เหมาะกับมุมวาง", "จัดต้นไม้ให้เป็นระเบียบและดูดีขึ้น"],
+  ["gardening_tool", "ใช้ดูแลต้นไม้หรือสวน", "คนปลูกต้นไม้หรือทำสวน", "ดูแลต้นไม้ไม่ถนัดเพราะอุปกรณ์ไม่พร้อม", "ช่วยรดน้ำ ตัดแต่ง หรือจัดสวนได้ง่ายขึ้น"],
+  ["home_storage", "จัดเก็บของให้เป็นระเบียบ", "คนที่อยากจัดบ้านหรือห้องให้เรียบร้อย", "ของในบ้านรกหรือวางปนกัน", "ช่วยให้มุมใช้งานดูเป็นระเบียบขึ้น"],
+  ["kitchenware", "ใช้เตรียมอาหารหรือใช้งานในครัว", "คนทำอาหารหรือจัดครัว", "ครัวใช้งานไม่คล่องหรืออุปกรณ์ไม่พร้อม", "ช่วยให้เตรียมอาหารและจัดครัวง่ายขึ้น"],
+  ["pet_supply", "ใช้ดูแลสัตว์เลี้ยง", "คนเลี้ยงสัตว์", "การดูแลสัตว์เลี้ยงยังไม่สะดวก", "ช่วยให้มุมของสัตว์เลี้ยงเป็นระบบขึ้น"],
+  ["automotive_accessory", "ใช้กับรถยนต์หรือพกไว้ในรถ", "คนใช้รถ", "อยากเพิ่มความสะดวกหรือความพร้อมในรถ", "ช่วยให้การใช้รถประจำวันสะดวกขึ้น"],
+  ["electronics_accessory", "ใช้ร่วมกับอุปกรณ์อิเล็กทรอนิกส์", "คนใช้มือถือ คอมพิวเตอร์ หรือแกดเจ็ต", "ใช้อุปกรณ์แล้วขาดตัวเชื่อมต่อหรือของเสริม", "ช่วยให้ใช้อุปกรณ์อิเล็กทรอนิกส์ได้คล่องขึ้น"],
+  ["beauty_tool", "ใช้แต่งหน้า ดูแลผิว หรือดูแลความงาม", "คนดูแลผิวหรือแต่งหน้า", "ขั้นตอนความงามยังไม่ถนัด", "ช่วยให้แต่งหน้าหรือดูแลผิวง่ายขึ้น"],
+  ["shoes", "สวมใส่เดินหรือทำกิจกรรมต่าง ๆ", "คนที่ต้องเดินหรือแต่งตัวตามกิจกรรม", "รองเท้าไม่เข้ากับกิจกรรม", "ใส่เดินหรือทำกิจกรรมได้สะดวกขึ้น"]
+].map(([productType, mainUseCase, targetAudience, painPoint, dailyBenefit]) => ({
+  productType,
+  mainUseCase,
+  targetAudience,
+  painPoint,
+  dailyBenefit
+})) satisfies ShopeeProductTypeProfile[];
+
+const SHOPEE_KNOWN_PRODUCT_TYPES = SHOPEE_PRODUCT_TYPE_LIBRARY.map((item) => item.productType);
+const SHOPEE_PRODUCT_TYPE_PROFILE_BY_TYPE = Object.fromEntries(
+  SHOPEE_PRODUCT_TYPE_LIBRARY.map((item) => [item.productType, item])
+) as Record<string, ShopeeProductTypeProfile>;
+const SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE = Object.fromEntries(
+  SHOPEE_PRODUCT_TYPE_LIBRARY.map((item) => [item.productType, item.mainUseCase])
+) as Record<string, string>;
+const shopeeProductUnderstandingCoverageStats = new Map<string, {
+  entityCount: number;
+  successCount: number;
+  failureCount: number;
+  missingMainUseCaseCount: number;
+}>();
 
 let shopeeProductUnderstandingCoverageLogged = false;
 
@@ -2666,23 +2773,80 @@ function getShopeeMappedMainUseCase(productType?: string, productEntity?: string
   if (/อาหารเสริม|วิตามิน|โปรตีน|เวย์|supplement|vitamin|protein|whey/i.test(haystack)) return SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE.health_supplement;
   if (/กีฬา|แบด|ลูกแบด|fitness|sport|exercise/i.test(haystack)) return SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE.sports_equipment;
   if (/art toy|อาร์ตทอย|ของสะสม|ฟิกเกอร์|collectible|กล่องสุ่ม/i.test(haystack)) return SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE.collectible;
+  const profile = getShopeeProductTypeProfile(rawType, productEntity);
+  if (profile) return profile.mainUseCase;
   return "";
+}
+
+function getShopeeProductTypeProfile(productType?: string, productEntity?: string) {
+  const rawType = normalizeTextEncoding(productType ?? "").trim();
+  const typeKey = normalizeShopeeProductTypeKey(rawType);
+  const directProfile = SHOPEE_PRODUCT_TYPE_PROFILE_BY_TYPE[typeKey];
+  if (directProfile) return directProfile;
+
+  const haystack = `${rawType} ${productEntity ?? ""}`;
+  const profileRules: Array<[RegExp, string]> = [
+    [/เทียนหอม|scented\s?candle|aroma\s?candle|soy\s?wax|apple\s*cranberry/i, "scented_candle"],
+    [/ผ้าปูโต๊ะ|table\s?cloth|tablecloth|กันน้ำ.*โต๊ะ|โต๊ะ.*กันน้ำ/i, "waterproof_tablecloth"],
+    [/sport_shirt|เสื้อกีฬา|sport\s?shirt/i, "sport_shirt"],
+    [/เสื้อ|shirt|t-?shirt|tee|blouse|polo/i, "shirt"],
+    [/กระโปรง|skirt/i, "skirt"],
+    [/เดรส|dress/i, "dress"],
+    [/กางเกง|pants|trousers/i, "pants"],
+    [/สกินแคร์|skincare|serum|เซรั่ม|ครีม|กันแดด|sunscreen|spf|ผิว/i, "skincare"],
+    [/กระบอกน้ำ|ขวดน้ำ|กระติก|แก้วเก็บ|tumbler|drinkware|water\s?bottle/i, "drinkware"],
+    [/หมอนรองคอ|travel_pillow|neck\s?pillow/i, "travel_pillow"],
+    [/กล่องเก็บ|storage\s?box/i, "storage_box"],
+    [/ชั้นวางรองเท้า|shoe\s?rack/i, "shoe_rack"],
+    [/จัดเก็บ|ชั้นวาง|storage|organizer/i, "home_storage"],
+    [/ครัว|ถาดน้ำแข็ง|หม้อ|กระทะ|kitchen|kitchenware/i, "kitchenware"],
+    [/สัตว์เลี้ยง|pet|cat|dog/i, "pet_supply"],
+    [/รถ|automotive|dashcam|กล้องติดรถ|ยาง|จัมป์|แบต/i, "automotive_accessory"],
+    [/มือถือ|หูฟัง|แกดเจ็ต|gadget|electronics|สมาร์ทวอทช์|charger|usb/i, "electronics_accessory"],
+    [/แต่งหน้า|makeup|beauty_tool|แปรงแต่งหน้า|พัฟ|ฟองน้ำ/i, "beauty_tool"],
+    [/ต่างหู|earring/i, "earring"],
+    [/สร้อย|necklace/i, "necklace"],
+    [/แหวน|ring/i, "ring"],
+    [/กำไล|bracelet|bangle/i, "bracelet"],
+    [/เครื่องประดับ|jewelry/i, "jewelry"],
+    [/กระเป๋าสตางค์|wallet/i, "wallet"],
+    [/เป้|backpack/i, "backpack"],
+    [/กระเป๋าถือ|handbag/i, "handbag"],
+    [/กระเป๋า|bag|crossbody/i, "bag"],
+    [/รองเท้า|shoe|sneaker|running_shoes|sport_shoes/i, "shoes"],
+    [/อาหาร|ขนม|snack|food|เครื่องดื่ม|น้ำพริก/i, "food"]
+  ];
+  const mappedType = profileRules.find(([pattern]) => pattern.test(haystack))?.[1];
+  return mappedType ? SHOPEE_PRODUCT_TYPE_PROFILE_BY_TYPE[mappedType] : undefined;
 }
 
 function getShopeeEntityBasedMainUseCase(productEntity?: string) {
   const entity = compactProductText(normalizeTextEncoding(productEntity ?? "").trim(), 64);
   if (!entity || /^(?:สินค้า|ไอเทม|ของใช้ทั่วไป|ไอเทมใช้งานประจำวัน)$/iu.test(entity)) return "";
+  if (/เทียนหอม|scented\s?candle|aroma\s?candle|soy\s?wax|apple\s*cranberry/i.test(entity)) return "ใช้เพิ่มกลิ่นหอมภายในห้อง";
+  if (/ผ้าปูโต๊ะ|table\s?cloth|tablecloth/i.test(entity)) return "ใช้ปูโต๊ะเพื่อกันน้ำและคราบเปื้อน";
   return `ใช้สำหรับ${entity}`;
+}
+
+function getShopeeProductUnderstandingCoverageReport() {
+  return [...shopeeProductUnderstandingCoverageStats.entries()]
+    .map(([productType, stats]) => ({ productType, ...stats }))
+    .sort((a, b) => b.failureCount - a.failureCount || b.missingMainUseCaseCount - a.missingMainUseCaseCount || b.entityCount - a.entityCount);
 }
 
 function logShopeeProductUnderstandingCoverageReport() {
   if (shopeeProductUnderstandingCoverageLogged) return;
   shopeeProductUnderstandingCoverageLogged = true;
   const missingMainUseCaseMapping = SHOPEE_KNOWN_PRODUCT_TYPES.filter((type) => !getShopeeMappedMainUseCase(type, type));
+  const incompleteProductTypeProfiles = SHOPEE_PRODUCT_TYPE_LIBRARY
+    .filter((profile) => !profile.mainUseCase || !profile.targetAudience || !profile.painPoint || !profile.dailyBenefit)
+    .map((profile) => profile.productType);
   console.info("[PRODUCT_UNDERSTANDING_COVERAGE_REPORT]", {
+    coverageReport: getShopeeProductUnderstandingCoverageReport(),
     knownProductTypes: [...SHOPEE_KNOWN_PRODUCT_TYPES],
     mappedProductTypes: Object.keys(SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE),
-    missingMainUseCaseMapping
+    missingMainUseCaseMapping,
+    incompleteProductTypeProfiles
   });
 }
 
@@ -2715,6 +2879,54 @@ function extractShopeeProductEntity(product: ShopeeProductRecord): ShopeeProduct
     product.productDescription,
     getShopeeProductImageSourceText(product)
   ].filter(Boolean).join(" ")).toLowerCase();
+
+  if (/เทียนหอม|scented\s?candle|aroma\s?candle|soy\s?wax|apple\s*cranberry/i.test(haystack)) {
+    const productEntity = /apple\s*cranberry|แอปเปิล\s*แครนเบอร์รี|แอปเปิ้ล\s*แครนเบอร์รี่/i.test(haystack)
+      ? "เทียนหอม Apple Cranberry"
+      : "เทียนหอม";
+    return {
+      rawTitle,
+      cleanedTitle: compactProductText(productEntity, 64) || cleanedTitle,
+      productEntity,
+      brand: extractShopeeKnownBrand(haystack),
+      model: extractShopeeKnownModel(haystack),
+      productType: "scented_candle",
+      whatItIs: "เทียนหอมสำหรับเพิ่มกลิ่นและบรรยากาศในห้อง",
+      mainUseCase: "ใช้เพิ่มกลิ่นหอมภายในห้อง",
+      keySellingPoint: "ช่วยให้มุมพักผ่อนมีกลิ่นหอมและบรรยากาศผ่อนคลายขึ้น",
+      realUsageScenario: "จุดหรือวางในห้องนั่งเล่น ห้องนอน หรือมุมพักผ่อน",
+      targetUser: "คนที่อยากให้ห้องมีกลิ่นหอมและบรรยากาศน่าอยู่",
+      targetAudience: "คนที่อยากให้ห้องมีกลิ่นหอม",
+      captionAngle: "เล่าการใช้เทียนหอมเพื่อเพิ่มกลิ่นในห้องและสร้างบรรยากาศผ่อนคลาย",
+      confidence: 94,
+      removedNoiseWords: titleInfo.removedNoiseWords
+    };
+  }
+
+  if (/ผ้าปูโต๊ะ|table\s?cloth|tablecloth|กันน้ำ.*โต๊ะ|โต๊ะ.*กันน้ำ/i.test(haystack)) {
+    const productEntity = /กันน้ำ|waterproof/i.test(haystack) ? "ผ้าปูโต๊ะกันน้ำ" : "ผ้าปูโต๊ะ";
+    return {
+      rawTitle,
+      cleanedTitle: compactProductText(productEntity, 64) || cleanedTitle,
+      productEntity,
+      brand: extractShopeeKnownBrand(haystack),
+      model: extractShopeeKnownModel(haystack),
+      productType: /กันน้ำ|waterproof/i.test(haystack) ? "waterproof_tablecloth" : "tablecloth",
+      whatItIs: "ผ้าปูโต๊ะสำหรับคลุมโต๊ะและช่วยดูแลพื้นผิวโต๊ะ",
+      mainUseCase: /กันน้ำ|waterproof/i.test(haystack)
+        ? "ใช้ปูโต๊ะเพื่อกันน้ำและคราบเปื้อน"
+        : "ใช้ปูโต๊ะเพื่อแต่งโต๊ะและช่วยลดคราบเปื้อน",
+      keySellingPoint: /กันน้ำ|waterproof/i.test(haystack)
+        ? "ช่วยกันน้ำและเช็ดคราบบนโต๊ะได้ง่ายขึ้น"
+        : "ช่วยให้โต๊ะดูเรียบร้อยและใช้งานได้สบายขึ้น",
+      realUsageScenario: "ปูบนโต๊ะกินข้าว โต๊ะทำงาน หรือโต๊ะอเนกประสงค์",
+      targetUser: "คนที่ใช้โต๊ะกินข้าว โต๊ะทำงาน หรือโต๊ะอเนกประสงค์",
+      targetAudience: "คนที่ใช้โต๊ะกินข้าว โต๊ะทำงาน หรือโต๊ะอเนกประสงค์",
+      captionAngle: "เล่าการใช้ผ้าปูโต๊ะกับโต๊ะจริง เน้นกันน้ำ กันคราบ และเช็ดทำความสะอาดง่าย",
+      confidence: 94,
+      removedNoiseWords: titleInfo.removedNoiseWords
+    };
+  }
 
   if (/tempur|travel\s?pillow|neck\s?pillow|หมอนรองคอ|หมอนเดินทาง/i.test(haystack)) {
     const brand = extractShopeeKnownBrand(haystack);
@@ -2980,6 +3192,20 @@ function getShopeeFallbackUnderstandingDetails(productType: string, haystack: st
     details.confidence = 78;
   }
 
+  const profile = getShopeeProductTypeProfile(details.productType || normalizedType, text);
+  if (profile) {
+    details.productType = details.productType || profile.productType;
+    details.productEntity = details.productEntity || normalizedType;
+    details.whatItIs = details.whatItIs || normalizedType;
+    details.mainUseCase = details.mainUseCase || profile.mainUseCase;
+    details.targetAudience = details.targetAudience || profile.targetAudience;
+    details.keySellingPoint = details.keySellingPoint || profile.dailyBenefit;
+    details.realUsageScenario = details.realUsageScenario || profile.mainUseCase;
+    details.targetUser = details.targetUser || profile.targetAudience;
+    details.captionAngle = details.captionAngle || `เล่าการใช้${details.productEntity || normalizedType}จากสถานการณ์จริง โดยยึดตัวสินค้าเป็นหลัก`;
+    details.confidence = Math.max(details.confidence ?? 0, 72);
+  }
+
   if (details.mainUseCase) {
     details.productEntity = details.productEntity || normalizedType;
     details.whatItIs = details.whatItIs || normalizedType;
@@ -3006,8 +3232,110 @@ function getShopeeProductUnderstandingFailureReasons(understanding: Pick<ShopeeP
   return reasons;
 }
 
+function recordShopeeProductUnderstandingCoverage(understanding: ShopeeProductUnderstanding) {
+  const productType = normalizeShopeeProductTypeKey(understanding.productType) || "unknown";
+  const current = shopeeProductUnderstandingCoverageStats.get(productType) ?? {
+    entityCount: 0,
+    successCount: 0,
+    failureCount: 0,
+    missingMainUseCaseCount: 0
+  };
+  current.entityCount += understanding.productEntity?.trim() ? 1 : 0;
+  if (understanding.failureReasons.length) current.failureCount += 1;
+  else current.successCount += 1;
+  if (understanding.failureReasons.includes("missing_main_use_case")) current.missingMainUseCaseCount += 1;
+  shopeeProductUnderstandingCoverageStats.set(productType, current);
+}
+
+function getFirstValidShopeeProductImageUrl(product: ShopeeProductRecord) {
+  return [
+    ...(product.productImageUrls ?? []),
+    product.productImageUrl
+  ].map((url) => String(url ?? "").trim()).find(Boolean) ?? "";
+}
+
+function normalizeShopeeVisionProductType(productType?: string, productEntity?: string) {
+  const profile = getShopeeProductTypeProfile(productType, productEntity);
+  return profile?.productType || normalizeShopeeProductTypeKey(productType) || normalizeTextEncoding(productType ?? "").trim();
+}
+
+function mergeShopeeVisionUnderstanding(
+  product: ShopeeProductRecord,
+  textUnderstanding: ShopeeProductUnderstanding,
+  vision: ShopeeVisionUnderstandingResult
+): ShopeeProductUnderstanding {
+  const visionProductEntity = compactProductText(normalizeTextEncoding(vision.visionProductEntity || ""), 80);
+  const visionProductType = normalizeShopeeVisionProductType(vision.visionProductType, visionProductEntity);
+  const visionMainUseCase = compactProductText(
+    normalizeTextEncoding(
+      vision.visionMainUseCase ||
+      getShopeeMappedMainUseCase(visionProductType, visionProductEntity) ||
+      getShopeeEntityBasedMainUseCase(visionProductEntity)
+    ),
+    120
+  );
+  const visionTargetAudience = compactProductText(normalizeTextEncoding(vision.visionTargetAudience || ""), 100);
+  const useVisionPrimary = vision.visionConfidence >= 75 && textUnderstanding.confidence < 80;
+  const visionWinsDisagreement = vision.visionConfidence > textUnderstanding.confidence && (
+    Boolean(visionProductType && visionProductType !== normalizeShopeeProductTypeKey(textUnderstanding.productType)) ||
+    Boolean(visionProductEntity && visionProductEntity !== textUnderstanding.productEntity)
+  );
+  const shouldUseVision = useVisionPrimary || visionWinsDisagreement;
+  const productEntity = shouldUseVision && visionProductEntity ? visionProductEntity : textUnderstanding.productEntity;
+  const productType = shouldUseVision && visionProductType ? visionProductType : textUnderstanding.productType;
+  const mainUseCase = shouldUseVision && visionMainUseCase
+    ? visionMainUseCase
+    : textUnderstanding.mainUseCase || getShopeeMappedMainUseCase(productType, productEntity) || getShopeeEntityBasedMainUseCase(productEntity);
+  const targetAudience = shouldUseVision && visionTargetAudience
+    ? visionTargetAudience
+    : textUnderstanding.targetAudience;
+  const confidence = shouldUseVision
+    ? Math.max(vision.visionConfidence, textUnderstanding.confidence)
+    : textUnderstanding.confidence;
+  const merged: ShopeeProductUnderstanding = {
+    ...textUnderstanding,
+    productEntity,
+    cleanedTitle: shouldUseVision && visionProductEntity ? visionProductEntity : textUnderstanding.cleanedTitle,
+    productType,
+    whatItIs: shouldUseVision && visionProductEntity ? visionProductEntity : textUnderstanding.whatItIs,
+    mainUseCase,
+    targetAudience,
+    targetUser: targetAudience || textUnderstanding.targetUser,
+    keySellingPoint: shouldUseVision && visionProductEntity
+      ? textUnderstanding.keySellingPoint || `ช่วยให้เลือกใช้${visionProductEntity}ได้ตรงกับสินค้าที่เห็นจริง`
+      : textUnderstanding.keySellingPoint,
+    realUsageScenario: shouldUseVision && mainUseCase
+      ? mainUseCase
+      : textUnderstanding.realUsageScenario,
+    captionAngle: shouldUseVision && productEntity
+      ? `เล่าการใช้${productEntity}จากตัวสินค้าที่เห็นจริง โดยไม่อ้างหมวดกว้าง`
+      : textUnderstanding.captionAngle,
+    confidence,
+    source: shouldUseVision ? "vision_rescue" : "merged",
+    fallbackUsed: textUnderstanding.fallbackUsed || shouldUseVision,
+    visualEvidence: vision.visualEvidence,
+    failureReasons: []
+  };
+  merged.failureReasons = getShopeeProductUnderstandingFailureReasons(merged);
+  merged.recognitionStatus = merged.failureReasons.length
+    ? "failed"
+    : merged.fallbackUsed
+      ? "fallback"
+      : "recognized";
+  recordShopeeProductUnderstandingCoverage(merged);
+  console.info("[PRODUCT_UNDERSTANDING_MERGED]", {
+    productId: product.productId,
+    source: merged.source,
+    productEntity: merged.productEntity,
+    productType: merged.productType,
+    mainUseCase: merged.mainUseCase,
+    targetAudience: merged.targetAudience,
+    confidence: merged.confidence
+  });
+  return merged;
+}
+
 function extractShopeeProductUnderstanding(product: ShopeeProductRecord): ShopeeProductUnderstanding {
-  logShopeeProductUnderstandingCoverageReport();
   const entity = extractShopeeProductEntity(product);
   const haystack = getShopeeStoryboardInputText({
     ...product,
@@ -3023,6 +3351,13 @@ function extractShopeeProductUnderstanding(product: ShopeeProductRecord): Shopee
   const mappedMainUseCase = getShopeeMappedMainUseCase(productType, productEntity);
   const entityBridgeMainUseCase = productEntity && imageCount > 0 ? getShopeeEntityBasedMainUseCase(productEntity) : "";
   const mainUseCase = entity.mainUseCase || fallback.mainUseCase || mappedMainUseCase || entityBridgeMainUseCase || "";
+  const fallbackUsed = Boolean(
+    (!entity.mainUseCase && fallback.mainUseCase) ||
+    (!entity.mainUseCase && !fallback.mainUseCase && mappedMainUseCase) ||
+    (!entity.mainUseCase && !fallback.mainUseCase && !mappedMainUseCase && entityBridgeMainUseCase) ||
+    (fallback.productType && fallback.productType !== entity.productType) ||
+    (fallback.productEntity && fallback.productEntity !== entity.productEntity)
+  );
   const bridgeKeySellingPoint = entityBridgeMainUseCase
     ? `ช่วยให้เลือกใช้${productEntity}ได้ตรงกับประเภทสินค้า`
     : "";
@@ -3041,11 +3376,38 @@ function extractShopeeProductUnderstanding(product: ShopeeProductRecord): Shopee
     targetAudience: entity.targetAudience || fallback.targetAudience || entity.targetUser || fallback.targetUser || "",
     captionAngle: entity.captionAngle || fallback.captionAngle || (entityBridgeMainUseCase ? `เล่าการใช้${productEntity}แบบระวังไม่เดาคุณสมบัติเกินจริง` : ""),
     confidence: Math.max(entity.confidence ?? 0, fallback.confidence ?? 0),
-    source: "rule_entity_extraction",
+    source: "text",
+    fallbackUsed,
+    recognitionStatus: "recognized",
     failureReasons: []
   };
   understanding.failureReasons = getShopeeProductUnderstandingFailureReasons(understanding);
+  understanding.recognitionStatus = understanding.failureReasons.length
+    ? "failed"
+    : fallbackUsed
+      ? "fallback"
+      : "recognized";
+  recordShopeeProductUnderstandingCoverage(understanding);
+  logShopeeProductUnderstandingCoverageReport();
   return understanding;
+}
+
+function getShopeeProductUnderstandingAuditPayload(product: ShopeeProductRecord, understanding: ShopeeProductUnderstanding) {
+  return {
+    ...getShopeeProductUnderstandingDebugPayload(product, understanding),
+    source: understanding.source,
+    recognitionStatus: understanding.recognitionStatus,
+    fallbackUsed: understanding.fallbackUsed,
+    visualEvidence: understanding.visualEvidence ?? [],
+    captionInput: {
+      productEntity: understanding.productEntity,
+      productType: understanding.productType,
+      mainUseCase: understanding.mainUseCase,
+      targetAudience: understanding.targetAudience,
+      confidence: understanding.confidence
+    },
+    coverageReport: getShopeeProductUnderstandingCoverageReport().slice(0, 50)
+  };
 }
 
 function getShopeeProductUnderstandingDebugPayload(product: ShopeeProductRecord, understanding: ShopeeProductUnderstanding) {
@@ -3647,6 +4009,8 @@ function inferShopeeFallbackProductType(product: ShopeeProductRecord, haystack: 
     .trim();
 
   const rules: Array<[RegExp, string]> = [
+    [/เทียนหอม|scented\s?candle|aroma\s?candle|soy\s?wax|apple\s*cranberry/i, "scented_candle"],
+    [/ผ้าปูโต๊ะ|table\s?cloth|tablecloth|กันน้ำ.*โต๊ะ|โต๊ะ.*กันน้ำ/i, /กันน้ำ|waterproof/i.test(haystack) ? "waterproof_tablecloth" : "tablecloth"],
     [/เครื่องกรองน้ำ|กรองน้ำ|น้ำดื่ม|coway|โคเวย์|water\s?(?:purifier|filter)/i, "เครื่องกรองน้ำ"],
     [/กล้องติดรถ|กล้องหน้ารถ|dash\s?cam|car\s?camera|drive\s?recorder|บันทึกภาพรถ|กล้องรถ|gps\s*built/i, "กล้องติดรถยนต์"],
     [/จัมป์สตาร์ท|jump\s?starter|แบตเตอรี่รถ|เติมลม|ยางรถ|รถยนต์|automotive/i, "อุปกรณ์รถยนต์"],
@@ -5727,7 +6091,7 @@ export async function generateShopeeCaption(input: {
 }) {
   const { product } = input;
   const titleInfo = getShopeeCleanedProductTitleInfo(product.productName);
-  const productUnderstanding = extractShopeeProductUnderstanding(product);
+  let productUnderstanding = extractShopeeProductUnderstanding(product);
   const imageCount = [product.productImageUrl, ...(product.productImageUrls ?? [])].filter((url) => Boolean(url?.trim())).length;
 
   await logShopeePackageStage({
@@ -5756,6 +6120,124 @@ export async function generateShopeeCaption(input: {
     userId: input.userId,
     jobId: input.jobId,
     product,
+    step: "TEXT_UNDERSTANDING_RESULT",
+    status: productUnderstanding.failureReasons.length ? "failed" : "success",
+    message: "Text-only product understanding completed",
+    metadata: {
+      productId: product.productId,
+      cleanTitle: productUnderstanding.cleanedTitle || titleInfo.cleanedTitle,
+      productEntity: productUnderstanding.productEntity,
+      productType: productUnderstanding.productType,
+      mainUseCase: productUnderstanding.mainUseCase,
+      targetAudience: productUnderstanding.targetAudience,
+      confidence: productUnderstanding.confidence
+    }
+  });
+
+  const rescueImageUrl = getFirstValidShopeeProductImageUrl(product);
+  let productUnderstandingMergedLogged = false;
+  if (productUnderstanding.confidence < 80 && rescueImageUrl && imageCount > 0) {
+    await logShopeePackageStage({
+      userId: input.userId,
+      jobId: input.jobId,
+      product,
+      step: "VISION_RESCUE_TRIGGERED",
+      status: "started",
+      message: "Text confidence is low; running vision rescue on the first product image",
+      metadata: {
+        productId: product.productId,
+        reason: "low_confidence",
+        textConfidence: productUnderstanding.confidence,
+        imageUrl: rescueImageUrl
+      }
+    });
+
+    try {
+      const visionUnderstanding = await analyzeShopeeProductImageUnderstanding({
+        imageUrl: rescueImageUrl,
+        productTitle: product.productName,
+        productDescription: product.productDescription,
+        timeoutMs: VISION_RESCUE_TIMEOUT_MS
+      });
+      await logShopeePackageStage({
+        userId: input.userId,
+        jobId: input.jobId,
+        product,
+        step: "VISION_UNDERSTANDING_RESULT",
+        status: visionUnderstanding.visionConfidence >= 75 ? "success" : "failed",
+        message: "Vision rescue returned product understanding",
+        metadata: {
+          productId: product.productId,
+          visionProductEntity: visionUnderstanding.visionProductEntity,
+          visionProductType: visionUnderstanding.visionProductType,
+          visionMainUseCase: visionUnderstanding.visionMainUseCase,
+          visionTargetAudience: visionUnderstanding.visionTargetAudience,
+          visionConfidence: visionUnderstanding.visionConfidence,
+          visualEvidence: visionUnderstanding.visualEvidence
+        }
+      });
+      productUnderstanding = mergeShopeeVisionUnderstanding(product, productUnderstanding, visionUnderstanding);
+      await logShopeePackageStage({
+        userId: input.userId,
+        jobId: input.jobId,
+        product,
+        step: "PRODUCT_UNDERSTANDING_MERGED",
+        status: productUnderstanding.failureReasons.length ? "failed" : "success",
+        message: "Text and vision understanding merged before Storyboard",
+        metadata: {
+          productId: product.productId,
+          source: productUnderstanding.source,
+          productEntity: productUnderstanding.productEntity,
+          productType: productUnderstanding.productType,
+          mainUseCase: productUnderstanding.mainUseCase,
+          targetAudience: productUnderstanding.targetAudience,
+          confidence: productUnderstanding.confidence
+        }
+      });
+      productUnderstandingMergedLogged = true;
+    } catch (error) {
+      await logShopeePackageStage({
+        userId: input.userId,
+        jobId: input.jobId,
+        product,
+        step: "VISION_RESCUE_FAILED",
+        status: "failed",
+        message: "Vision rescue failed; falling back to text understanding if validation allows it",
+        metadata: {
+          productId: product.productId,
+          reason: "vision_rescue_failed",
+          textConfidence: productUnderstanding.confidence,
+          imageUrl: rescueImageUrl
+        },
+        error
+      });
+    }
+  }
+
+  if (!productUnderstandingMergedLogged) {
+    await logShopeePackageStage({
+      userId: input.userId,
+      jobId: input.jobId,
+      product,
+      step: "PRODUCT_UNDERSTANDING_MERGED",
+      status: productUnderstanding.failureReasons.length ? "failed" : "success",
+      message: "Final product understanding selected before Storyboard",
+      metadata: {
+        productId: product.productId,
+        source: productUnderstanding.source,
+        productEntity: productUnderstanding.productEntity,
+        productType: productUnderstanding.productType,
+        mainUseCase: productUnderstanding.mainUseCase,
+        targetAudience: productUnderstanding.targetAudience,
+        confidence: productUnderstanding.confidence
+      }
+    });
+  }
+
+  await logShopeePackageStage({
+    userId: input.userId,
+    jobId: input.jobId,
+    product,
     step: "PRODUCT_UNDERSTANDING_STARTED",
     status: "started",
     message: "Extracting Shopee product entity, type, use case, and target audience",
@@ -5764,6 +6246,16 @@ export async function generateShopeeCaption(input: {
       rawTitle: titleInfo.rawTitle,
       cleanedTitle: productUnderstanding.cleanedTitle || titleInfo.cleanedTitle
     }
+  });
+
+  await logShopeePackageStage({
+    userId: input.userId,
+    jobId: input.jobId,
+    product,
+    step: "PRODUCT_UNDERSTANDING_AUDIT",
+    status: productUnderstanding.failureReasons.length ? "failed" : "success",
+    message: "Product understanding audit captured before Storyboard and Caption",
+    metadata: getShopeeProductUnderstandingAuditPayload(product, productUnderstanding)
   });
 
   try {

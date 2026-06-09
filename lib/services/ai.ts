@@ -30,6 +30,15 @@ type MultiImagePersonalityReply = {
   replyText: string;
 };
 
+export type ShopeeVisionUnderstandingResult = {
+  visionProductEntity: string;
+  visionProductType: string;
+  visionMainUseCase: string;
+  visionTargetAudience: string;
+  visionConfidence: number;
+  visualEvidence: string[];
+};
+
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
@@ -44,6 +53,10 @@ export function getAnalyticsModel() {
 
 export function getLightweightModel() {
   return process.env.OPENAI_LIGHT_MODEL || "gpt-5-nano";
+}
+
+export function getVisionModel() {
+  return process.env.OPENAI_VISION_MODEL || process.env.OPENAI_CONTENT_MODEL || "gpt-5-mini";
 }
 
 export function getImageModel() {
@@ -283,6 +296,84 @@ export async function generateFacebookContent(keyword: string, options: Generate
     return parsed.variants;
   } catch {
     return getFallbackVariants(options.userId ?? null, keyword);
+  }
+}
+
+export async function analyzeShopeeProductImageUnderstanding(input: {
+  imageUrl: string;
+  productTitle?: string;
+  productDescription?: string;
+  timeoutMs?: number;
+}): Promise<ShopeeVisionUnderstandingResult> {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error("OpenAI vision rescue is not configured: missing OPENAI_API_KEY");
+  }
+
+  const timeoutMs = Math.max(1_000, input.timeoutMs ?? 30_000);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort(new Error(`Vision rescue timeout after ${timeoutMs}ms`));
+  }, timeoutMs);
+
+  try {
+    const result = await client.responses.create({
+      model: getVisionModel(),
+      input: [
+        {
+          role: "system",
+          content:
+            "You analyze Shopee product images for product understanding only. Return strict JSON only. Identify the actual main product shown, not decorative background. Do not infer unrelated categories. Use concise Thai for entity/use case/audience and snake_case for product type when possible."
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: `Analyze this Shopee product image.
+
+Return JSON only:
+
+{
+"visionProductEntity": "",
+"visionProductType": "",
+"visionMainUseCase": "",
+"visionTargetAudience": "",
+"visionConfidence": 0,
+"visualEvidence": []
+}
+
+Rules:
+* Identify the actual product shown in the image.
+* Focus on the main product, not decorative background.
+* Do not infer unrelated categories.
+* If the product looks like a candle, return scented_candle or candle.
+* If it is a table cover, return tablecloth or waterproof_tablecloth.
+* If it is jewelry, return necklace/earring/bracelet/ring as appropriate.
+* If unsure, set confidence below 70.
+
+Optional text context, only for disambiguation:
+Title: ${input.productTitle ?? ""}
+Description: ${input.productDescription ?? ""}`
+            },
+            { type: "input_image", image_url: input.imageUrl, detail: "high" }
+          ]
+        }
+      ]
+    }, { signal: controller.signal });
+
+    const parsed = JSON.parse(extractJson(result.output_text)) as Partial<ShopeeVisionUnderstandingResult>;
+    return {
+      visionProductEntity: normalizeExtractedText(String(parsed.visionProductEntity ?? "")),
+      visionProductType: normalizeExtractedText(String(parsed.visionProductType ?? "")),
+      visionMainUseCase: normalizeExtractedText(String(parsed.visionMainUseCase ?? "")),
+      visionTargetAudience: normalizeExtractedText(String(parsed.visionTargetAudience ?? "")),
+      visionConfidence: Math.max(0, Math.min(100, Number(parsed.visionConfidence ?? 0) || 0)),
+      visualEvidence: Array.isArray(parsed.visualEvidence)
+        ? parsed.visualEvidence.map((item) => normalizeExtractedText(String(item))).filter(Boolean).slice(0, 8)
+        : []
+    };
+  } finally {
+    clearTimeout(timeout);
   }
 }
 

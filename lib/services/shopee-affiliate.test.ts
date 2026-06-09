@@ -42,6 +42,10 @@ function readShopeeAffiliateServiceSource() {
   return readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "shopee-affiliate.ts"), "utf8");
 }
 
+function readAiServiceSource() {
+  return readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "ai.ts"), "utf8");
+}
+
 function sourceBetween(source: string, start: string, end: string) {
   const startIndex = source.indexOf(start);
   const endIndex = source.indexOf(end, startIndex + start.length);
@@ -233,10 +237,18 @@ function testShopeeSourceSpecificSelectionGuards() {
 
 function testProductUnderstandingMainUseCaseCoverage() {
   const source = readShopeeAffiliateServiceSource();
-  const knownSource = sourceBetween(source, "const SHOPEE_KNOWN_PRODUCT_TYPES", "const SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE");
+  const librarySource = sourceBetween(source, "const SHOPEE_PRODUCT_TYPE_LIBRARY", "const SHOPEE_KNOWN_PRODUCT_TYPES");
   const mappingSource = sourceBetween(source, "const SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE", "let shopeeProductUnderstandingCoverageLogged");
   const extractionSource = sourceBetween(source, "function extractShopeeProductUnderstanding", "function getShopeeProductUnderstandingDebugPayload");
   const requiredProductTypes = [
+    "scented_candle",
+    "waterproof_tablecloth",
+    "storage_box",
+    "shoe_rack",
+    "pet_feeder",
+    "pet_bed",
+    "travel_bottle",
+    "thermal_cup",
     "apparel",
     "sport_shirt",
     "skincare",
@@ -249,24 +261,77 @@ function testProductUnderstandingMainUseCaseCoverage() {
     "electronics_accessory",
     "beauty_tool",
     "jewelry",
+    "necklace",
+    "earring",
+    "bracelet",
+    "wallet",
+    "backpack",
+    "handbag",
+    "car_phone_holder",
+    "car_vacuum",
+    "phone_case",
+    "charging_cable",
+    "power_bank",
+    "kitchen_container",
+    "ice_tray",
+    "water_filter",
     "bag",
     "shoes",
     "food"
   ];
+  const productTypeMatches = Array.from(librarySource.matchAll(/\["([a-z0-9_]+)",/g)).map((match) => match[1]);
+  const uniqueProductTypes = new Set(productTypeMatches);
+  assert.ok(uniqueProductTypes.size >= 100, `Expected at least 100 product types, found ${uniqueProductTypes.size}`);
 
   for (const productType of requiredProductTypes) {
-    assert.ok(knownSource.includes(`"${productType}"`), `Missing known productType ${productType}`);
-    assert.ok(mappingSource.includes(`${productType}:`), `Missing mainUseCase mapping for ${productType}`);
+    assert.ok(uniqueProductTypes.has(productType), `Missing productType library entry ${productType}`);
   }
+  for (const profileField of ["mainUseCase", "targetAudience", "painPoint", "dailyBenefit"]) {
+    assert.ok(librarySource.includes(profileField), `Missing Product Type Library field ${profileField}`);
+  }
+  assert.ok(mappingSource.includes("SHOPEE_PRODUCT_TYPE_LIBRARY.map((item) => [item.productType, item.mainUseCase])"));
   assert.ok(source.includes("PRODUCT_UNDERSTANDING_COVERAGE_REPORT"));
+  assert.ok(source.includes("PRODUCT_UNDERSTANDING_AUDIT"));
+  assert.ok(source.includes("TEXT_UNDERSTANDING_RESULT"));
+  assert.ok(source.includes("VISION_RESCUE_TRIGGERED"));
+  assert.ok(source.includes("VISION_UNDERSTANDING_RESULT"));
+  assert.ok(source.includes("VISION_RESCUE_FAILED"));
+  assert.ok(source.includes("PRODUCT_UNDERSTANDING_MERGED"));
+  assert.ok(source.includes("VISION_RESCUE_TIMEOUT_MS = 30_000"));
+  assert.ok(source.includes("productUnderstanding.confidence < 80"));
+  assert.ok(source.includes("getFirstValidShopeeProductImageUrl"));
+  assert.ok(source.includes("analyzeShopeeProductImageUnderstanding"));
+  assert.ok(source.includes("coverageReport"));
   assert.ok(source.includes("missingMainUseCaseMapping"));
+  assert.ok(source.includes("incompleteProductTypeProfiles"));
   assert.ok(source.includes("getShopeeEntityBasedMainUseCase"));
+  assert.ok(source.includes("ใช้เพิ่มกลิ่นหอมภายในห้อง"));
+  assert.ok(source.includes("ใช้ปูโต๊ะเพื่อกันน้ำและคราบเปื้อน"));
+  assert.ok(source.includes("getShopeeProductUnderstandingAuditPayload"));
+  assert.ok(source.includes("captionInput"));
   assert.ok(extractionSource.includes("mappedMainUseCase"));
   assert.ok(extractionSource.includes("entityBridgeMainUseCase"));
   assert.ok(extractionSource.includes("imageCount > 0"));
+  assert.ok(extractionSource.includes("fallbackUsed"));
+  assert.ok(extractionSource.includes("recognitionStatus"));
   assert.ok(source.includes("function humanizeShopeeStoryboardCaptionLine"));
   assert.ok(source.includes("entityBridgeMatch"));
   console.log("PASS Shopee product understanding mainUseCase coverage");
+}
+
+function testShopeeVisionRescueUsesActualImageInput() {
+  const source = readAiServiceSource();
+  const visionSource = sourceBetween(source, "export async function analyzeShopeeProductImageUnderstanding", "export async function generateOptimizationSuggestions");
+  assert.ok(visionSource.includes("{ type: \"input_image\", image_url: input.imageUrl, detail: \"high\" }"));
+  assert.ok(visionSource.includes("Analyze this Shopee product image"));
+  assert.ok(visionSource.includes("visionProductEntity"));
+  assert.ok(visionSource.includes("visionProductType"));
+  assert.ok(visionSource.includes("visionMainUseCase"));
+  assert.ok(visionSource.includes("visionTargetAudience"));
+  assert.ok(visionSource.includes("visionConfidence"));
+  assert.ok(visionSource.includes("visualEvidence"));
+  assert.ok(visionSource.includes("controller.abort"));
+  console.log("PASS Shopee vision rescue uses actual image input");
 }
 
 await testMockProviderReturnsProducts();
@@ -283,3 +348,4 @@ testImagePromptSetCreatesFourConsistentPrompts();
 testStoryboardCaptionSourceUsesProductEntityGuards();
 testShopeeSourceSpecificSelectionGuards();
 testProductUnderstandingMainUseCaseCoverage();
+testShopeeVisionRescueUsesActualImageInput();
