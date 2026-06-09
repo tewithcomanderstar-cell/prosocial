@@ -9,6 +9,7 @@ import {
   analyzeShopeeProductImageUnderstanding,
   generateFacebookContent,
   generateProductReferenceImage,
+  getContentModel,
   type ShopeeVisionUnderstandingResult
 } from "@/lib/services/ai";
 import { assertNoLargeMongoFields, uploadAutoPostImage } from "@/lib/services/blob-storage";
@@ -4468,6 +4469,160 @@ function buildShopeeStoryboardCtaLine(storyboard: ShopeeProductStoryboard) {
   return `🛒 ดูรายละเอียด${productLabel}ได้ที่ลิงก์ด้านล่าง`;
 }
 
+type ShopeeCaptionPromptInput = {
+  productName: string;
+  productDescription: string;
+  keySellingPoints: string[];
+  affiliateLink: string;
+  storyboardSummary: {
+    productEntity: string;
+    productType: string;
+    mainUseCase: string;
+    targetAudience: string;
+    problemSolved: string;
+    dailyBenefit: string;
+    realUsageScenario: string;
+    captionAngle: string;
+  };
+};
+
+type ShopeeStoryboardCaptionResult = {
+  caption: string;
+  fallbackUsed: boolean;
+  fallbackReason?: string;
+  diagnostics: ReturnType<typeof getShopeeCaptionGenerationDiagnostics>;
+};
+
+function getShopeeCaptionPromptInput(input: {
+  product: ShopeeProductRecord;
+  storyboard: ShopeeProductStoryboard;
+  affiliateLink: string;
+}): ShopeeCaptionPromptInput {
+  const { product, storyboard, affiliateLink } = input;
+  const description = compactProductText(product.productDescription, 900);
+  const keySellingPoints = [
+    storyboard.keySellingPoint,
+    storyboard.problemSolved,
+    storyboard.dailyBenefit,
+    storyboard.emotionalBenefit,
+    storyboard.realUsageScenario
+  ]
+    .map((item) => compactProductText(humanizeShopeeStoryboardCaptionLine(item, storyboard), 120))
+    .filter(Boolean);
+  return {
+    productName: product.productName || storyboard.productEntity || storyboard.productSimpleName || "สินค้า Shopee",
+    productDescription: description,
+    keySellingPoints: Array.from(new Set(keySellingPoints)).slice(0, 5),
+    affiliateLink,
+    storyboardSummary: {
+      productEntity: storyboard.productEntity,
+      productType: storyboard.productType,
+      mainUseCase: storyboard.mainUseCase,
+      targetAudience: storyboard.targetUser,
+      problemSolved: storyboard.problemSolved,
+      dailyBenefit: storyboard.dailyBenefit,
+      realUsageScenario: storyboard.realUsageScenario,
+      captionAngle: storyboard.captionAngle
+    }
+  };
+}
+
+function getShopeeCaptionPromptLength(promptInput: ShopeeCaptionPromptInput) {
+  return JSON.stringify(promptInput).length;
+}
+
+function getShopeeCaptionRawResponseParseError(error: unknown) {
+  if (!(error instanceof ShopeeProviderError) || !error.responseSummary) return null;
+  try {
+    JSON.parse(error.responseSummary);
+    return null;
+  } catch (parseError) {
+    return parseError instanceof Error ? parseError.message : String(parseError);
+  }
+}
+
+function getShopeeCaptionGenerationDiagnostics(input: {
+  error?: unknown;
+  product: ShopeeProductRecord;
+  storyboard: ShopeeProductStoryboard;
+  affiliateLink: string;
+  promptInput: ShopeeCaptionPromptInput;
+  captionRetryCount?: number;
+}) {
+  const { error, product, storyboard, promptInput } = input;
+  return {
+    errorName: error instanceof Error ? error.name : error ? "NonError" : null,
+    errorMessage: error instanceof Error ? error.message : error ? String(error) : null,
+    errorCode: error instanceof ShopeeProviderError ? error.code : null,
+    provider: getShopeeStoryboardProvider(),
+    model: getContentModel(),
+    promptLength: getShopeeCaptionPromptLength(promptInput),
+    productId: product.productId,
+    productName: product.productName || storyboard.productEntity,
+    storyboardId: `${product.productId}:${storyboard.productType}:${storyboard.productEntity}`,
+    storyboardStatus: validateShopeeProductStoryboard(storyboard) ? "created" : "invalid",
+    rawResponseParseError: getShopeeCaptionRawResponseParseError(error),
+    captionRetryCount: input.captionRetryCount ?? 0,
+    hasProductName: Boolean(promptInput.productName.trim()),
+    hasProductDescription: Boolean(promptInput.productDescription.trim()),
+    keySellingPointCount: promptInput.keySellingPoints.length,
+    hasAffiliateLink: Boolean(input.affiliateLink.trim()),
+    storyboardSummary: promptInput.storyboardSummary
+  };
+}
+
+function buildShopeeFallbackCaptionBullets(storyboard: ShopeeProductStoryboard) {
+  const fallbackBullets = [
+    storyboard.dailyBenefit,
+    storyboard.realUsageScenario,
+    storyboard.keySellingPoint,
+    storyboard.problemSolved
+  ]
+    .map((item) => compactProductText(humanizeShopeeStoryboardCaptionLine(item, storyboard), 72).replace(/[.!。?？]+$/u, ""))
+    .filter(Boolean);
+  const specificFallbacks = [
+    `${getShopeeEntityActionText(storyboard)}ได้ตรงกับจังหวะใช้งานจริง`,
+    `ใช้ใน${getShopeeEntityContextText(storyboard)}ได้เหมาะกว่าเลือกแบบกว้าง ๆ`,
+    compactProductText(storyboard.mainUseCase, 72),
+    compactProductText(storyboard.captionAngle, 72)
+  ].filter(Boolean);
+  return dedupeCaptionBenefitLines([...fallbackBullets, ...specificFallbacks])
+    .slice(0, 4)
+    .map((line) => `✓ ${line}`);
+}
+
+function buildDeterministicShopeeFallbackCaption(input: {
+  product: ShopeeProductRecord;
+  storyboard: ShopeeProductStoryboard;
+  affiliateLink: string;
+}) {
+  const { product, storyboard, affiliateLink } = input;
+  const productLabel = getShopeeStoryboardProductLabel(storyboard);
+  const action = compactProductText(getShopeeEntityActionText(storyboard), 64);
+  const context = compactProductText(getShopeeEntityContextText(storyboard), 74);
+  const opening = `${getShopeeStoryboardEmoji(storyboard.productType)} เห็น${productLabel}แล้วนึกถึงตอนต้อง${action}`;
+  const naturalIntro = [
+    `${productLabel}ตัวนี้เหมาะกับคนที่อยากได้ของที่ตรงกับการใช้จริง ไม่ต้องเดาจากหมวดกว้าง ๆ`,
+    context ? `ใช้กับ${context}ได้ค่อนข้างชัด เหมาะกับคนที่เลือกของจากสถานการณ์ใช้งานจริง` : "",
+    compactProductText(formatShopeeStoryboardPriceLine(product, storyboard), 90)
+  ].filter(Boolean);
+  const bullets = buildShopeeFallbackCaptionBullets(storyboard);
+  const caption = [
+    opening,
+    "",
+    naturalIntro.join(" "),
+    "",
+    ...bullets,
+    "",
+    `เหมาะกับคนที่กำลังมองหา${productLabel} ใช้งานจริงครับ`,
+    "",
+    buildShopeeStoryboardCtaLine(storyboard),
+    "",
+    formatShopeeShortLinkLine(affiliateLink)
+  ].join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  return normalizeShopeeCaptionLinkLine(caption, affiliateLink);
+}
+
 function getShopeeCaptionHumanReadableLines(caption: string) {
   return normalizeTextEncoding(caption)
     .split(/\r?\n/)
@@ -4934,11 +5089,26 @@ function buildShopeeStoryboardCaption(input: {
   affiliateLink: string;
   jobId?: string;
 }) {
+  return buildShopeeStoryboardCaptionResult(input).caption;
+}
+
+function buildShopeeStoryboardCaptionResult(input: {
+  product: ShopeeProductRecord;
+  storyboard: ShopeeProductStoryboard;
+  affiliateLink: string;
+  jobId?: string;
+}): ShopeeStoryboardCaptionResult {
   const { product, storyboard, affiliateLink } = input;
+  const promptInput = getShopeeCaptionPromptInput({ product, storyboard, affiliateLink });
   const captionInputJson = {
     jobId: input.jobId ?? "",
     productId: product.productId,
     productName: product.productName,
+    productDescription: promptInput.productDescription,
+    keySellingPoints: promptInput.keySellingPoints,
+    affiliateLink,
+    promptLength: getShopeeCaptionPromptLength(promptInput),
+    storyboardSummary: promptInput.storyboardSummary,
     productEntity: storyboard.productEntity,
     productType: storyboard.productType,
     mainUseCase: storyboard.mainUseCase,
@@ -4955,6 +5125,12 @@ function buildShopeeStoryboardCaption(input: {
     productId: product.productId,
     composer: "buildShopeeStoryboardCaption",
     source: "deterministic_storyboard_builder",
+    promptLength: getShopeeCaptionPromptLength(promptInput),
+    hasProductName: Boolean(promptInput.productName.trim()),
+    hasProductDescription: Boolean(promptInput.productDescription.trim()),
+    keySellingPointCount: promptInput.keySellingPoints.length,
+    hasAffiliateLink: Boolean(affiliateLink.trim()),
+    hasStoryboardSummary: Boolean(promptInput.storyboardSummary.productEntity && promptInput.storyboardSummary.mainUseCase),
     instruction: "Compose Thai seller-style caption from productEntity, productType, mainUseCase, and human benefit lines. Do not render metadata field names or labels such as usageContext/mainUseCase/productEntity/targetAudience."
   });
   const benefits = buildShopeeStoryboardBenefits(storyboard);
@@ -4983,7 +5159,57 @@ function buildShopeeStoryboardCaption(input: {
     captionPreview: caption.slice(0, 700),
     benefitLines: benefits
   });
-  const normalizedCaption = validateStoryboardAffiliateCaption(normalizeShopeeCaptionLinkLine(caption, affiliateLink), storyboard, product, affiliateLink, input.jobId);
+  let normalizedCaption: string;
+  try {
+    normalizedCaption = validateStoryboardAffiliateCaption(normalizeShopeeCaptionLinkLine(caption, affiliateLink), storyboard, product, affiliateLink, input.jobId);
+  } catch (error) {
+    const diagnostics = getShopeeCaptionGenerationDiagnostics({
+      error,
+      product,
+      storyboard,
+      affiliateLink,
+      promptInput
+    });
+    console.warn("[CAPTION_GENERATION_ERROR_DETAIL]", diagnostics);
+    const fallbackCaption = buildDeterministicShopeeFallbackCaption({ product, storyboard, affiliateLink });
+    console.info("[CAPTION_FALLBACK_RAW_OUTPUT]", {
+      jobId: input.jobId ?? "",
+      productId: product.productId,
+      composer: "deterministic_thai_fallback",
+      captionPreview: fallbackCaption.slice(0, 700),
+      fallbackReason: diagnostics.errorCode ?? diagnostics.errorMessage ?? "caption_generation_failed"
+    });
+    try {
+      const normalizedFallbackCaption = validateStoryboardAffiliateCaption(fallbackCaption, storyboard, product, affiliateLink, input.jobId);
+      console.info("[CAPTION_FALLBACK_USED]", {
+        jobId: input.jobId ?? "",
+        productId: product.productId,
+        productName: product.productName,
+        provider: "deterministic_fallback",
+        model: "rule",
+        originalErrorName: diagnostics.errorName,
+        originalErrorMessage: diagnostics.errorMessage,
+        originalErrorCode: diagnostics.errorCode,
+        promptLength: diagnostics.promptLength,
+        captionPreview: normalizedFallbackCaption.slice(0, 500)
+      });
+      return {
+        caption: assertValidTextEncoding(normalizedFallbackCaption, "Shopee storyboard fallback caption"),
+        fallbackUsed: true,
+        fallbackReason: diagnostics.errorCode ?? diagnostics.errorMessage ?? "caption_generation_failed",
+        diagnostics
+      };
+    } catch (fallbackError) {
+      console.warn("[CAPTION_FALLBACK_FAILED]", getShopeeCaptionGenerationDiagnostics({
+        error: fallbackError,
+        product,
+        storyboard,
+        affiliateLink,
+        promptInput
+      }));
+      throw error;
+    }
+  }
   console.info("[CAPTION_POST_PROCESS]", {
     jobId: input.jobId ?? "",
     productId: product.productId,
@@ -4991,10 +5217,19 @@ function buildShopeeStoryboardCaption(input: {
     captionPreview: normalizedCaption.slice(0, 700),
     changed: normalizedCaption !== caption
   });
-  return assertValidTextEncoding(
-    normalizedCaption,
-    "Shopee storyboard caption"
-  );
+  return {
+    caption: assertValidTextEncoding(
+      normalizedCaption,
+      "Shopee storyboard caption"
+    ),
+    fallbackUsed: false,
+    diagnostics: getShopeeCaptionGenerationDiagnostics({
+      product,
+      storyboard,
+      affiliateLink,
+      promptInput
+    })
+  };
 }
 
 function createValidatedShopeeProductStoryboard(product: ShopeeProductRecord) {
@@ -7070,6 +7305,13 @@ export async function generateShopeeCaption(input: {
     }
   });
 
+  const captionPromptInput = getShopeeCaptionPromptInput({
+    product: productForStoryboard,
+    storyboard,
+    affiliateLink: input.affiliateLink
+  });
+  const captionPromptLength = getShopeeCaptionPromptLength(captionPromptInput);
+
   await logShopeePackageStage({
     userId: input.userId,
     jobId: input.jobId,
@@ -7079,19 +7321,65 @@ export async function generateShopeeCaption(input: {
     message: "Generating caption from Product Storyboard",
     metadata: {
       storyboardType: storyboard.productType,
-      shortLink: input.affiliateLink
+      shortLink: input.affiliateLink,
+      provider: getShopeeStoryboardProvider(),
+      model: getContentModel(),
+      promptLength: captionPromptLength,
+      hasProductName: Boolean(captionPromptInput.productName.trim()),
+      hasProductDescription: Boolean(captionPromptInput.productDescription.trim()),
+      keySellingPointCount: captionPromptInput.keySellingPoints.length,
+      hasAffiliateLink: Boolean(input.affiliateLink.trim()),
+      storyboardSummary: captionPromptInput.storyboardSummary
     }
   });
 
   let storyboardCaption: string;
+  let captionResult: ShopeeStoryboardCaptionResult | null = null;
   try {
-    storyboardCaption = buildShopeeStoryboardCaption({
+    captionResult = buildShopeeStoryboardCaptionResult({
       product: productForStoryboard,
       storyboard,
       affiliateLink: input.affiliateLink,
       jobId: input.jobId
     });
+    storyboardCaption = captionResult.caption;
+    if (captionResult.fallbackUsed) {
+      await logShopeePackageStage({
+        userId: input.userId,
+        jobId: input.jobId,
+        product: productForStoryboard,
+        step: "CAPTION_FALLBACK_USED",
+        status: "success",
+        message: "Fallback caption created after primary caption generation failed",
+        metadata: {
+          captionStatus: "fallback_created",
+          fallbackReason: captionResult.fallbackReason ?? "",
+          provider: "deterministic_fallback",
+          model: "rule",
+          originalProvider: captionResult.diagnostics.provider,
+          originalModel: captionResult.diagnostics.model,
+          errorName: captionResult.diagnostics.errorName,
+          errorMessage: captionResult.diagnostics.errorMessage,
+          errorCode: captionResult.diagnostics.errorCode,
+          promptLength: captionResult.diagnostics.promptLength,
+          productId: product.productId,
+          productName: product.productName,
+          storyboardId: captionResult.diagnostics.storyboardId,
+          storyboardStatus: captionResult.diagnostics.storyboardStatus,
+          rawResponseParseError: captionResult.diagnostics.rawResponseParseError,
+          captionRetryCount: captionResult.diagnostics.captionRetryCount,
+          captionPreview: storyboardCaption.slice(0, 500)
+        }
+      });
+    }
   } catch (error) {
+    const diagnostics = getShopeeCaptionGenerationDiagnostics({
+      error,
+      product: productForStoryboard,
+      storyboard,
+      affiliateLink: input.affiliateLink,
+      promptInput: captionPromptInput
+    });
     if (error instanceof ShopeeProviderError && error.code === "caption_readability_failed") {
       let detail: Record<string, unknown> = {};
       try {
@@ -7118,18 +7406,17 @@ export async function generateShopeeCaption(input: {
     await logShopeeAutomationEvent({
       userId: input.userId,
       level: "error",
-      message: "CAPTION_VALIDATION_FAILED_DETAIL",
-      productId: product.productId,
-      metadata: {
-        jobId: input.jobId ?? "",
+        message: "CAPTION_VALIDATION_FAILED_DETAIL",
         productId: product.productId,
-        productName: product.productName,
-        shortLink: input.affiliateLink,
-        validatorName: "validateStoryboardAffiliateCaption",
-        errorCode: error instanceof ShopeeProviderError ? error.code : "",
-        errorMessage: error instanceof Error ? error.message : String(error),
-        responseSummary: error instanceof ShopeeProviderError ? error.responseSummary ?? "" : ""
-      }
+        metadata: {
+          jobId: input.jobId ?? "",
+          shortLink: input.affiliateLink,
+          validatorName: "validateStoryboardAffiliateCaption",
+          ...diagnostics,
+          errorCode: error instanceof ShopeeProviderError ? error.code : "",
+          errorMessage: error instanceof Error ? error.message : String(error),
+          responseSummary: error instanceof ShopeeProviderError ? error.responseSummary ?? "" : ""
+        }
     });
     await logShopeePackageStage({
       userId: input.userId,
@@ -7140,7 +7427,8 @@ export async function generateShopeeCaption(input: {
       message: "Caption generation from Product Storyboard failed",
       metadata: {
         storyboardType: storyboard.productType,
-        validatorName: "validateStoryboardAffiliateCaption"
+        validatorName: "validateStoryboardAffiliateCaption",
+        ...diagnostics
       },
       error
     });
@@ -7155,6 +7443,14 @@ export async function generateShopeeCaption(input: {
     message: "Caption created from Product Storyboard",
     metadata: {
       storyboardType: storyboard.productType,
+      captionStatus: captionResult?.fallbackUsed ? "fallback_created" : "created",
+      provider: captionResult?.fallbackUsed ? "deterministic_fallback" : getShopeeStoryboardProvider(),
+      model: captionResult?.fallbackUsed ? "rule" : getContentModel(),
+      promptLength: captionResult?.diagnostics.promptLength ?? captionPromptLength,
+      captionRetryCount: captionResult?.diagnostics.captionRetryCount ?? 0,
+      captionLastError: captionResult?.fallbackUsed
+        ? captionResult.diagnostics.errorMessage ?? captionResult.diagnostics.errorCode ?? null
+        : null,
       captionLength: storyboardCaption.length,
       captionPreview: storyboardCaption.slice(0, 240),
       shortLink: input.affiliateLink

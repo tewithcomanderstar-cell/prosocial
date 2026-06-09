@@ -54,6 +54,14 @@ function readAutoPostProcessStepRouteSource() {
   return readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../../app/api/auto-post/process-step/route.ts"), "utf8");
 }
 
+function readAutoPostStatusRouteSource() {
+  return readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../../app/api/auto-post/status/route.ts"), "utf8");
+}
+
+function readAutoPostPanelSource() {
+  return readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../../components/auto-post-panel.tsx"), "utf8");
+}
+
 function sourceBetween(source: string, start: string, end: string) {
   const startIndex = source.indexOf(start);
   const endIndex = source.indexOf(end, startIndex + start.length);
@@ -377,6 +385,54 @@ function testShopeeCaptionHumanReadabilityGuards() {
   console.log("PASS Shopee caption human readability guards");
 }
 
+function testShopeeCaptionFallbackGenerationGuards() {
+  const source = readShopeeAffiliateServiceSource();
+  const captionSource = sourceBetween(source, "function getShopeeCaptionPromptInput", "function createValidatedShopeeProductStoryboard");
+  const generateSource = sourceBetween(source, "export async function generateShopeeCaption", "async function fetchShopeeReferenceImage");
+  const statusSource = readAutoPostStatusRouteSource();
+  const panelSource = readAutoPostPanelSource();
+
+  assert.ok(captionSource.includes("productDescription"));
+  assert.ok(captionSource.includes("keySellingPoints"));
+  assert.ok(captionSource.includes("affiliateLink"));
+  assert.ok(captionSource.includes("storyboardSummary"));
+  assert.ok(captionSource.includes("promptLength"));
+  assert.ok(captionSource.includes("rawResponseParseError"));
+  assert.ok(captionSource.includes("buildDeterministicShopeeFallbackCaption"));
+  assert.ok(captionSource.includes("CAPTION_GENERATION_ERROR_DETAIL"));
+  assert.ok(captionSource.includes("CAPTION_FALLBACK_RAW_OUTPUT"));
+  assert.ok(captionSource.includes("CAPTION_FALLBACK_USED"));
+  assert.ok(captionSource.includes("CAPTION_FALLBACK_FAILED"));
+  assert.ok(captionSource.includes("validateStoryboardAffiliateCaption(fallbackCaption"));
+  assert.ok(captionSource.includes("formatShopeeStoryboardPriceLine(product, storyboard)"));
+  assert.ok(captionSource.includes("formatShopeeShortLinkLine(affiliateLink)"));
+  assert.ok(captionSource.includes("buildShopeeStoryboardCtaLine(storyboard)"));
+  assert.ok(source.includes("caption_readability_failed"));
+  assert.equal(captionSource.includes("สินค้าคุณภาพดี"), false);
+  assert.equal(captionSource.includes("คุ้มค่า คุ้มราคา"), false);
+  assert.equal(captionSource.includes("เหมาะสำหรับทุกเพศทุกวัย"), false);
+  assert.equal(captionSource.includes("ใช้งานได้หลากหลาย"), false);
+
+  assert.ok(generateSource.includes("CAPTION_FALLBACK_USED"));
+  assert.ok(generateSource.includes("captionStatus: \"fallback_created\""));
+  assert.ok(generateSource.includes("captionLastError"));
+  assert.ok(generateSource.includes("CAPTION_CREATED"));
+  assert.ok(generateSource.includes("captionResult?.fallbackUsed ? \"deterministic_fallback\""));
+  assert.ok(generateSource.includes("promptLength"));
+  assert.ok(generateSource.indexOf("CAPTION_FALLBACK_USED") < generateSource.indexOf("CAPTION_CREATED"));
+
+  assert.ok(statusSource.includes("fallback_created"));
+  assert.ok(statusSource.includes("CAPTION_FALLBACK_USED"));
+  assert.ok(statusSource.includes("captionLastError"));
+  assert.ok(statusSource.includes("captionProvider"));
+  assert.ok(statusSource.includes("captionRetryCount"));
+  assert.ok(panelSource.includes("captionLastError?: string | null"));
+  assert.ok(panelSource.includes("Caption provider"));
+  assert.ok(panelSource.includes("Caption retry count"));
+  assert.ok(panelSource.includes("Caption last error"));
+  console.log("PASS Shopee caption fallback generation guards");
+}
+
 function testAutoPostProcessStepNoEligibleProductsReturnsDiagnostics() {
   const source = readAutoPostProcessStepRouteSource();
   assert.ok(source.includes("shopee_no_eligible_products"));
@@ -402,4 +458,5 @@ testShopeeSourceSpecificSelectionGuards();
 testProductUnderstandingMainUseCaseCoverage();
 testShopeeVisionRescueUsesActualImageInput();
 testShopeeCaptionHumanReadabilityGuards();
+testShopeeCaptionFallbackGenerationGuards();
 testAutoPostProcessStepNoEligibleProductsReturnsDiagnostics();

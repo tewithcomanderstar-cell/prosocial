@@ -276,6 +276,7 @@ function derivePreTaskBlockingStep(logs: StageLog[]) {
     "BLOB_UPLOAD_STARTED",
     "BLOB_UPLOAD_FAILED",
     "CAPTION_CREATED",
+    "CAPTION_FALLBACK_USED",
     "CAPTION_STARTED",
     "CAPTION_FAILED",
     "PRODUCT_CONTEXT_CREATE_COMPLETED",
@@ -340,7 +341,7 @@ function derivePreTaskBlockingStep(logs: StageLog[]) {
   if (latestStep === "UGC_IMAGES_STARTED") return "WAITING_FOR_UGC_IMAGES";
   if (latestStep === "BLOB_UPLOAD_STARTED") return "WAITING_FOR_BLOB_UPLOAD";
   if (latestStep === "BLOB_UPLOAD_COMPLETED") return "WAITING_FOR_UGC_IMAGES";
-  if (latestStep === "CAPTION_CREATED") return "WAITING_FOR_UGC_IMAGES";
+  if (latestStep === "CAPTION_CREATED" || latestStep === "CAPTION_FALLBACK_USED") return "WAITING_FOR_UGC_IMAGES";
   if (latestStep === "CAPTION_STARTED") return "WAITING_FOR_CAPTION";
   if (latestStep === "PRODUCT_CONTEXT_CREATE_STARTED") return "WAITING_FOR_PRODUCT_CONTEXT";
   if (latestStep === "PRODUCT_CONTEXT_CREATE_COMPLETED") return "WAITING_FOR_CAPTION";
@@ -590,6 +591,7 @@ export async function GET() {
       "PRODUCT_PACKAGE_LOOP_ITEM_FAILED",
       "CAPTION_STARTED",
       "CAPTION_CREATED",
+      "CAPTION_FALLBACK_USED",
       "UGC_IMAGES_STARTED",
       "UGC_IMAGES_CREATED",
       "OPENAI_IMAGE_REQUEST_START",
@@ -610,7 +612,7 @@ export async function GET() {
     };
     const captionStatusInput = {
       started: ["CAPTION_STARTED"],
-      completed: ["CAPTION_CREATED"],
+      completed: ["CAPTION_CREATED", "CAPTION_FALLBACK_USED"],
       failed: ["CAPTION_FAILED", "CAPTION_VALIDATION_FAILED_DETAIL"],
       staleStartedAfterMs: 120_000
     };
@@ -633,6 +635,56 @@ export async function GET() {
     let captionStatusSource = getStageStatusSource(runStageLogs, captionStatusInput);
     let imageStatusSource = getStageStatusSource(runStageLogs, imageStatusInput);
     let blobStatusSource = getStageStatusSource(runStageLogs, blobStatusInput);
+    const latestCaptionLog = getLatestStageLog(runStageLogs, [
+      "CAPTION_CREATED",
+      "CAPTION_FALLBACK_USED",
+      "CAPTION_FAILED",
+      "CAPTION_VALIDATION_FAILED_DETAIL",
+      "CAPTION_STARTED"
+    ]);
+    const latestCaptionFallbackLog = getLatestStageLog(runStageLogs, ["CAPTION_FALLBACK_USED"]);
+    const latestCaptionMetadata = (latestCaptionLog?.metadata ?? {}) as Record<string, unknown>;
+    const latestCaptionFallbackMetadata = (latestCaptionFallbackLog?.metadata ?? {}) as Record<string, unknown>;
+    const latestCaptionFailureLog = getLatestStageLog(runStageLogs, ["CAPTION_FAILED", "CAPTION_VALIDATION_FAILED_DETAIL"]);
+    const latestCaptionFailureMetadata = (latestCaptionFailureLog?.metadata ?? {}) as Record<string, unknown>;
+    if (
+      captionStatus === "created" &&
+      (
+        getStageStep(latestCaptionLog as StageLog) === "CAPTION_FALLBACK_USED" ||
+        latestCaptionMetadata.captionStatus === "fallback_created" ||
+        latestCaptionFallbackLog
+      )
+    ) {
+      captionStatus = "fallback_created";
+      captionStatusSource = latestCaptionFallbackLog
+        ? `action_log:${getStageStep(latestCaptionFallbackLog)}`
+        : captionStatusSource;
+    }
+    const latestCaptionSerializedError = getSerializedErrorMetadata(latestCaptionFailureMetadata);
+    const captionLastError =
+      typeof latestCaptionMetadata.captionLastError === "string" && latestCaptionMetadata.captionLastError
+        ? String(latestCaptionMetadata.captionLastError)
+        : typeof latestCaptionFallbackMetadata.errorMessage === "string" && latestCaptionFallbackMetadata.errorMessage
+        ? String(latestCaptionFallbackMetadata.errorMessage)
+        : typeof latestCaptionFailureMetadata.errorMessage === "string" && latestCaptionFailureMetadata.errorMessage
+          ? String(latestCaptionFailureMetadata.errorMessage)
+          : typeof latestCaptionSerializedError?.message === "string"
+            ? String(latestCaptionSerializedError.message)
+            : null;
+    const captionProvider =
+      typeof latestCaptionMetadata.provider === "string"
+        ? String(latestCaptionMetadata.provider)
+        : typeof latestCaptionFallbackMetadata.provider === "string"
+          ? String(latestCaptionFallbackMetadata.provider)
+          : null;
+    const captionRetryCount =
+      typeof latestCaptionMetadata.captionRetryCount === "number"
+        ? latestCaptionMetadata.captionRetryCount
+        : typeof latestCaptionFallbackMetadata.captionRetryCount === "number"
+          ? latestCaptionFallbackMetadata.captionRetryCount
+          : typeof latestCaptionFailureMetadata.captionRetryCount === "number"
+            ? latestCaptionFailureMetadata.captionRetryCount
+            : null;
     const latestImageRequestLog = getLatestStageLog(runStageLogs, [
       "OPENAI_IMAGE_REQUEST_END",
       "OPENAI_IMAGE_REQUEST_FAILED",
@@ -1017,6 +1069,9 @@ export async function GET() {
       storyboardRetryCount: storyboardRetryCount !== null && Number.isFinite(storyboardRetryCount) ? storyboardRetryCount : null,
       storyboardLastError: storyboardLastError ? sanitizeLegacyMessage(storyboardLastError) : null,
       captionStatus,
+      captionLastError: captionLastError ? sanitizeLegacyMessage(captionLastError) : null,
+      captionProvider: captionProvider ? sanitizeLegacyMessage(captionProvider) : null,
+      captionRetryCount: captionRetryCount !== null && Number.isFinite(captionRetryCount) ? captionRetryCount : null,
       imageStatus,
       blobStatus,
       imageStartedAt:

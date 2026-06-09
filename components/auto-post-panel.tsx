@@ -82,6 +82,9 @@ type ControlPanelStatus = {
   storyboardRetryCount?: number | null;
   storyboardLastError?: string | null;
   captionStatus?: string | null;
+  captionLastError?: string | null;
+  captionProvider?: string | null;
+  captionRetryCount?: number | null;
   imageStatus?: string | null;
   blobStatus?: string | null;
   imageStartedAt?: string | null;
@@ -1400,6 +1403,9 @@ export function AutoPostPanel() {
           <div className="auto-post-metric-card"><span className="muted">Storyboard retry count</span><strong>{controlPanel?.storyboardRetryCount ?? "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Storyboard last error</span><strong>{controlPanel?.storyboardLastError ? sanitizeText(controlPanel.storyboardLastError) : "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Caption status</span><strong>{controlPanel?.captionStatus ?? "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Caption provider</span><strong>{controlPanel?.captionProvider ? sanitizeText(controlPanel.captionProvider) : "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Caption retry count</span><strong>{controlPanel?.captionRetryCount ?? "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Caption last error</span><strong>{controlPanel?.captionLastError ? sanitizeText(controlPanel.captionLastError) : "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Image status</span><strong>{controlPanel?.imageStatus ?? "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Image started at</span><strong>{formatDateTime(controlPanel?.imageStartedAt ?? undefined)}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Image duration</span><strong>{formatDurationMs(controlPanel?.imageDurationMs)}</strong></div>
