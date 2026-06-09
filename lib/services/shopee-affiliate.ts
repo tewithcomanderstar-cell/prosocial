@@ -2846,16 +2846,27 @@ function getShopeeFallbackUnderstandingDetails(productType: string, haystack: st
     details.confidence = 78;
   } else if (/สกินแคร์|serum|เซรั่ม|ครีม|กันแดด|sunscreen|spf|ผิว/i.test(text)) {
     details.productType = "skincare";
-    details.mainUseCase = "ใช้เป็นส่วนหนึ่งของ routine ดูแลผิว";
+    details.mainUseCase = /กันแดด|sunscreen|spf/i.test(text)
+      ? "ทาก่อนออกแดดหรือก่อนแต่งหน้าเพื่อช่วยดูแลผิวระหว่างวัน"
+      : "ทาหลังล้างหน้าในขั้นตอนดูแลผิว เพื่อช่วยให้ผิวดูชุ่มชื้นและพร้อมแต่งหน้าขึ้น";
     details.targetAudience = "คนที่มองหาไอเทมดูแลผิว";
+    details.keySellingPoint = /กันแดด|sunscreen|spf/i.test(text)
+      ? "เนื้อใช้ประจำวันได้ง่าย เหมาะกับวันที่ต้องออกแดดหรืออยู่ห้องแอร์"
+      : "เนื้อบางเบา ใช้ง่ายใน routine และเหมาะกับวันที่อยากให้ผิวดูชุ่มชื้นขึ้น";
+    details.realUsageScenario = /กันแดด|sunscreen|spf/i.test(text)
+      ? "ทาช่วงเช้าก่อนออกจากบ้านหรือก่อนแต่งหน้า"
+      : "ใช้หลังล้างหน้า ก่อนลงครีมหรือก่อนแต่งหน้า";
+    details.captionAngle = /กันแดด|sunscreen|spf/i.test(text)
+      ? "รีวิวกันแดดจากการใช้ตอนเช้า เน้นเนื้อสัมผัส ใช้ก่อนแต่งหน้า และวันที่ต้องออกแดด"
+      : "รีวิวสกินแคร์จากการใช้จริง เน้นเนื้อสัมผัส ซึมไว ความชุ่มชื้น และใช้ก่อนแต่งหน้า";
     details.confidence = 78;
   }
 
   if (details.mainUseCase) {
     details.productEntity = details.productEntity || normalizedType;
     details.whatItIs = details.whatItIs || normalizedType;
-    details.keySellingPoint = details.keySellingPoint || `จุดเด่นของ${details.productEntity}ช่วยตอบโจทย์การใช้งานจริง`;
-    details.realUsageScenario = details.realUsageScenario || `บริบทใช้งานจริงของ${details.productEntity}`;
+    details.keySellingPoint = details.keySellingPoint || `ช่วยให้ใช้${details.productEntity}ได้เข้ากับสถานการณ์จริง`;
+    details.realUsageScenario = details.realUsageScenario || `ใช้${details.productEntity}ในวันที่ต้องการความสะดวก`;
     details.targetUser = details.targetUser || details.targetAudience || `คนที่กำลังมองหา${details.productEntity}`;
     details.captionAngle = details.captionAngle || `เล่าประโยชน์ของ${details.productEntity}จากการใช้งานจริง`;
   }
@@ -3128,11 +3139,15 @@ function enrichShopeeStoryboardForAffiliateReview(
       purchaseReason: "น่าลองสำหรับคนที่อยากมีของกินติดบ้าน"
     },
     beauty: {
-      primaryPainPoint: "อยากดูแลตัวเองให้สะดวกใน routine เดิม",
-      problemSolved: "ช่วยให้ขั้นตอนดูแลผิวหรือความงามง่ายขึ้น",
-      dailyBenefit: "ใช้ใน routine ดูแลผิวได้ไม่ยุ่งยาก",
-      emotionalBenefit: "เพิ่มความมั่นใจในวันที่ต้องออกไปข้างนอก",
-      purchaseReason: "เหมาะกับคนที่อยากมีไอเทมดูแลตัวเองไว้ใช้ประจำ"
+      primaryPainPoint: "อยากได้สกินแคร์ที่ใช้แล้วไม่หนักหน้า",
+      problemSolved: /กันแดด|sunscreen|spf/i.test(getShopeeStoryboardEntityText(storyboard))
+        ? "ใช้ก่อนออกแดดหรือก่อนแต่งหน้าได้ เหมาะกับวันที่ต้องเจอแดดหรืออยู่ห้องแอร์"
+        : "เนื้อบางเบา ซึมไว ใช้ก่อนแต่งหน้าแล้วผิวดูชุ่มชื้นขึ้น",
+      dailyBenefit: /กันแดด|sunscreen|spf/i.test(getShopeeStoryboardEntityText(storyboard))
+        ? "ทาช่วงเช้าก่อนออกจากบ้านหรือก่อนแต่งหน้า"
+        : "ทาหลังล้างหน้า ก่อนลงครีมหรือก่อนแต่งหน้า",
+      emotionalBenefit: "ผิวดูพร้อมขึ้นในวันที่ต้องออกไปข้างนอก",
+      purchaseReason: "เหมาะกับคนที่อยากได้สกินแคร์ใช้จริงทุกวัน ไม่เหนอะหนะหน้า"
     },
     jewelry: {
       primaryPainPoint: "แต่งตัวเรียบ ๆ แล้วอยากให้ลุคดูมีอะไรขึ้น",
@@ -3767,6 +3782,10 @@ function isShopeeDrinkwareStoryboard(storyboard: ShopeeStoryboardEntityLike) {
   return /กระบอกน้ำ|ขวดน้ำ|กระติก|แก้วเก็บ|tumbler|water\s?bottle|bottle|เก็บอุณหภูมิ|เก็บความเย็น/i.test(getShopeeStoryboardEntityText(storyboard));
 }
 
+function isShopeeBeautyStoryboard(storyboard: ShopeeStoryboardEntityLike) {
+  return /skincare|สกินแคร์|เซรั่ม|กันแดด|ครีม|ผิว|บำรุง|serum|sunscreen|spf|cleanser|cosmetic/i.test(getShopeeStoryboardEntityText(storyboard));
+}
+
 function isShopeeHomeUtilityStoryboard(storyboard: ShopeeStoryboardEntityLike) {
   const entityText = getShopeeStoryboardEntityText(storyboard);
   return /ของใช้ในบ้าน|ทำความสะอาด|ไม้ถู|ชั้นวาง|กล่องเก็บ|จัดระเบียบ|งานจัดบ้าน/i.test(entityText) &&
@@ -3781,7 +3800,9 @@ function getShopeeEntityActionText(storyboard: ShopeeStoryboardEntityLike) {
   if (isShopeeDrinkwareStoryboard(storyboard)) return "พกน้ำหรือเครื่องดื่ม";
   if (isShopeeApparelStoryboard(storyboard)) return "ใส่และแมตช์ลุค";
   if (/รถ|จัมป์|แบต|ยาง|dash\s?cam|กล้องติดรถ/i.test(getShopeeStoryboardEntityText(storyboard))) return "ใช้งานกับรถ";
-  if (/สกินแคร์|เซรั่ม|กันแดด|ผิว|เครื่องสำอาง/i.test(getShopeeStoryboardEntityText(storyboard))) return "ใช้ใน routine ดูแลผิว";
+  if (isShopeeBeautyStoryboard(storyboard)) return /กันแดด|sunscreen|spf/i.test(getShopeeStoryboardEntityText(storyboard))
+    ? "ทาก่อนออกแดดหรือก่อนแต่งหน้า"
+    : "ทาหลังล้างหน้าและก่อนแต่งหน้า";
   if (/ครัว|ถาดน้ำแข็ง|หม้อ|กระทะ|กล่องอาหาร|ช้อน|จาน/i.test(getShopeeStoryboardEntityText(storyboard))) return "ใช้เตรียมอาหารหรือจัดครัว";
   const productLabel = getShopeeStoryboardProductLabel(storyboard);
   return compactProductText(storyboard.mainUseCase || `ใช้งาน${productLabel}`, 58);
@@ -3792,6 +3813,9 @@ function getShopeeEntityContextText(storyboard: ShopeeStoryboardEntityLike) {
   if (isShopeeWaterFilterStoryboard(storyboard)) return "บ้าน คอนโด หรือมุมครัวสำหรับกดน้ำดื่ม";
   if (isShopeeDrinkwareStoryboard(storyboard)) return "ที่ทำงาน ระหว่างเดินทาง หรือออกกำลังกาย";
   if (isShopeeApparelStoryboard(storyboard)) return "วันทำงาน วันไปเที่ยว หรือวันลำลอง";
+  if (isShopeeBeautyStoryboard(storyboard)) return /กันแดด|sunscreen|spf/i.test(getShopeeStoryboardEntityText(storyboard))
+    ? "ตอนเช้าก่อนออกจากบ้าน วันที่ต้องออกแดด หรือวันที่อยู่ห้องแอร์"
+    : "หลังล้างหน้า ก่อนแต่งหน้า หรือวันที่อยากเติมความชุ่มชื้นให้ผิว";
   return compactProductText(storyboard.usageScene || storyboard.mainUseCase || `บริบทใช้งานจริงของ${getShopeeStoryboardProductLabel(storyboard)}`, 70);
 }
 
@@ -3849,6 +3873,34 @@ function sanitizeShopeeStoryboardTextForEntity(text: string, storyboard: ShopeeP
   return normalized || source;
 }
 
+function humanizeShopeeStoryboardCaptionLine(text: string, storyboard: ShopeeProductStoryboard) {
+  const source = sanitizeShopeeStoryboardTextForEntity(text, storyboard)
+    .replace(/บริบทใช้งานจริงของ/giu, "")
+    .replace(/จุดเด่นของ(.+?)ช่วยตอบโจทย์การใช้งานจริง/giu, "ใช้$1ได้เข้ากับชีวิตจริง")
+    .replace(/ใช้เป็นส่วนหนึ่งของ routine ดูแลผิว(?:ได้|ได้ไม่ยุ่งยาก)?/giu, "ทาหลังล้างหน้า ก่อนลงครีมหรือก่อนแต่งหน้า")
+    .replace(/routine ดูแลผิว/giu, "ขั้นตอนดูแลผิว")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!isShopeeBeautyStoryboard(storyboard)) return source;
+  if (/^สกินแคร์$/iu.test(source) || /^ดูแลผิว$/iu.test(source)) return "ทาหลังล้างหน้า ก่อนลงครีมหรือก่อนแต่งหน้า";
+  if (/ขั้นตอนดูแลผิว(?:ได้)?ไม่ยุ่งยาก/iu.test(source)) return "ใช้แล้วไม่หนักหน้า เหมาะกับวันเร่ง ๆ";
+  return source;
+}
+
+function dedupeCaptionBenefitLines(lines: string[]) {
+  const seen = new Set<string>();
+  return lines.filter((line) => {
+    const key = normalizeTextEncoding(line)
+      .replace(/^[^\p{L}\p{N}]+/u, "")
+      .replace(/✅|✨|💖|🌸|💄|👍/gu, "")
+      .replace(/\s+/g, "")
+      .toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function buildShopeeStoryboardBenefits(storyboard: ShopeeProductStoryboard) {
   const emojis = getShopeeStoryboardBenefitEmojis(storyboard.productType);
   const benefits = [
@@ -3857,10 +3909,10 @@ function buildShopeeStoryboardBenefits(storyboard: ShopeeProductStoryboard) {
     storyboard.realUsageScenario,
     storyboard.problemSolved
   ]
-    .map((benefit) => compactProductText(sanitizeShopeeStoryboardTextForEntity(benefit, storyboard), 56).replace(/[.!。?？]+$/u, ""))
+    .map((benefit) => compactProductText(humanizeShopeeStoryboardCaptionLine(benefit, storyboard), 62).replace(/[.!。?？]+$/u, ""))
     .filter(Boolean)
     .slice(0, 4);
-  return benefits.map((benefit, index) => `${emojis[index] ?? "✅"} ${benefit}`);
+  return dedupeCaptionBenefitLines(benefits).map((benefit, index) => `${emojis[index] ?? "✅"} ${benefit}`);
 }
 
 function buildShopeeStoryboardSolutionLine(storyboard: ShopeeProductStoryboard) {
@@ -3868,7 +3920,10 @@ function buildShopeeStoryboardSolutionLine(storyboard: ShopeeProductStoryboard) 
   if (isShopeeWaterFilterStoryboard(storyboard)) return "มีน้ำดื่มพร้อมกดใช้ สะดวกกว่าเดิม ✅";
   if (isShopeeDrinkwareStoryboard(storyboard)) return "พกน้ำหรือเครื่องดื่มไว้จิบระหว่างวันได้สะดวก ✅";
   if (isShopeeApparelStoryboard(storyboard)) return "ใส่แมตช์กับลุคทำงาน ไปเที่ยว หรือวันลำลองได้ง่าย ✅";
-  const mainUseCase = compactProductText(sanitizeShopeeStoryboardTextForEntity(storyboard.mainUseCase, storyboard), 72).replace(/[.!。?？]+$/u, "");
+  if (isShopeeBeautyStoryboard(storyboard)) return /กันแดด|sunscreen|spf/i.test(getShopeeStoryboardEntityText(storyboard))
+    ? "ทาก่อนออกแดดหรือก่อนแต่งหน้าได้ ไม่เหนอะหนะหน้า ✅"
+    : "เนื้อบางเบา ซึมไว ใช้ก่อนแต่งหน้าได้สบายขึ้น ✅";
+  const mainUseCase = compactProductText(humanizeShopeeStoryboardCaptionLine(storyboard.mainUseCase, storyboard), 72).replace(/[.!。?？]+$/u, "");
   if (mainUseCase) return `${mainUseCase} ✅`;
   return `${getShopeeEntityActionText(storyboard)}ได้ตรงกับการใช้งานจริง ✅`;
 }
@@ -3924,6 +3979,8 @@ type StoryboardCaptionFailedRule = {
 
 const SHOPEE_GENERIC_CAPTION_TEMPLATE_PATTERN =
   /ของใช้ในบ้าน|หยิบใช้|ช่วยให้บ้านดูใช้งานง่าย|ช่วงใช้งานในชีวิตประจำวัน|ช่วยให้บ้านน่าอยู่ขึ้น|ใช้ในชีวิตประจำวัน|มีตัวช่วยไว้สะดวกกว่าเดิม|เหมาะกับทุกบ้าน/iu;
+const SHOPEE_METADATA_CAPTION_PATTERN =
+  /บริบทใช้งานจริงของ|จุดเด่นของ.+?ช่วยตอบโจทย์|usageContext|mainUseCase|productEntity|targetAudience|productType|realUsageScenario|dailyBenefit|keySellingPoint/iu;
 
 function normalizeShopeeEntityMentionText(value?: string) {
   return normalizeTextEncoding(value ?? "")
@@ -4128,6 +4185,16 @@ function validateStoryboardAffiliateCaption(caption: string, storyboard: ShopeeP
       actual: genericTemplateViolation.phrase
     });
   }
+  if (SHOPEE_METADATA_CAPTION_PATTERN.test(normalized)) {
+    const failedLine = lines.find((line) => SHOPEE_METADATA_CAPTION_PATTERN.test(line)) ?? "";
+    failedRules.push({
+      rule: "NO_METADATA_LANGUAGE",
+      message: "Caption contains metadata-style wording instead of seller language",
+      failedLine,
+      expected: "caption uses natural seller phrases such as texture, use moment, benefit, and audience fit",
+      actual: failedLine
+    });
+  }
   const entitySpecificLine = lines.find((line) => hasShopeeCaptionEntityOrUseCaseMention(line, storyboard));
   if (!entitySpecificLine) {
     failedRules.push({
@@ -4209,6 +4276,28 @@ function buildShopeeStoryboardCaption(input: {
   jobId?: string;
 }) {
   const { product, storyboard, affiliateLink } = input;
+  const captionInputJson = {
+    jobId: input.jobId ?? "",
+    productId: product.productId,
+    productName: product.productName,
+    productEntity: storyboard.productEntity,
+    productType: storyboard.productType,
+    mainUseCase: storyboard.mainUseCase,
+    targetAudience: storyboard.targetUser,
+    problemSolved: storyboard.problemSolved,
+    dailyBenefit: storyboard.dailyBenefit,
+    emotionalBenefit: storyboard.emotionalBenefit,
+    realUsageScenario: storyboard.realUsageScenario,
+    purchaseReason: storyboard.purchaseReason
+  };
+  console.info("[CAPTION_INPUT_JSON]", captionInputJson);
+  console.info("[CAPTION_PROMPT]", {
+    jobId: input.jobId ?? "",
+    productId: product.productId,
+    composer: "buildShopeeStoryboardCaption",
+    source: "deterministic_storyboard_builder",
+    instruction: "Compose Thai seller-style caption from productEntity, productType, mainUseCase, and human benefit lines. Do not render metadata field names or labels such as usageContext/mainUseCase/productEntity/targetAudience."
+  });
   const benefits = buildShopeeStoryboardBenefits(storyboard);
   const solutionLine = buildShopeeStoryboardSolutionLine(storyboard);
   const caption = [
@@ -4228,8 +4317,23 @@ function buildShopeeStoryboardCaption(input: {
     "",
     getShopeeStoryboardHashtags(product, storyboard).join(" ")
   ].join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  console.info("[CAPTION_RAW_OUTPUT]", {
+    jobId: input.jobId ?? "",
+    productId: product.productId,
+    composer: "buildShopeeStoryboardCaption",
+    captionPreview: caption.slice(0, 700),
+    benefitLines: benefits
+  });
+  const normalizedCaption = validateStoryboardAffiliateCaption(normalizeShopeeCaptionLinkLine(caption, affiliateLink), storyboard, product, affiliateLink, input.jobId);
+  console.info("[CAPTION_POST_PROCESS]", {
+    jobId: input.jobId ?? "",
+    productId: product.productId,
+    composer: "repairStoryboardAffiliateCaption + validateStoryboardAffiliateCaption",
+    captionPreview: normalizedCaption.slice(0, 700),
+    changed: normalizedCaption !== caption
+  });
   return assertValidTextEncoding(
-    validateStoryboardAffiliateCaption(normalizeShopeeCaptionLinkLine(caption, affiliateLink), storyboard, product, affiliateLink, input.jobId),
+    normalizedCaption,
     "Shopee storyboard caption"
   );
 }
