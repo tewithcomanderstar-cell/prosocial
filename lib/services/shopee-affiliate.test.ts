@@ -231,6 +231,44 @@ function testShopeeSourceSpecificSelectionGuards() {
   console.log("PASS Shopee source-specific selection guards");
 }
 
+function testProductUnderstandingMainUseCaseCoverage() {
+  const source = readShopeeAffiliateServiceSource();
+  const knownSource = sourceBetween(source, "const SHOPEE_KNOWN_PRODUCT_TYPES", "const SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE");
+  const mappingSource = sourceBetween(source, "const SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE", "let shopeeProductUnderstandingCoverageLogged");
+  const extractionSource = sourceBetween(source, "function extractShopeeProductUnderstanding", "function getShopeeProductUnderstandingDebugPayload");
+  const requiredProductTypes = [
+    "apparel",
+    "sport_shirt",
+    "skincare",
+    "drinkware",
+    "travel_pillow",
+    "home_storage",
+    "kitchenware",
+    "pet_supply",
+    "automotive_accessory",
+    "electronics_accessory",
+    "beauty_tool",
+    "jewelry",
+    "bag",
+    "shoes",
+    "food"
+  ];
+
+  for (const productType of requiredProductTypes) {
+    assert.ok(knownSource.includes(`"${productType}"`), `Missing known productType ${productType}`);
+    assert.ok(mappingSource.includes(`${productType}:`), `Missing mainUseCase mapping for ${productType}`);
+  }
+  assert.ok(source.includes("PRODUCT_UNDERSTANDING_COVERAGE_REPORT"));
+  assert.ok(source.includes("missingMainUseCaseMapping"));
+  assert.ok(source.includes("getShopeeEntityBasedMainUseCase"));
+  assert.ok(extractionSource.includes("mappedMainUseCase"));
+  assert.ok(extractionSource.includes("entityBridgeMainUseCase"));
+  assert.ok(extractionSource.includes("imageCount > 0"));
+  assert.ok(source.includes("function humanizeShopeeStoryboardCaptionLine"));
+  assert.ok(source.includes("entityBridgeMatch"));
+  console.log("PASS Shopee product understanding mainUseCase coverage");
+}
+
 await testMockProviderReturnsProducts();
 testShopeeCategoryNormalization();
 testScoringRewardsStrongProducts();
@@ -244,3 +282,4 @@ testImagePromptIncludesSafetyRules();
 testImagePromptSetCreatesFourConsistentPrompts();
 testStoryboardCaptionSourceUsesProductEntityGuards();
 testShopeeSourceSpecificSelectionGuards();
+testProductUnderstandingMainUseCaseCoverage();

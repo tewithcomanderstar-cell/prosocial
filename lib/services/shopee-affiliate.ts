@@ -2568,6 +2568,124 @@ type ShopeeProductUnderstanding = ShopeeProductEntity & {
   failureReasons: string[];
 };
 
+const SHOPEE_KNOWN_PRODUCT_TYPES = [
+  "apparel",
+  "sport_shirt",
+  "skincare",
+  "drinkware",
+  "travel_pillow",
+  "home_storage",
+  "kitchenware",
+  "pet_supply",
+  "automotive_accessory",
+  "electronics_accessory",
+  "beauty_tool",
+  "jewelry",
+  "bag",
+  "shoes",
+  "food",
+  "water_purifier_accessory",
+  "water_purifier",
+  "shirt",
+  "skirt",
+  "dress",
+  "pants",
+  "dashcam",
+  "running_shoes",
+  "sport_shoes",
+  "desk_lamp",
+  "audio_gadget",
+  "health_supplement",
+  "sports_equipment",
+  "collectible"
+] as const;
+
+const SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE: Record<string, string> = {
+  apparel: "สวมใส่ในชีวิตประจำวันหรือแต่งตัวตามโอกาส",
+  sport_shirt: "สวมใส่ออกกำลังกายหรือทำกิจกรรมกลางแจ้ง",
+  skincare: "ใช้บำรุงและดูแลผิว",
+  drinkware: "ใส่เครื่องดื่มและพกพาระหว่างวัน",
+  travel_pillow: "รองคอระหว่างเดินทาง",
+  home_storage: "จัดเก็บของให้เป็นระเบียบ",
+  kitchenware: "ใช้เตรียมอาหารหรือใช้งานในครัว",
+  pet_supply: "ใช้ดูแลสัตว์เลี้ยง",
+  automotive_accessory: "ใช้กับรถยนต์หรือพกไว้ในรถ",
+  electronics_accessory: "ใช้ร่วมกับอุปกรณ์อิเล็กทรอนิกส์",
+  beauty_tool: "ใช้แต่งหน้า ดูแลผิว หรือดูแลความงาม",
+  jewelry: "สวมใส่เป็นเครื่องประดับและแมตช์ลุค",
+  bag: "ใช้ใส่ของและพกพาระหว่างวัน",
+  shoes: "สวมใส่เดินหรือทำกิจกรรมต่าง ๆ",
+  food: "ใช้รับประทานเป็นอาหารหรือของทานเล่น",
+  water_purifier_accessory: "ใช้เปลี่ยนหรือใช้งานร่วมกับเครื่องกรองน้ำเพื่อกรองน้ำดื่ม",
+  water_purifier: "กดน้ำดื่มสะอาดไว้ใช้ในบ้าน",
+  shirt: "สวมใส่และแมตช์กับลุคตามโอกาส",
+  skirt: "สวมใส่และแมตช์กับเสื้อผ้าตามโอกาส",
+  dress: "สวมใส่แต่งตัวไปทำงาน ไปเที่ยว หรือโอกาสพิเศษ",
+  pants: "สวมใส่และแต่งตัวให้เข้ากับกิจกรรมระหว่างวัน",
+  dashcam: "ติดหน้ารถเพื่อบันทึกเส้นทางและเหตุการณ์ระหว่างขับขี่",
+  running_shoes: "สวมใส่วิ่ง เดิน หรือทำกิจกรรมที่ต้องเคลื่อนไหว",
+  sport_shoes: "สวมใส่ออกกำลังกายหรือทำกิจกรรมที่ต้องเคลื่อนไหว",
+  desk_lamp: "เพิ่มแสงสว่างตอนอ่านหนังสือ ทำงาน หรือใช้คอม",
+  audio_gadget: "ใช้ฟังเสียงระหว่างเดินทาง ทำงาน หรือพักผ่อน",
+  health_supplement: "ใช้เสริมการดูแลสุขภาพหรือโภชนาการตามคำแนะนำบนสินค้า",
+  sports_equipment: "ใช้เล่นกีฬา ฝึกซ้อม หรือออกกำลังกาย",
+  collectible: "สะสม ตั้งโชว์ หรือใช้ตกแต่งมุมโปรด"
+};
+
+let shopeeProductUnderstandingCoverageLogged = false;
+
+function normalizeShopeeProductTypeKey(value?: string) {
+  return normalizeTextEncoding(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function getShopeeMappedMainUseCase(productType?: string, productEntity?: string) {
+  const rawType = normalizeTextEncoding(productType ?? "").trim();
+  const typeKey = normalizeShopeeProductTypeKey(rawType);
+  if (SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE[typeKey]) return SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE[typeKey];
+
+  const haystack = `${rawType} ${productEntity ?? ""}`;
+  if (/sport_shirt|เสื้อกีฬา|sport\s?shirt/i.test(haystack)) return SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE.sport_shirt;
+  if (/เสื้อ|กระโปรง|เดรส|กางเกง|เสื้อผ้า|แฟชั่น|shirt|skirt|dress|pants|apparel/i.test(haystack)) return SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE.apparel;
+  if (/สกินแคร์|skincare|serum|เซรั่ม|ครีม|กันแดด|sunscreen|spf|ผิว/i.test(haystack)) return SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE.skincare;
+  if (/กระบอกน้ำ|ขวดน้ำ|กระติก|แก้วเก็บ|tumbler|drinkware|water\s?bottle/i.test(haystack)) return SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE.drinkware;
+  if (/หมอนรองคอ|travel_pillow|neck\s?pillow/i.test(haystack)) return SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE.travel_pillow;
+  if (/จัดเก็บ|กล่องเก็บ|ชั้นวาง|storage|organizer/i.test(haystack)) return SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE.home_storage;
+  if (/ครัว|ถาดน้ำแข็ง|หม้อ|กระทะ|kitchen|kitchenware/i.test(haystack)) return SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE.kitchenware;
+  if (/สัตว์เลี้ยง|pet|cat|dog/i.test(haystack)) return SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE.pet_supply;
+  if (/รถ|automotive|dashcam|กล้องติดรถ|ยาง|จัมป์|แบต/i.test(haystack)) return SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE.automotive_accessory;
+  if (/มือถือ|หูฟัง|แกดเจ็ต|gadget|electronics|สมาร์ทวอทช์|charger|usb/i.test(haystack)) return SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE.electronics_accessory;
+  if (/แต่งหน้า|makeup|beauty_tool|แปรงแต่งหน้า|พัฟ|ฟองน้ำ/i.test(haystack)) return SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE.beauty_tool;
+  if (/สร้อย|เครื่องประดับ|จี้|ต่างหู|แหวน|กำไล|jewelry|necklace/i.test(haystack)) return SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE.jewelry;
+  if (/กระเป๋า|bag|เป้|wallet|crossbody/i.test(haystack)) return SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE.bag;
+  if (/รองเท้า|shoe|sneaker|running_shoes|sport_shoes/i.test(haystack)) return SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE.shoes;
+  if (/อาหาร|ขนม|snack|food|เครื่องดื่ม|น้ำพริก/i.test(haystack) && !/อาหารเสริม|วิตามิน|โปรตีน|เวย์/i.test(haystack)) return SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE.food;
+  if (/อาหารเสริม|วิตามิน|โปรตีน|เวย์|supplement|vitamin|protein|whey/i.test(haystack)) return SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE.health_supplement;
+  if (/กีฬา|แบด|ลูกแบด|fitness|sport|exercise/i.test(haystack)) return SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE.sports_equipment;
+  if (/art toy|อาร์ตทอย|ของสะสม|ฟิกเกอร์|collectible|กล่องสุ่ม/i.test(haystack)) return SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE.collectible;
+  return "";
+}
+
+function getShopeeEntityBasedMainUseCase(productEntity?: string) {
+  const entity = compactProductText(normalizeTextEncoding(productEntity ?? "").trim(), 64);
+  if (!entity || /^(?:สินค้า|ไอเทม|ของใช้ทั่วไป|ไอเทมใช้งานประจำวัน)$/iu.test(entity)) return "";
+  return `ใช้สำหรับ${entity}`;
+}
+
+function logShopeeProductUnderstandingCoverageReport() {
+  if (shopeeProductUnderstandingCoverageLogged) return;
+  shopeeProductUnderstandingCoverageLogged = true;
+  const missingMainUseCaseMapping = SHOPEE_KNOWN_PRODUCT_TYPES.filter((type) => !getShopeeMappedMainUseCase(type, type));
+  console.info("[PRODUCT_UNDERSTANDING_COVERAGE_REPORT]", {
+    knownProductTypes: [...SHOPEE_KNOWN_PRODUCT_TYPES],
+    mappedProductTypes: Object.keys(SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE),
+    missingMainUseCaseMapping
+  });
+}
+
 function extractShopeeKnownBrand(text: string) {
   if (/coway|โคเวย์/i.test(text)) return "Coway";
   if (/tempur/i.test(text)) return "TEMPUR";
@@ -2889,23 +3007,39 @@ function getShopeeProductUnderstandingFailureReasons(understanding: Pick<ShopeeP
 }
 
 function extractShopeeProductUnderstanding(product: ShopeeProductRecord): ShopeeProductUnderstanding {
+  logShopeeProductUnderstandingCoverageReport();
   const entity = extractShopeeProductEntity(product);
   const haystack = getShopeeStoryboardInputText({
     ...product,
     productName: entity.cleanedTitle || product.productName
   });
   const fallback = getShopeeFallbackUnderstandingDetails(entity.productType, haystack);
+  const imageCount = Array.from(new Set([
+    product.productImageUrl,
+    ...(product.productImageUrls ?? [])
+  ].map((url) => String(url ?? "").trim()).filter(Boolean))).length;
+  const productEntity = fallback.productEntity || entity.productEntity;
+  const productType = fallback.productType || entity.productType;
+  const mappedMainUseCase = getShopeeMappedMainUseCase(productType, productEntity);
+  const entityBridgeMainUseCase = productEntity && imageCount > 0 ? getShopeeEntityBasedMainUseCase(productEntity) : "";
+  const mainUseCase = entity.mainUseCase || fallback.mainUseCase || mappedMainUseCase || entityBridgeMainUseCase || "";
+  const bridgeKeySellingPoint = entityBridgeMainUseCase
+    ? `ช่วยให้เลือกใช้${productEntity}ได้ตรงกับประเภทสินค้า`
+    : "";
+  const bridgeRealUsageScenario = entityBridgeMainUseCase
+    ? `ใช้${productEntity}ตามลักษณะสินค้าที่ระบุ`
+    : "";
   const understanding: ShopeeProductUnderstanding = {
     ...entity,
-    productEntity: fallback.productEntity || entity.productEntity,
-    productType: fallback.productType || entity.productType,
+    productEntity,
+    productType,
     whatItIs: fallback.whatItIs || entity.whatItIs,
-    mainUseCase: entity.mainUseCase || fallback.mainUseCase || "",
-    keySellingPoint: entity.keySellingPoint || fallback.keySellingPoint || "",
-    realUsageScenario: entity.realUsageScenario || fallback.realUsageScenario || "",
+    mainUseCase,
+    keySellingPoint: entity.keySellingPoint || fallback.keySellingPoint || bridgeKeySellingPoint,
+    realUsageScenario: entity.realUsageScenario || fallback.realUsageScenario || bridgeRealUsageScenario,
     targetUser: entity.targetUser || fallback.targetUser || fallback.targetAudience || "",
     targetAudience: entity.targetAudience || fallback.targetAudience || entity.targetUser || fallback.targetUser || "",
-    captionAngle: entity.captionAngle || fallback.captionAngle || "",
+    captionAngle: entity.captionAngle || fallback.captionAngle || (entityBridgeMainUseCase ? `เล่าการใช้${productEntity}แบบระวังไม่เดาคุณสมบัติเกินจริง` : ""),
     confidence: Math.max(entity.confidence ?? 0, fallback.confidence ?? 0),
     source: "rule_entity_extraction",
     failureReasons: []
@@ -3881,6 +4015,11 @@ function humanizeShopeeStoryboardCaptionLine(text: string, storyboard: ShopeePro
     .replace(/routine ดูแลผิว/giu, "ขั้นตอนดูแลผิว")
     .replace(/\s+/g, " ")
     .trim();
+  const entityBridgeMatch = source.match(/^ใช้สำหรับ(.+)$/u);
+  if (entityBridgeMatch) {
+    const productLabel = getShopeeStoryboardProductLabel(storyboard);
+    return `ดูรายละเอียด${productLabel}ให้ตรงกับการใช้งานที่ต้องการ`;
+  }
   if (!isShopeeBeautyStoryboard(storyboard)) return source;
   if (/^สกินแคร์$/iu.test(source) || /^ดูแลผิว$/iu.test(source)) return "ทาหลังล้างหน้า ก่อนลงครีมหรือก่อนแต่งหน้า";
   if (/ขั้นตอนดูแลผิว(?:ได้)?ไม่ยุ่งยาก/iu.test(source)) return "ใช้แล้วไม่หนักหน้า เหมาะกับวันเร่ง ๆ";
