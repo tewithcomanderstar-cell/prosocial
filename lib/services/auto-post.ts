@@ -22,6 +22,7 @@ import { normalizeTextEncoding, validateTextEncoding } from "@/lib/services/text
 import { AutoPostConfig } from "@/models/AutoPostConfig";
 import { Job } from "@/models/Job";
 import { Post } from "@/models/Post";
+import { WorkflowRun } from "@/models/WorkflowRun";
 
 type AutoPostStatus = "idle" | "running" | "posting" | "success" | "failed" | "retrying" | "paused" | "waiting";
 type JobStatus = "pending" | "processing" | "posted" | "failed";
@@ -99,6 +100,7 @@ const AUTO_POST_BATCH_PAGE_SPACING_MINUTES = Number(
   process.env.AUTO_POST_PAGE_INTERVAL_MINUTES ?? process.env.AUTO_POST_PAGE_SPACING_MINUTES ?? "10"
 );
 const AUTO_POST_JOB_TIMEOUT_MS = Number(process.env.AUTO_POST_JOB_TIMEOUT_MS ?? "300000");
+const ACTIVE_PAGE_QUEUE_STALE_MS = 30 * 60 * 1000;
 const AUTO_POST_MAX_PRODUCT_ATTEMPTS = Math.max(
   1,
   Number(process.env.AUTO_POST_PRODUCT_ATTEMPTS ?? process.env.AUTO_POST_MAX_PRODUCT_ATTEMPTS ?? "10")
@@ -473,6 +475,134 @@ export async function countOpenShopeePageJobsForConfig(configId: string, userId?
   }
 
   return Job.countDocuments(query);
+}
+
+type ActiveShopeePageJobDebug = {
+  pageJobId: string;
+  pageId: string | null;
+  status: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  runId: string | null;
+  templatePostId: string | null;
+  ageMs: number | null;
+  ageMinutes: number | null;
+  stale: boolean;
+  templatePostExists: boolean | null;
+  workflowRunStatus: string | null;
+  workflowRunFinishedAt: string | null;
+  runEnded: boolean;
+  invalidReferenceReason: string | null;
+};
+
+function looksLikeObjectId(value: string) {
+  return /^[a-f0-9]{24}$/i.test(value);
+}
+
+async function inspectActiveShopeePageQueue(config: LeanAutoPostConfig) {
+  const now = new Date();
+  const query = {
+    type: "post",
+    status: { $in: [...OPEN_AUTO_POST_JOB_STATUSES] },
+    "payload.autoSource": "shopee-affiliate",
+    "payload.autoPostConfigId": String(config._id),
+    userId: config.userId
+  };
+
+  const jobs = await Job.find(query)
+    .sort({ updatedAt: 1 })
+    .select("_id postId targetPageId status createdAt updatedAt payload")
+    .lean();
+  const templatePostIds = Array.from(new Set(jobs.map((job: any) => String(job.postId ?? "")).filter(Boolean)));
+  const workflowRunIds = Array.from(
+    new Set(
+      jobs
+        .map((job: any) => String((job.payload as Record<string, unknown> | undefined)?.workflowRunId ?? ""))
+        .filter(Boolean)
+    )
+  );
+  const existingTemplatePostIds = new Set(
+    (
+      await Post.find({ _id: { $in: templatePostIds.filter(looksLikeObjectId) } })
+        .select("_id")
+        .lean()
+    ).map((post: any) => String(post._id))
+  );
+  const workflowRuns = await WorkflowRun.find({ _id: { $in: workflowRunIds.filter(looksLikeObjectId) } })
+    .select("_id status finishedAt")
+    .lean();
+  const workflowRunById = new Map(workflowRuns.map((run: any) => [String(run._id), run]));
+
+  const activeJobs: ActiveShopeePageJobDebug[] = jobs.map((job: any) => {
+    const updatedAt = job.updatedAt ? new Date(job.updatedAt) : null;
+    const ageMs = updatedAt && !Number.isNaN(updatedAt.getTime()) ? now.getTime() - updatedAt.getTime() : null;
+    const runId = String((job.payload as Record<string, unknown> | undefined)?.workflowRunId ?? "") || null;
+    const templatePostId = job.postId ? String(job.postId) : null;
+    const workflowRun = runId ? workflowRunById.get(runId) : null;
+    const templatePostExists = templatePostId ? existingTemplatePostIds.has(templatePostId) : null;
+    const workflowRunStatus = workflowRun ? String(workflowRun.status ?? "") : null;
+    const runEnded = Boolean(workflowRunStatus && !["pending", "running"].includes(workflowRunStatus));
+    const missingTemplatePost = Boolean(templatePostId && templatePostExists === false);
+    const missingWorkflowRun = Boolean(runId && !workflowRun);
+    const invalidReferenceReason = missingTemplatePost
+      ? "template_post_missing"
+      : missingWorkflowRun
+        ? "workflow_run_missing"
+        : runEnded
+          ? "workflow_run_closed"
+          : null;
+
+    return {
+      pageJobId: String(job._id),
+      pageId: job.targetPageId ? String(job.targetPageId) : null,
+      status: job.status ? String(job.status) : null,
+      createdAt: job.createdAt ? new Date(job.createdAt).toISOString() : null,
+      updatedAt: updatedAt ? updatedAt.toISOString() : null,
+      runId,
+      templatePostId,
+      ageMs,
+      ageMinutes: ageMs === null ? null : Math.round(ageMs / 60000),
+      stale: ageMs === null || ageMs > ACTIVE_PAGE_QUEUE_STALE_MS,
+      templatePostExists,
+      workflowRunStatus,
+      workflowRunFinishedAt: workflowRun?.finishedAt ? new Date(workflowRun.finishedAt).toISOString() : null,
+      runEnded,
+      invalidReferenceReason
+    };
+  });
+
+  const staleJobs = activeJobs.filter((job) => job.stale);
+  const invalidJobs = activeJobs.filter((job) => !job.stale && job.invalidReferenceReason);
+  const jobsToFail = [...staleJobs, ...invalidJobs];
+
+  if (jobsToFail.length > 0) {
+    await Job.updateMany(
+      { _id: { $in: jobsToFail.map((job) => job.pageJobId) } },
+      {
+        $set: {
+          status: "failed",
+          completedAt: now,
+          lastError: "stale_page_job",
+          failureReason: "stale_page_job",
+          errorCode: "stale_page_job",
+          errorDetails: {
+            markedAt: now.toISOString(),
+            staleAfterMinutes: ACTIVE_PAGE_QUEUE_STALE_MS / 60000,
+            reason: "stale_page_job"
+          }
+        }
+      }
+    );
+  }
+
+  return {
+    query,
+    now,
+    activeJobs,
+    staleJobs,
+    invalidJobs,
+    remainingActiveJobs: activeJobs.filter((job) => !jobsToFail.some((failedJob) => failedJob.pageJobId === job.pageJobId))
+  };
 }
 
 function stripFileExtension(value: string) {
@@ -1673,7 +1803,58 @@ async function queueShopeeAutoPostsForConfig(
     throw new Error("No Facebook pages selected for Shopee Affiliate Auto Post");
   }
 
-  const openPageJobs = await countOpenShopeePageJobsForConfig(config._id, config.userId);
+  const activePageQueue = await inspectActiveShopeePageQueue(config);
+  await logShopeeStep({
+    config,
+    step: "ACTIVE_PAGE_QUEUE_DEBUG",
+    status: activePageQueue.activeJobs.length ? "started" : "success",
+    message: `Active Shopee page queue query returned ${activePageQueue.activeJobs.length} job(s).`,
+    metadata: {
+      activeJobsCount: activePageQueue.activeJobs.length,
+      activeJobs: activePageQueue.activeJobs,
+      query: {
+        type: activePageQueue.query.type,
+        statuses: OPEN_AUTO_POST_JOB_STATUSES,
+        autoSource: "shopee-affiliate",
+        autoPostConfigId: String(config._id),
+        userId: String(config.userId)
+      },
+      staleAfterMinutes: ACTIVE_PAGE_QUEUE_STALE_MS / 60000,
+      checkedAt: activePageQueue.now.toISOString()
+    }
+  });
+
+  for (const staleJob of activePageQueue.staleJobs) {
+    await logShopeeStep({
+      config,
+      step: "STALE_PAGE_JOB_DETECTED",
+      status: "failed",
+      message: `Marked stale Shopee page job ${staleJob.pageJobId} as failed.`,
+      pageId: staleJob.pageId ?? undefined,
+      metadata: {
+        reason: "stale_page_job",
+        staleAfterMinutes: ACTIVE_PAGE_QUEUE_STALE_MS / 60000,
+        activeJob: staleJob
+      }
+    });
+  }
+
+  for (const invalidJob of activePageQueue.invalidJobs) {
+    await logShopeeStep({
+      config,
+      step: "ACTIVE_PAGE_JOB_INVALID_REFERENCE",
+      status: "failed",
+      message: `Marked invalid Shopee page job ${invalidJob.pageJobId} as failed.`,
+      pageId: invalidJob.pageId ?? undefined,
+      metadata: {
+        reason: "stale_page_job",
+        invalidReferenceReason: invalidJob.invalidReferenceReason,
+        activeJob: invalidJob
+      }
+    });
+  }
+
+  const openPageJobs = activePageQueue.remainingActiveJobs.length;
   if (openPageJobs > 0) {
     const pendingRecovery = await retryPendingShopeePageJobs(config.userId, config._id);
     if (pendingRecovery.requeued > 0) {
@@ -1684,6 +1865,9 @@ async function queueShopeeAutoPostsForConfig(
         message: `Re-queued ${pendingRecovery.requeued} pending Shopee page task(s) from the current batch.`,
         metadata: {
           openPageJobs,
+          activeJobsCount: activePageQueue.activeJobs.length,
+          remainingActiveJobsCount: activePageQueue.remainingActiveJobs.length,
+          activeJobs: activePageQueue.remainingActiveJobs,
           requeued: pendingRecovery.requeued,
           processed: pendingRecovery.processed
         }
@@ -1718,6 +1902,9 @@ async function queueShopeeAutoPostsForConfig(
       message: `Skipped creating a new Shopee batch because ${openPageJobs} page job(s) are still pending from the current batch.`,
       metadata: {
         openPageJobs,
+        activeJobsCount: activePageQueue.activeJobs.length,
+        remainingActiveJobsCount: activePageQueue.remainingActiveJobs.length,
+        activeJobs: activePageQueue.remainingActiveJobs,
         selectedPageCount: eligiblePageIds.length,
         nextRunAt: delayedNextRunAt.toISOString()
       }
