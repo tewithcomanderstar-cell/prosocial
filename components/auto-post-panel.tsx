@@ -68,8 +68,10 @@ type ControlPanelStatus = {
   currentJobId?: string | null;
   currentStep?: string | null;
   currentAttempt?: number | null;
+  productAttempt?: number | null;
   maxProductAttempts?: number | null;
   skippedProductsCount?: number;
+  skippedProducts?: Array<{ productId?: string; productName?: string; reason?: string; classification?: string }> | null;
   currentProduct?: string | null;
   currentProductId?: string | null;
   templatePostId?: string | null;
@@ -92,6 +94,11 @@ type ControlPanelStatus = {
   imageFailureReason?: string | null;
   imageFailureStack?: string | null;
   lastSkippedReason?: string | null;
+  templatePostCreationError?: string | null;
+  productUnderstandingError?: string | null;
+  captionGenerationError?: string | null;
+  affiliateLinkError?: string | null;
+  databaseSaveError?: string | null;
   selectedPagesCount?: number;
   createdTasksCount?: number;
   queueHealth?: "ok" | "missing_tasks" | string;
@@ -1381,6 +1388,11 @@ export function AutoPostPanel() {
           <div className="auto-post-metric-card"><span className="muted">Current product id</span><strong>{controlPanel?.currentProductId ? sanitizeText(controlPanel.currentProductId) : "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Template post id</span><strong>{controlPanel?.templatePostId ? sanitizeText(controlPanel.templatePostId) : "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Last skipped reason</span><strong>{controlPanel?.lastSkippedReason ? sanitizeText(controlPanel.lastSkippedReason) : "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Product understanding error</span><strong>{controlPanel?.productUnderstandingError ? sanitizeText(controlPanel.productUnderstandingError) : "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Caption error</span><strong>{controlPanel?.captionGenerationError ? sanitizeText(controlPanel.captionGenerationError) : "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Affiliate link error</span><strong>{controlPanel?.affiliateLinkError ? sanitizeText(controlPanel.affiliateLinkError) : "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Template post error</span><strong>{controlPanel?.templatePostCreationError ? sanitizeText(controlPanel.templatePostCreationError) : "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Database save error</span><strong>{controlPanel?.databaseSaveError ? sanitizeText(controlPanel.databaseSaveError) : "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Storyboard status</span><strong>{controlPanel?.storyboardStatus ?? "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Storyboard started at</span><strong>{formatDateTime(controlPanel?.storyboardStartedAt ?? undefined)}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Storyboard duration</span><strong>{formatDurationMs(controlPanel?.storyboardDurationMs)}</strong></div>

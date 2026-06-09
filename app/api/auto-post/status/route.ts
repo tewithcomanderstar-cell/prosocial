@@ -883,14 +883,6 @@ export async function GET() {
           pageName: pageNameById.get(String(latestProcessingJob.targetPageId ?? "")) ?? "Facebook Page"
         }
       : null;
-    const pageFailureMessage = latestFailedJob
-      ? `${pageNameById.get(String(latestFailedJob.targetPageId ?? "")) ?? "Facebook Page"}: ${
-          sanitizeLegacyMessage(latestFailedJob.failureReason ?? latestFailedJob.lastError ?? latestFailedJob.errorCode ?? "Publish failed")
-        }`
-      : null;
-    const mappedLastError = pageFailureMessage
-      ? { source: "facebook_api", status: null, message: pageFailureMessage }
-      : mapShopeeLastError(sanitizedLastError);
     const latestAttemptLog = logs.find((log) => {
       const metadata = (log.metadata ?? {}) as Record<string, unknown>;
       return (
@@ -898,16 +890,38 @@ export async function GET() {
         metadata.step === "PRODUCT_ATTEMPT_FAILED" ||
         metadata.step === "PRODUCT_ATTEMPT_SUCCESS" ||
         metadata.step === "PRODUCT_SKIPPED" ||
+        metadata.step === "SKIPPED_PRODUCT_WITH_REASON" ||
         metadata.step === "RETRYING_WITH_NEXT_PRODUCT"
       );
     });
     const latestSkippedProductLog = logs.find((log) => {
       const metadata = (log.metadata ?? {}) as Record<string, unknown>;
       const step = String(metadata.step ?? "");
-      return step === "PRODUCT_SKIPPED" || step.startsWith("PRODUCT_SKIPPED_");
+      return step === "PRODUCT_SKIPPED" || step === "SKIPPED_PRODUCT_WITH_REASON" || step.startsWith("PRODUCT_SKIPPED_");
     });
     const latestAttemptMetadata = (latestAttemptLog?.metadata ?? {}) as Record<string, unknown>;
     const latestSkippedMetadata = (latestSkippedProductLog?.metadata ?? {}) as Record<string, unknown>;
+    const latestSkippedReason = latestSkippedProductLog
+      ? sanitizeLegacyMessage(String(
+          latestSkippedMetadata.lastSkippedReason ??
+          latestSkippedMetadata.skipReason ??
+          latestSkippedMetadata.reason ??
+          latestSkippedProductLog.message ??
+          "Product skipped"
+        ))
+      : null;
+    const latestDetailedErrorMessage =
+      latestSkippedReason && String(effectiveConfig?.autoPostStatus ?? "").match(/retrying|running/i)
+        ? `Product skipped: ${latestSkippedReason}`
+        : sanitizedLastError;
+    const pageFailureMessage = latestFailedJob
+      ? `${pageNameById.get(String(latestFailedJob.targetPageId ?? "")) ?? "Facebook Page"}: ${
+          sanitizeLegacyMessage(latestFailedJob.failureReason ?? latestFailedJob.lastError ?? latestFailedJob.errorCode ?? "Publish failed")
+        }`
+      : null;
+    const mappedLastError = pageFailureMessage
+      ? { source: "facebook_api", status: null, message: pageFailureMessage }
+      : mapShopeeLastError(latestDetailedErrorMessage);
     const currentAttempt =
       typeof latestAttemptMetadata.attempt === "number" ? latestAttemptMetadata.attempt : latestAttemptMetadata.attempt ? Number(latestAttemptMetadata.attempt) : null;
     const maxProductAttempts =
@@ -921,7 +935,7 @@ export async function GET() {
           ? latestSkippedMetadata.skippedProductsCount
           : logs.filter((log) => {
               const step = String(((log.metadata ?? {}) as Record<string, unknown>).step ?? "");
-              return step === "PRODUCT_SKIPPED" || step.startsWith("PRODUCT_SKIPPED_");
+              return step === "PRODUCT_SKIPPED" || step === "SKIPPED_PRODUCT_WITH_REASON" || step.startsWith("PRODUCT_SKIPPED_");
             }).length;
     const latestAttemptStep = String(latestAttemptMetadata.step ?? "");
     const isFindingValidProduct =
@@ -1020,9 +1034,14 @@ export async function GET() {
       imageFailureSource: imageFailureDetails.source,
       imageFailureReason: imageFailureDetails.reason ? sanitizeLegacyMessage(imageFailureDetails.reason) : null,
       imageFailureStack: imageFailureDetails.stack ? String(imageFailureDetails.stack).slice(0, 3000) : null,
-      lastSkippedReason: latestSkippedProductLog
-        ? sanitizeLegacyMessage(String(latestSkippedMetadata.reason ?? latestSkippedProductLog.message ?? "Product skipped"))
-        : null,
+      lastSkippedReason: latestSkippedReason,
+      productAttempt: currentAttempt,
+      skippedProducts: latestSkippedMetadata.skippedProducts ?? null,
+      templatePostCreationError: latestAttemptMetadata.templatePostCreationError ?? latestSkippedMetadata.templatePostCreationError ?? null,
+      productUnderstandingError: latestAttemptMetadata.productUnderstandingError ?? latestSkippedMetadata.productUnderstandingError ?? null,
+      captionGenerationError: latestAttemptMetadata.captionGenerationError ?? latestSkippedMetadata.captionGenerationError ?? null,
+      affiliateLinkError: latestAttemptMetadata.affiliateLinkError ?? latestSkippedMetadata.affiliateLinkError ?? null,
+      databaseSaveError: latestAttemptMetadata.databaseSaveError ?? latestSkippedMetadata.databaseSaveError ?? null,
       selectedPagesCount,
       createdTasksCount,
       queueHealth: isFindingValidProduct ? "finding_valid_product" : noTaskRunIsActive ? "preparing_page_tasks" : noTaskRunIsStale ? "waiting_for_template_post" : missingTasksCount > 0 ? "missing_tasks" : "ok",

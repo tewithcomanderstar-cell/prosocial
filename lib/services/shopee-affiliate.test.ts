@@ -370,6 +370,10 @@ function testShopeeCaptionHumanReadabilityGuards() {
   assert.ok(source.includes("removeDuplicateShopeeProductNameLines"));
   assert.ok(autoPostSource.includes("PRODUCT_SKIPPED_CAPTION_READABILITY_FAILED"));
   assert.ok(autoPostSource.includes("retry_with_next_product"));
+  assert.ok(autoPostSource.includes("SKIPPED_PRODUCT_WITH_REASON"));
+  assert.ok(autoPostSource.includes("productUnderstandingError"));
+  assert.ok(autoPostSource.includes("captionGenerationError"));
+  assert.ok(autoPostSource.includes("affiliateLinkError"));
   console.log("PASS Shopee caption human readability guards");
 }
 
