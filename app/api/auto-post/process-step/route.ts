@@ -4,6 +4,7 @@ import { logAction, logAndNotifyError } from "@/lib/services/logging";
 import { handleRoleError, requireRole } from "@/lib/services/permissions";
 import { processQueuedJobs } from "@/lib/services/queue";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
+import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -98,6 +99,18 @@ export async function POST(request: Request) {
       return handleRoleError(error);
     }
 
+    const errorRecord = typeof error === "object" && error ? error as Record<string, unknown> : {};
+    const errorCode = typeof errorRecord.code === "string" ? errorRecord.code : "";
+    const errorStatus = typeof errorRecord.status === "number" ? errorRecord.status : 500;
+    let diagnostics: unknown = null;
+    if (typeof errorRecord.responseSummary === "string") {
+      try {
+        diagnostics = JSON.parse(errorRecord.responseSummary);
+      } catch {
+        diagnostics = errorRecord.responseSummary;
+      }
+    }
+
     const userId = body.userId;
     if (userId) {
       await logAndNotifyError({
@@ -111,6 +124,15 @@ export async function POST(request: Request) {
         },
         error
       });
+    }
+
+    if (errorCode === "shopee_no_eligible_products") {
+      return NextResponse.json({
+        ok: false,
+        message: error instanceof Error ? error.message : "No eligible Shopee products found",
+        code: errorCode,
+        diagnostics
+      }, { status: errorStatus });
     }
 
     return jsonError(error instanceof Error ? error.message : "Auto Post worker step failed", 500, "auto_post_process_step_failed");

@@ -50,6 +50,10 @@ function readAutoPostServiceSource() {
   return readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "auto-post.ts"), "utf8");
 }
 
+function readAutoPostProcessStepRouteSource() {
+  return readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../../app/api/auto-post/process-step/route.ts"), "utf8");
+}
+
 function sourceBetween(source: string, start: string, end: string) {
   const startIndex = source.indexOf(start);
   const endIndex = source.indexOf(end, startIndex + start.length);
@@ -235,6 +239,11 @@ function testShopeeSourceSpecificSelectionGuards() {
   assert.ok(source.includes("SHOPEE_SOURCE_SCORE_BREAKDOWN"));
   assert.ok(source.includes("manual_keyword_required"));
   assert.ok(source.includes("listType_requires_matchId_but_matchId_missing"));
+  assert.ok(source.includes("FALLBACK_PRODUCT_SELECTION_USED"));
+  assert.ok(source.includes("shopee_no_eligible_products"));
+  assert.ok(source.includes("getShopeeProductHardSelectionRejectionReason"));
+  assert.ok(source.includes("fallback_relaxed_selection"));
+  assert.ok(source.includes("PRODUCT_SELECTION_ROOT_CAUSE"));
   assert.equal(source.includes("function weightedRandomProduct"), false);
   console.log("PASS Shopee source-specific selection guards");
 }
@@ -364,6 +373,15 @@ function testShopeeCaptionHumanReadabilityGuards() {
   console.log("PASS Shopee caption human readability guards");
 }
 
+function testAutoPostProcessStepNoEligibleProductsReturnsDiagnostics() {
+  const source = readAutoPostProcessStepRouteSource();
+  assert.ok(source.includes("shopee_no_eligible_products"));
+  assert.ok(source.includes("diagnostics"));
+  assert.ok(source.includes("NextResponse.json"));
+  assert.ok(source.includes("responseSummary"));
+  console.log("PASS auto-post process-step returns diagnostics for no eligible products");
+}
+
 await testMockProviderReturnsProducts();
 testShopeeCategoryNormalization();
 testScoringRewardsStrongProducts();
@@ -380,3 +398,4 @@ testShopeeSourceSpecificSelectionGuards();
 testProductUnderstandingMainUseCaseCoverage();
 testShopeeVisionRescueUsesActualImageInput();
 testShopeeCaptionHumanReadabilityGuards();
+testAutoPostProcessStepNoEligibleProductsReturnsDiagnostics();

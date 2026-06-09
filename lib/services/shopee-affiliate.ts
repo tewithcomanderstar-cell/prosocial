@@ -6050,6 +6050,7 @@ function logShopeeSourceScoreBreakdown(input: {
 const PRODUCT_SELECTION_REJECTION_REASONS = [
   "missing_image",
   "missing_product_url",
+  "missing_affiliate_url",
   "out_of_stock",
   "blocked_category",
   "below_min_price",
@@ -6085,6 +6086,7 @@ type ProductSelectionDiagnostics = {
   topRejectedProducts: Array<Record<string, unknown>>;
   lowScoreBreakdowns: Array<Record<string, unknown>>;
   sourceDataQuality: Record<string, unknown>;
+  fallbackUsed: boolean;
 };
 
 function createProductSelectionDiagnostics(input: {
@@ -6122,6 +6124,7 @@ function createProductSelectionDiagnostics(input: {
     rejectCounts,
     topRejectedProducts: [],
     lowScoreBreakdowns: [],
+    fallbackUsed: false,
     sourceDataQuality: {
       source: input.source,
       productsWithSearchVolume,
@@ -6271,6 +6274,42 @@ function logProductSelectionDiagnostics(diagnostics: ProductSelectionDiagnostics
     percentage,
     recommendation: recommendations[primaryFailureReason] ?? "Inspect PRODUCT_REJECTION_SUMMARY and TOP_REJECTED_PRODUCTS for the dominant rejection reason."
   });
+}
+
+function getProductSelectionDiagnosticsPayload(diagnostics: ProductSelectionDiagnostics) {
+  const sortedRejects = Object.entries(diagnostics.rejectCounts).sort((left, right) => right[1] - left[1]);
+  const [primaryFailureReason = "none", primaryFailureCount = 0] = sortedRejects[0] ?? [];
+  const totalRejected = Object.values(diagnostics.rejectCounts).reduce((sum, count) => sum + count, 0);
+  const percentage = totalRejected > 0 ? Math.round((primaryFailureCount / totalRejected) * 100) : 0;
+  return {
+    fetchedProducts: diagnostics.fetchedProducts,
+    eligibleProducts: diagnostics.finalEligibleProducts,
+    rejectionSummary: diagnostics.rejectCounts,
+    sampleRejectedProducts: diagnostics.topRejectedProducts,
+    appliedFilters: {
+      hardRequirements: ["has_image", "has_product_url_or_affiliate_url", "not_out_of_stock", "not_blocked_category"],
+      strictFiltersApplied: !diagnostics.fallbackUsed,
+      fallbackUsed: diagnostics.fallbackUsed
+    },
+    primaryFailureReason,
+    percentage,
+    sourceDataQuality: diagnostics.sourceDataQuality
+  };
+}
+
+function isShopeeHardRequirementRejection(reason: string | null) {
+  return reason === "missing_image" ||
+    reason === "missing_product_url" ||
+    reason === "out_of_stock" ||
+    reason === "blocked_category";
+}
+
+function getShopeeProductHardSelectionRejectionReason(product: ShopeeProductRecord, blockedCategories?: string[]) {
+  if (!product.productImageUrl && !product.productImageUrls?.length) return "missing_image";
+  if (!product.productUrl && !product.affiliateUrl) return "missing_product_url";
+  if (product.stock !== undefined && product.stock !== null && toFiniteNumber(product.stock) <= 0) return "out_of_stock";
+  if (blockedCategories?.some((category) => isShopeeCategoryMatch(product.category, category))) return "blocked_category";
+  return null;
 }
 
 export async function selectShopeeProductsForPages(input: {
@@ -6490,11 +6529,98 @@ export async function selectShopeeProductsForPages(input: {
     selected.push({ pageId, product: best.product, score: best.score });
   }
 
+  if (!selected.length && discovered.length) {
+    selectionDiagnostics.fallbackUsed = true;
+    console.warn("FALLBACK_PRODUCT_SELECTION_USED", {
+      source: sourceTag,
+      fetchedProducts: selectionDiagnostics.fetchedProducts,
+      afterDedupe: selectionDiagnostics.afterDedupe,
+      reason: "strict_filters_returned_zero_eligible_products",
+      hardRequirements: ["has_image", "has_product_url_or_affiliate_url", "not_out_of_stock", "not_blocked_category"]
+    });
+
+    for (const pageId of input.pageIds) {
+      const fallbackCandidates: ShopeeSourceScoredCandidate[] = [];
+      for (const product of discovered) {
+        const scoreResult = scoreShopeeProductForSource({
+          product,
+          sourceTag,
+          keyword: input.keyword,
+          categories: effectiveCategoryPriority
+        });
+        const hardRejection = getShopeeProductHardSelectionRejectionReason(product, input.blockedCategories);
+        if (hardRejection) {
+          logShopeeSourceScoreBreakdown({
+            sourceTag,
+            pageId,
+            product,
+            scoreResult,
+            finalRank: null,
+            selectionStatus: "rejected",
+            rejectedReason: `fallback_${hardRejection}`
+          });
+          continue;
+        }
+        if (selectedProductIds.has(String(product.productId)) || selectedProductIdentities.has(getShopeeProductIdentity(product))) {
+          continue;
+        }
+        const legacyRiskScore = scoreShopeeProduct({
+          product,
+          recentlyPosted: false,
+          categoryPriority: effectiveCategoryPriority,
+          blockedCategories: input.blockedCategories
+        });
+        fallbackCandidates.push({
+          product,
+          ...scoreResult,
+          score: {
+            ...scoreResult.score,
+            riskFlags: Array.from(new Set([...scoreResult.score.riskFlags, ...legacyRiskScore.riskFlags, "fallback_relaxed_selection"]))
+          }
+        });
+      }
+
+      const pageIndex = input.pageIds.indexOf(pageId);
+      const preferredCategory = rotatedCategories.length ? rotatedCategories[pageIndex % rotatedCategories.length] : "";
+      const preferredCandidates = preferredCategory
+        ? fallbackCandidates.filter((item) => productMatchesPreferredCategory(item.product, preferredCategory))
+        : [];
+      const ranked = sourceSpecificRankedSelection(preferredCandidates.length ? preferredCandidates : fallbackCandidates, sourceTag);
+      const best = pickRandomTopSourceCandidate(ranked);
+
+      for (const candidate of ranked) {
+        logShopeeSourceScoreBreakdown({
+          sourceTag,
+          pageId,
+          product: candidate.product,
+          scoreResult: candidate,
+          finalRank: candidate.finalRank ?? null,
+          selectionStatus: best?.product.productId === candidate.product.productId ? "selected" : "rejected",
+          rejectedReason: best?.product.productId === candidate.product.productId
+            ? "fallback_relaxed_selection"
+            : "fallback_candidate_not_selected"
+        });
+      }
+
+      if (!best) continue;
+      selectedProductIds.add(String(best.product.productId));
+      selectedProductIdentities.add(getShopeeProductIdentity(best.product));
+      selected.push({ pageId, product: best.product, score: best.score });
+    }
+  }
+
   selectionDiagnostics.finalEligibleProducts = selected.length;
   logProductSelectionDiagnostics(selectionDiagnostics);
 
   if (!selected.length) {
-    throw new Error("No eligible Shopee products found for the current filters");
+    const diagnosticsPayload = getProductSelectionDiagnosticsPayload(selectionDiagnostics);
+    throw new ShopeeProviderError(
+      "No eligible Shopee products found after strict and fallback product selection",
+      422,
+      "shopee_no_eligible_products",
+      "internal_api",
+      JSON.stringify(diagnosticsPayload)
+    );
   }
 
   return selected;
