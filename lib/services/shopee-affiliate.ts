@@ -2828,6 +2828,38 @@ function getShopeeEntityBasedMainUseCase(productEntity?: string) {
   return `ใช้สำหรับ${entity}`;
 }
 
+function normalizeShopeeHumanReadableEntityText(value?: string) {
+  return normalizeTextEncoding(value ?? "")
+    .replace(/\(\s*ab\s*roller\s*\)?/giu, " AB Roller")
+    .replace(/\(\s*ab\s*$/giu, " AB Roller")
+    .replace(/\(\s*usb\s*\)?/giu, " USB")
+    .replace(/\(\s*type\s*-\s*c\s*\)?/giu, " Type-C")
+    .replace(/\(\s*typec\s*\)?/giu, " Type-C")
+    .replace(/\s+\)/gu, ")")
+    .replace(/\s+([,.:;!?])/gu, "$1")
+    .replace(/[\s([{/&-]*(?:\.{3}|…)?$/u, "")
+    .replace(/[([{]\s*$/u, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function normalizeShopeeProductUnderstandingReadability<T extends ShopeeProductUnderstanding>(understanding: T): T {
+  const productEntity = normalizeShopeeHumanReadableEntityText(understanding.productEntity);
+  const cleanedTitle = normalizeShopeeHumanReadableEntityText(understanding.cleanedTitle);
+  return {
+    ...understanding,
+    productEntity: productEntity || understanding.productEntity,
+    cleanedTitle: cleanedTitle || productEntity || understanding.cleanedTitle,
+    whatItIs: normalizeShopeeHumanReadableEntityText(understanding.whatItIs) || understanding.whatItIs,
+    mainUseCase: normalizeShopeeHumanReadableEntityText(understanding.mainUseCase) || understanding.mainUseCase,
+    targetAudience: normalizeShopeeHumanReadableEntityText(understanding.targetAudience) || understanding.targetAudience,
+    targetUser: normalizeShopeeHumanReadableEntityText(understanding.targetUser) || understanding.targetUser,
+    keySellingPoint: normalizeShopeeHumanReadableEntityText(understanding.keySellingPoint) || understanding.keySellingPoint,
+    realUsageScenario: normalizeShopeeHumanReadableEntityText(understanding.realUsageScenario) || understanding.realUsageScenario,
+    captionAngle: normalizeShopeeHumanReadableEntityText(understanding.captionAngle) || understanding.captionAngle
+  };
+}
+
 function getShopeeProductUnderstandingCoverageReport() {
   return [...shopeeProductUnderstandingCoverageStats.entries()]
     .map(([productType, stats]) => ({ productType, ...stats }))
@@ -3292,7 +3324,7 @@ function mergeShopeeVisionUnderstanding(
   const confidence = shouldUseVision
     ? Math.max(vision.visionConfidence, textUnderstanding.confidence)
     : textUnderstanding.confidence;
-  const merged: ShopeeProductUnderstanding = {
+  const merged: ShopeeProductUnderstanding = normalizeShopeeProductUnderstandingReadability({
     ...textUnderstanding,
     productEntity,
     cleanedTitle: shouldUseVision && visionProductEntity ? visionProductEntity : textUnderstanding.cleanedTitle,
@@ -3315,7 +3347,7 @@ function mergeShopeeVisionUnderstanding(
     fallbackUsed: textUnderstanding.fallbackUsed || shouldUseVision,
     visualEvidence: vision.visualEvidence,
     failureReasons: []
-  };
+  });
   merged.failureReasons = getShopeeProductUnderstandingFailureReasons(merged);
   merged.recognitionStatus = merged.failureReasons.length
     ? "failed"
@@ -3364,7 +3396,7 @@ function extractShopeeProductUnderstanding(product: ShopeeProductRecord): Shopee
   const bridgeRealUsageScenario = entityBridgeMainUseCase
     ? `ใช้${productEntity}ตามลักษณะสินค้าที่ระบุ`
     : "";
-  const understanding: ShopeeProductUnderstanding = {
+  const understanding: ShopeeProductUnderstanding = normalizeShopeeProductUnderstandingReadability({
     ...entity,
     productEntity,
     productType,
@@ -3380,7 +3412,7 @@ function extractShopeeProductUnderstanding(product: ShopeeProductRecord): Shopee
     fallbackUsed,
     recognitionStatus: "recognized",
     failureReasons: []
-  };
+  });
   understanding.failureReasons = getShopeeProductUnderstandingFailureReasons(understanding);
   understanding.recognitionStatus = understanding.failureReasons.length
     ? "failed"
@@ -4436,6 +4468,49 @@ function buildShopeeStoryboardCtaLine(storyboard: ShopeeProductStoryboard) {
   return `🛒 ดูรายละเอียด${productLabel}ได้ที่ลิงก์ด้านล่าง`;
 }
 
+function getShopeeCaptionHumanReadableLines(caption: string) {
+  return normalizeTextEncoding(caption)
+    .split(/\r?\n/)
+    .map((line) => normalizeShopeeHumanReadableEntityText(line.trim()))
+    .filter(Boolean);
+}
+
+function removeShopeeRepeatedEntitySpam(caption: string, storyboard?: ShopeeProductStoryboard) {
+  if (!storyboard?.productEntity) return caption;
+  const entity = normalizeShopeeHumanReadableEntityText(storyboard.productEntity);
+  const comparableEntity = normalizeShopeeEntityMentionText(entity);
+  if (!comparableEntity) return caption;
+  let entityMentionCount = 0;
+  return caption
+    .split(/\n{2,}/)
+    .map((line) => line.trim())
+    .filter((line) => {
+      const comparableLine = normalizeShopeeEntityMentionText(line);
+      if (!comparableLine.includes(comparableEntity)) return true;
+      entityMentionCount += 1;
+      if (entityMentionCount <= 2) return true;
+      return !isShopeeProductNameDuplicateText(line, entity, 0.65);
+    })
+    .join("\n\n");
+}
+
+function humanizeShopeeCaptionBeforeValidation(caption: string, affiliateLink: string, storyboard?: ShopeeProductStoryboard) {
+  const productName = storyboard?.productEntity || storyboard?.productSimpleName || "";
+  let lines = getShopeeCaptionHumanReadableLines(caption);
+  lines = removeDuplicateShopeeProductNameLines(lines, productName || "สินค้า");
+  const seen = new Set<string>();
+  const uniqueLines = lines.filter((line) => {
+    const key = normalizeShopeeEntityMentionText(line);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const normalized = removeShopeeRepeatedEntitySpam(uniqueLines.join("\n\n"), storyboard)
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return normalizeShopeeCaptionLinkLine(normalized, affiliateLink);
+}
+
 function repairStoryboardAffiliateCaption(caption: string, affiliateLink: string, storyboard?: ShopeeProductStoryboard) {
   let normalized = normalizeShopeeCaptionLinkLine(normalizeTextEncoding(caption), affiliateLink)
     .split(/\r?\n/)
@@ -4469,7 +4544,9 @@ function repairStoryboardAffiliateCaption(caption: string, affiliateLink: string
   if (!normalized.includes(affiliateLink)) {
     normalized = `${normalized}\n\n${formatShopeeShortLinkLine(affiliateLink)}`;
   }
-  return normalizeShopeeCaptionLinkLine(normalized, affiliateLink).replace(/\n{3,}/g, "\n\n").trim();
+  return humanizeShopeeCaptionBeforeValidation(normalized, affiliateLink, storyboard)
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 type StoryboardCaptionFailedRule = {
@@ -4484,6 +4561,8 @@ const SHOPEE_GENERIC_CAPTION_TEMPLATE_PATTERN =
   /ของใช้ในบ้าน|หยิบใช้|ช่วยให้บ้านดูใช้งานง่าย|ช่วงใช้งานในชีวิตประจำวัน|ช่วยให้บ้านน่าอยู่ขึ้น|ใช้ในชีวิตประจำวัน|มีตัวช่วยไว้สะดวกกว่าเดิม|เหมาะกับทุกบ้าน/iu;
 const SHOPEE_METADATA_CAPTION_PATTERN =
   /บริบทใช้งานจริงของ|จุดเด่นของ.+?ช่วยตอบโจทย์|usageContext|mainUseCase|productEntity|targetAudience|productType|realUsageScenario|dailyBenefit|keySellingPoint/iu;
+const SHOPEE_HUMAN_READABILITY_METADATA_PATTERN =
+  /รายละเอียดสินค้า|รายละเอียด[^\n]*|ข้อมูลสินค้า|บริบทใช้งาน|mainUseCase|targetAudience|productEntity|productType/iu;
 
 function normalizeShopeeEntityMentionText(value?: string) {
   return normalizeTextEncoding(value ?? "")
@@ -4533,6 +4612,50 @@ function getShopeeGenericCaptionTemplateViolation(caption: string, storyboard: S
   return { failedLine, phrase };
 }
 
+function countShopeeEntityMentions(caption: string, productEntity: string) {
+  const entity = normalizeShopeeEntityMentionText(normalizeShopeeHumanReadableEntityText(productEntity));
+  const text = normalizeShopeeEntityMentionText(caption);
+  if (!entity || entity.length < 3 || !text.includes(entity)) return 0;
+  return text.split(entity).length - 1;
+}
+
+function getShopeeCaptionHumanReadabilityIssues(caption: string, storyboard: ShopeeProductStoryboard) {
+  const issues: string[] = [];
+  const normalized = normalizeTextEncoding(caption);
+  const cleanedEntity = normalizeShopeeHumanReadableEntityText(storyboard.productEntity || storyboard.productSimpleName);
+  const lines = normalized.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+
+  if (/\([^)]*$/u.test(normalized)) issues.push("broken_parenthesis");
+  if (/\[[^\]]*$/u.test(normalized)) issues.push("broken_square_bracket");
+  if (/\{[^}]*$/u.test(normalized)) issues.push("broken_curly_bracket");
+  if (/[([{&/-]\s*$/u.test(cleanedEntity) || /(?:\.{3}|…)\s*$/u.test(cleanedEntity)) issues.push("product_entity_dangling_suffix");
+
+  const entityMentionCount = countShopeeEntityMentions(normalized, cleanedEntity);
+  if (entityMentionCount > 2) issues.push("repeated_product_entity");
+
+  const metadataLine = lines.find((line) => SHOPEE_HUMAN_READABILITY_METADATA_PATTERN.test(line));
+  if (metadataLine) issues.push("metadata_fragment");
+
+  const shortLine = lines.find((line) => {
+    const comparable = normalizeTextEncoding(line)
+      .replace(/[^\p{L}\p{N}]+/gu, "")
+      .trim();
+    return comparable.length > 0 && comparable.length < 5;
+  });
+  if (shortLine) issues.push("too_short_line");
+
+  const unfinishedLine = lines.find((line) =>
+    /\([^)]*$/u.test(line) ||
+    /\[[^\]]*$/u.test(line) ||
+    /\{[^}]*$/u.test(line) ||
+    /[([{&/-]\s*$/u.test(line) ||
+    /(?:\.{3}|…)\s*$/u.test(line)
+  );
+  if (unfinishedLine) issues.push("unfinished_text");
+
+  return [...new Set(issues)];
+}
+
 function getStoryboardCaptionDebugPayload(input: {
   jobId?: string;
   product: ShopeeProductRecord;
@@ -4575,11 +4698,34 @@ function getStoryboardCaptionDebugPayload(input: {
       "HAS_PRICE_WHEN_PRICE_EXISTS",
       "NO_FORBIDDEN_SOURCE_LANGUAGE",
       "NO_GENERIC_CATEGORY_TEMPLATE",
+      "CAPTION_HUMAN_READABILITY",
       "ENTITY_SPECIFIC_LANGUAGE",
       "STORYBOARD_REQUIRED"
     ],
     validationRulesDisabled: DISABLED_STORYBOARD_PRESENTATION_VALIDATION_RULES
   };
+}
+
+function createCaptionReadabilityValidationError(input: {
+  product: ShopeeProductRecord;
+  storyboard: ShopeeProductStoryboard;
+  caption: string;
+  detectedIssues: string[];
+}) {
+  const detail = {
+    productId: input.product.productId,
+    productEntity: input.storyboard.productEntity,
+    captionPreview: input.caption.slice(0, 500),
+    detectedIssues: input.detectedIssues
+  };
+  console.warn("[CAPTION_READABILITY_FAILED]", detail);
+  return new ShopeeProviderError(
+    `CAPTION_READABILITY_FAILED for ${input.product.productId}: ${input.detectedIssues.join(", ")}`,
+    422,
+    "caption_readability_failed",
+    "internal_api",
+    JSON.stringify(detail)
+  );
 }
 
 function createStoryboardCaptionValidationError(input: {
@@ -4633,6 +4779,16 @@ function validateStoryboardAffiliateCaption(caption: string, storyboard: ShopeeP
     affiliateLink,
     caption: normalized
   }));
+
+  const readabilityIssues = getShopeeCaptionHumanReadabilityIssues(normalized, storyboard);
+  if (readabilityIssues.length) {
+    throw createCaptionReadabilityValidationError({
+      product,
+      storyboard,
+      caption: normalized,
+      detectedIssues: readabilityIssues
+    });
+  }
 
   if (!normalized) {
     failedRules.push({
@@ -6539,6 +6695,29 @@ export async function generateShopeeCaption(input: {
       jobId: input.jobId
     });
   } catch (error) {
+    if (error instanceof ShopeeProviderError && error.code === "caption_readability_failed") {
+      let detail: Record<string, unknown> = {};
+      try {
+        detail = error.responseSummary ? JSON.parse(error.responseSummary) as Record<string, unknown> : {};
+      } catch {
+        detail = {};
+      }
+      await logShopeePackageStage({
+        userId: input.userId,
+        jobId: input.jobId,
+        product: productForStoryboard,
+        step: "CAPTION_READABILITY_FAILED",
+        status: "failed",
+        message: "Caption failed human readability validation",
+        metadata: {
+          productId: product.productId,
+          productEntity: storyboard.productEntity,
+          captionPreview: String(detail.captionPreview ?? "").slice(0, 500),
+          detectedIssues: Array.isArray(detail.detectedIssues) ? detail.detectedIssues : []
+        },
+        error
+      });
+    }
     await logShopeeAutomationEvent({
       userId: input.userId,
       level: "error",

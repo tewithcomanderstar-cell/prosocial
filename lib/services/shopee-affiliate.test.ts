@@ -46,6 +46,10 @@ function readAiServiceSource() {
   return readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "ai.ts"), "utf8");
 }
 
+function readAutoPostServiceSource() {
+  return readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "auto-post.ts"), "utf8");
+}
+
 function sourceBetween(source: string, start: string, end: string) {
   const startIndex = source.indexOf(start);
   const endIndex = source.indexOf(end, startIndex + start.length);
@@ -334,6 +338,32 @@ function testShopeeVisionRescueUsesActualImageInput() {
   console.log("PASS Shopee vision rescue uses actual image input");
 }
 
+function testShopeeCaptionHumanReadabilityGuards() {
+  const source = readShopeeAffiliateServiceSource();
+  const validationSource = sourceBetween(source, "function getShopeeCaptionHumanReadabilityIssues", "function getStoryboardCaptionDebugPayload");
+  const repairSource = sourceBetween(source, "function repairStoryboardAffiliateCaption", "type StoryboardCaptionFailedRule");
+  const autoPostSource = readAutoPostServiceSource();
+  assert.ok(source.includes("CAPTION_HUMAN_READABILITY"));
+  assert.ok(source.includes("CAPTION_READABILITY_FAILED"));
+  assert.ok(source.includes("caption_readability_failed"));
+  assert.ok(source.includes("normalizeShopeeHumanReadableEntityText"));
+  assert.ok(source.includes("AB Roller"));
+  assert.ok(source.includes("Type-C"));
+  assert.ok(validationSource.includes("broken_parenthesis"));
+  assert.ok(validationSource.includes("broken_square_bracket"));
+  assert.ok(validationSource.includes("broken_curly_bracket"));
+  assert.ok(validationSource.includes("product_entity_dangling_suffix"));
+  assert.ok(validationSource.includes("repeated_product_entity"));
+  assert.ok(validationSource.includes("metadata_fragment"));
+  assert.ok(validationSource.includes("too_short_line"));
+  assert.ok(validationSource.includes("unfinished_text"));
+  assert.ok(repairSource.includes("humanizeShopeeCaptionBeforeValidation"));
+  assert.ok(source.includes("removeDuplicateShopeeProductNameLines"));
+  assert.ok(autoPostSource.includes("PRODUCT_SKIPPED_CAPTION_READABILITY_FAILED"));
+  assert.ok(autoPostSource.includes("retry_with_next_product"));
+  console.log("PASS Shopee caption human readability guards");
+}
+
 await testMockProviderReturnsProducts();
 testShopeeCategoryNormalization();
 testScoringRewardsStrongProducts();
@@ -349,3 +379,4 @@ testStoryboardCaptionSourceUsesProductEntityGuards();
 testShopeeSourceSpecificSelectionGuards();
 testProductUnderstandingMainUseCaseCoverage();
 testShopeeVisionRescueUsesActualImageInput();
+testShopeeCaptionHumanReadabilityGuards();

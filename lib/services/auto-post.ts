@@ -765,6 +765,13 @@ function getRetryWithNextProductReason(error: unknown) {
   const code = getAutoPostErrorCode(error);
   const message = getAutoPostErrorMessage(error).toLowerCase();
   const storyboardCaptionReason = getStoryboardCaptionFailureReason(error);
+  if (code === "caption_readability_failed") {
+    return {
+      reason: "caption_readability_failed",
+      step: "PRODUCT_SKIPPED_CAPTION_READABILITY_FAILED",
+      message: "Skipping product because caption readability validation failed"
+    };
+  }
   if (storyboardCaptionReason) {
     return {
       reason: storyboardCaptionReason,
@@ -823,6 +830,7 @@ function getShopeeAttemptFailureReason(error: unknown) {
   const storyboardCaptionReason = getStoryboardCaptionFailureReason(error);
   if (storyboardCaptionReason) return storyboardCaptionReason;
   if (isShopeeShortLinkFailure(error)) return "missing_shortlink";
+  if (code === "caption_readability_failed") return "caption_readability_failed";
   if (code === "product_understanding_failed" || message.includes("product_understanding_failed")) return "product_understanding_failed";
   if (code === "storyboard_generation_failed" || message.includes("product_storyboard_failed")) return "storyboard_generation_failed";
   if (code === "legacy_caption_disabled" || message.includes("legacy shopee caption")) return "legacy_caption_path_called";
@@ -855,7 +863,7 @@ export function classifyAutoPostError(error: unknown): AutoPostErrorClassificati
     return "retry_with_next_product";
   }
 
-  if (getAutoPostErrorCode(error) === "storyboard_caption_validation_failed") {
+  if (getAutoPostErrorCode(error) === "storyboard_caption_validation_failed" || getAutoPostErrorCode(error) === "caption_readability_failed") {
     return "retry_with_next_product";
   }
 
