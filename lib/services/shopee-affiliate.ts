@@ -6047,6 +6047,232 @@ function logShopeeSourceScoreBreakdown(input: {
   });
 }
 
+const PRODUCT_SELECTION_REJECTION_REASONS = [
+  "missing_image",
+  "missing_product_url",
+  "out_of_stock",
+  "blocked_category",
+  "below_min_price",
+  "above_max_price",
+  "below_min_rating",
+  "below_min_sales",
+  "below_min_discount",
+  "already_posted_today",
+  "recently_posted",
+  "below_min_source_score"
+] as const;
+
+type ProductSelectionDiagnostics = {
+  source: ShopeeSourceTag;
+  selectedCategories: string[];
+  keyword: string;
+  fetchedProducts: number;
+  afterDedupe: number;
+  afterMissingImageFilter: number;
+  afterMissingUrlFilter: number;
+  afterOutOfStockFilter: number;
+  afterBlockedCategoryFilter: number;
+  afterMinPriceFilter: number;
+  afterMaxPriceFilter: number;
+  afterMinRatingFilter: number;
+  afterMinSalesFilter: number;
+  afterMinDiscountFilter: number;
+  afterAlreadyPostedTodayFilter: number;
+  afterRecentlyPostedFilter: number;
+  afterSourceScoreFilter: number;
+  finalEligibleProducts: number;
+  rejectCounts: Record<string, number>;
+  topRejectedProducts: Array<Record<string, unknown>>;
+  lowScoreBreakdowns: Array<Record<string, unknown>>;
+  sourceDataQuality: Record<string, unknown>;
+};
+
+function createProductSelectionDiagnostics(input: {
+  source: ShopeeSourceTag;
+  selectedCategories: string[];
+  keyword?: string;
+  fetchedProducts: number;
+  afterDedupe: number;
+  products: ShopeeProductRecord[];
+}): ProductSelectionDiagnostics {
+  const rejectCounts = Object.fromEntries(PRODUCT_SELECTION_REJECTION_REASONS.map((reason) => [reason, 0])) as Record<string, number>;
+  const productsWithSearchVolume = input.products.filter((product) => toFiniteNumber(product.searchVolume) > 0).length;
+  const productsWithRecentSales = input.products.filter((product) => toFiniteNumber(product.recentSales) > 0).length;
+  const productsWithSalesVelocity = input.products.filter((product) => toFiniteNumber(product.salesVelocity) > 0).length;
+  const productsWithSourceApiSignal = input.products.filter((product) => Boolean(product.sourceApiSignal)).length;
+  return {
+    source: input.source,
+    selectedCategories: input.selectedCategories,
+    keyword: input.keyword ?? "",
+    fetchedProducts: input.fetchedProducts,
+    afterDedupe: input.afterDedupe,
+    afterMissingImageFilter: 0,
+    afterMissingUrlFilter: 0,
+    afterOutOfStockFilter: 0,
+    afterBlockedCategoryFilter: 0,
+    afterMinPriceFilter: 0,
+    afterMaxPriceFilter: 0,
+    afterMinRatingFilter: 0,
+    afterMinSalesFilter: 0,
+    afterMinDiscountFilter: 0,
+    afterAlreadyPostedTodayFilter: 0,
+    afterRecentlyPostedFilter: 0,
+    afterSourceScoreFilter: 0,
+    finalEligibleProducts: 0,
+    rejectCounts,
+    topRejectedProducts: [],
+    lowScoreBreakdowns: [],
+    sourceDataQuality: {
+      source: input.source,
+      productsWithSearchVolume,
+      productsWithRecentSales,
+      productsWithSalesVelocity,
+      productsWithSourceApiSignal,
+      productsWithoutSearchVolume: input.afterDedupe - productsWithSearchVolume,
+      productsWithoutRecentSales: input.afterDedupe - productsWithRecentSales,
+      productsWithoutSalesVelocity: input.afterDedupe - productsWithSalesVelocity,
+      productsWithoutSourceApiSignal: input.afterDedupe - productsWithSourceApiSignal
+    }
+  };
+}
+
+function recordProductSelectionStaticFunnel(input: {
+  diagnostics: ProductSelectionDiagnostics;
+  product: ShopeeProductRecord;
+  dailyLocks: { productIds: Set<string>; identities: Set<string> };
+  blockedCategories?: string[];
+  minPrice?: number;
+  maxPrice?: number;
+  minRating?: number;
+  minSales?: number;
+  minDiscountPercent?: number;
+}) {
+  const productId = String(input.product.productId);
+  const identity = getShopeeProductIdentity(input.product);
+  const effectivePrice = getEffectiveProductPrice(input.product);
+  if (!input.product.productImageUrl && !input.product.productImageUrls?.length) return;
+  input.diagnostics.afterMissingImageFilter += 1;
+  if (!input.product.productUrl && !input.product.affiliateUrl) return;
+  input.diagnostics.afterMissingUrlFilter += 1;
+  if (input.product.stock !== undefined && input.product.stock !== null && toFiniteNumber(input.product.stock) <= 0) return;
+  input.diagnostics.afterOutOfStockFilter += 1;
+  if (input.blockedCategories?.some((category) => isShopeeCategoryMatch(input.product.category, category))) return;
+  input.diagnostics.afterBlockedCategoryFilter += 1;
+  if ((input.minPrice ?? 0) > 0 && effectivePrice < (input.minPrice ?? 0)) return;
+  input.diagnostics.afterMinPriceFilter += 1;
+  if ((input.maxPrice ?? 0) > 0 && effectivePrice > (input.maxPrice ?? 0)) return;
+  input.diagnostics.afterMaxPriceFilter += 1;
+  if ((input.minRating ?? 0) > 0 && (input.product.rating ?? 0) < (input.minRating ?? 0)) return;
+  input.diagnostics.afterMinRatingFilter += 1;
+  if ((input.minSales ?? 0) > 0 && (input.product.salesCount ?? 0) < (input.minSales ?? 0)) return;
+  input.diagnostics.afterMinSalesFilter += 1;
+  if ((input.minDiscountPercent ?? 0) > 0 && (input.product.discountPercent ?? 0) < (input.minDiscountPercent ?? 0)) return;
+  input.diagnostics.afterMinDiscountFilter += 1;
+  if (input.diagnostics.rejectCounts.excluded_product_id !== undefined) {
+    // no-op; keeps diagnostics read-only and aligned with actual rejection summary keys.
+  }
+  if (input.dailyLocks.productIds.has(productId) || input.dailyLocks.identities.has(identity)) return;
+  input.diagnostics.afterAlreadyPostedTodayFilter += 1;
+}
+
+function recordProductSelectionRejection(input: {
+  diagnostics: ProductSelectionDiagnostics;
+  product: ShopeeProductRecord;
+  sourceTag: ShopeeSourceTag;
+  scoreResult: ShopeeSourceScoreResult;
+  rejectReason: string;
+}) {
+  input.diagnostics.rejectCounts[input.rejectReason] = (input.diagnostics.rejectCounts[input.rejectReason] ?? 0) + 1;
+  if (input.diagnostics.topRejectedProducts.length < 50) {
+    input.diagnostics.topRejectedProducts.push({
+      productId: input.product.productId,
+      title: input.product.productName,
+      source: input.sourceTag,
+      salesCount: input.product.salesCount ?? 0,
+      rating: input.product.rating ?? 0,
+      reviewCount: input.product.reviewCount ?? 0,
+      discountPercent: input.product.discountPercent ?? 0,
+      commissionRate: input.product.commissionRate ?? 0,
+      sourceScore: input.scoreResult.sourceSpecificScore,
+      rejectReason: input.rejectReason
+    });
+  }
+  if (input.rejectReason === "below_min_source_score" && input.diagnostics.lowScoreBreakdowns.length < 50) {
+    const breakdown = input.scoreResult.scoreBreakdown;
+    input.diagnostics.lowScoreBreakdowns.push({
+      productId: input.product.productId,
+      title: input.product.productName,
+      source: input.sourceTag,
+      salesScore: breakdown.salesScore ?? null,
+      ratingScore: breakdown.ratingScore ?? null,
+      reviewScore: breakdown.reviewScore ?? null,
+      discountScore: breakdown.discountScore ?? null,
+      commissionScore: breakdown.commissionRateScore ?? null,
+      salesMomentumScore: breakdown.salesMomentumScore ?? null,
+      freshnessScore: breakdown.freshnessScore ?? null,
+      keywordMatchScore: breakdown.keywordMatchScore ?? null,
+      searchVolumeScore: breakdown.searchVolumeScore ?? null,
+      sourceApiBonus: breakdown.sourceApiBonus ?? null,
+      finalSourceScore: input.scoreResult.sourceSpecificScore
+    });
+  }
+}
+
+function logProductSelectionDiagnostics(diagnostics: ProductSelectionDiagnostics) {
+  console.info("PRODUCT_SELECTION_FUNNEL", {
+    source: diagnostics.source,
+    selectedCategories: diagnostics.selectedCategories,
+    keyword: diagnostics.keyword,
+    fetchedProducts: diagnostics.fetchedProducts,
+    afterDedupe: diagnostics.afterDedupe,
+    afterMissingImageFilter: diagnostics.afterMissingImageFilter,
+    afterMissingUrlFilter: diagnostics.afterMissingUrlFilter,
+    afterOutOfStockFilter: diagnostics.afterOutOfStockFilter,
+    afterBlockedCategoryFilter: diagnostics.afterBlockedCategoryFilter,
+    afterMinPriceFilter: diagnostics.afterMinPriceFilter,
+    afterMaxPriceFilter: diagnostics.afterMaxPriceFilter,
+    afterMinRatingFilter: diagnostics.afterMinRatingFilter,
+    afterMinSalesFilter: diagnostics.afterMinSalesFilter,
+    afterMinDiscountFilter: diagnostics.afterMinDiscountFilter,
+    afterAlreadyPostedTodayFilter: diagnostics.afterAlreadyPostedTodayFilter,
+    afterRecentlyPostedFilter: diagnostics.afterRecentlyPostedFilter,
+    afterSourceScoreFilter: diagnostics.afterSourceScoreFilter,
+    finalEligibleProducts: diagnostics.finalEligibleProducts
+  });
+  console.info("PRODUCT_REJECTION_SUMMARY", {
+    fetchedProducts: diagnostics.fetchedProducts,
+    rejectCounts: diagnostics.rejectCounts
+  });
+  console.info("TOP_REJECTED_PRODUCTS", diagnostics.topRejectedProducts);
+  console.info("SOURCE_SCORE_BREAKDOWN", diagnostics.lowScoreBreakdowns);
+  console.info("SOURCE_DATA_QUALITY", diagnostics.sourceDataQuality);
+  const sortedRejects = Object.entries(diagnostics.rejectCounts).sort((left, right) => right[1] - left[1]);
+  const [primaryFailureReason = "none", primaryFailureCount = 0] = sortedRejects[0] ?? [];
+  const totalRejected = Object.values(diagnostics.rejectCounts).reduce((sum, count) => sum + count, 0);
+  const percentage = totalRejected > 0 ? Math.round((primaryFailureCount / totalRejected) * 100) : 0;
+  const recommendations: Record<string, string> = {
+    missing_image: "Shopee response product pool has products without usable image URLs.",
+    missing_product_url: "Shopee response product pool has products without productUrl or affiliateUrl.",
+    out_of_stock: "Shopee response product pool is mostly out of stock.",
+    blocked_category: "Configured blocked categories are eliminating the fetched product pool.",
+    below_min_price: "Configured minimum price is higher than most fetched products.",
+    above_max_price: "Configured maximum price is lower than most fetched products.",
+    below_min_rating: "Configured minimum rating is higher than most fetched products.",
+    below_min_sales: "Configured minimum sales is higher than most fetched products.",
+    below_min_discount: "Configured minimum discount is higher than most fetched products.",
+    already_posted_today: "Daily duplicate protection is eliminating the fetched product pool.",
+    recently_posted: "Recent-post duplicate protection is eliminating products for the selected page.",
+    below_min_source_score: "Source-specific score relies on signals that are weak or missing from Shopee API responses."
+  };
+  console.info("PRODUCT_SELECTION_ROOT_CAUSE", {
+    fetchedProducts: diagnostics.fetchedProducts,
+    eligibleProducts: diagnostics.finalEligibleProducts,
+    primaryFailureReason,
+    percentage,
+    recommendation: recommendations[primaryFailureReason] ?? "Inspect PRODUCT_REJECTION_SUMMARY and TOP_REJECTED_PRODUCTS for the dominant rejection reason."
+  });
+}
+
 export async function selectShopeeProductsForPages(input: {
   userId: string;
   pageIds: string[];
@@ -6102,6 +6328,14 @@ export async function selectShopeeProductsForPages(input: {
   }
   const discovered = shuffleShopeeProducts(dedupeShopeeProducts(discoveredByCategory.flat()));
   await upsertShopeeProducts(discovered);
+  const selectionDiagnostics = createProductSelectionDiagnostics({
+    source: sourceTag,
+    selectedCategories: discoveryCategories,
+    keyword: input.keyword,
+    fetchedProducts: discoveredByCategory.flat().length,
+    afterDedupe: discovered.length,
+    products: discovered
+  });
 
   const selected: Array<{ pageId: string; product: ShopeeProductRecord; score: ProductScore }> = [];
   const selectedProductIds = new Set<string>();
@@ -6121,6 +6355,17 @@ export async function selectShopeeProductsForPages(input: {
         sourceTag,
         keyword: input.keyword,
         categories: effectiveCategoryPriority
+      });
+      recordProductSelectionStaticFunnel({
+        diagnostics: selectionDiagnostics,
+        product,
+        dailyLocks,
+        blockedCategories: input.blockedCategories,
+        minPrice: input.minPrice,
+        maxPrice: input.maxPrice,
+        minRating: input.minRating,
+        minSales: input.minSales,
+        minDiscountPercent: input.minDiscountPercent
       });
       const staticRejection = getShopeeProductFilterRejectionReason({
         product,
@@ -6145,6 +6390,13 @@ export async function selectShopeeProductsForPages(input: {
           selectionStatus: "rejected",
           rejectedReason: staticRejection
         });
+        recordProductSelectionRejection({
+          diagnostics: selectionDiagnostics,
+          product,
+          sourceTag,
+          scoreResult,
+          rejectReason: staticRejection
+        });
         continue;
       }
       const recentlyPosted = await wasProductRecentlyPosted(input.userId, pageId, product.productId);
@@ -6158,8 +6410,16 @@ export async function selectShopeeProductsForPages(input: {
           selectionStatus: "rejected",
           rejectedReason: "recently_posted"
         });
+        recordProductSelectionRejection({
+          diagnostics: selectionDiagnostics,
+          product,
+          sourceTag,
+          scoreResult,
+          rejectReason: "recently_posted"
+        });
         continue;
       }
+      selectionDiagnostics.afterRecentlyPostedFilter += 1;
       if (scoreResult.sourceSpecificScore < SHOPEE_MIN_SOURCE_SPECIFIC_SCORE) {
         logShopeeSourceScoreBreakdown({
           sourceTag,
@@ -6170,8 +6430,16 @@ export async function selectShopeeProductsForPages(input: {
           selectionStatus: "rejected",
           rejectedReason: "below_min_source_score"
         });
+        recordProductSelectionRejection({
+          diagnostics: selectionDiagnostics,
+          product,
+          sourceTag,
+          scoreResult,
+          rejectReason: "below_min_source_score"
+        });
         continue;
       }
+      selectionDiagnostics.afterSourceScoreFilter += 1;
       const legacyRiskScore = scoreShopeeProduct({
         product,
         recentlyPosted,
@@ -6221,6 +6489,9 @@ export async function selectShopeeProductsForPages(input: {
     selectedProductIdentities.add(getShopeeProductIdentity(best.product));
     selected.push({ pageId, product: best.product, score: best.score });
   }
+
+  selectionDiagnostics.finalEligibleProducts = selected.length;
+  logProductSelectionDiagnostics(selectionDiagnostics);
 
   if (!selected.length) {
     throw new Error("No eligible Shopee products found for the current filters");
