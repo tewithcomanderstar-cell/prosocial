@@ -97,6 +97,12 @@ export type ShopeeProductRecord = {
   shopName?: string;
   rating?: number;
   commissionRate?: number;
+  searchVolume?: number;
+  recentSales?: number;
+  salesVelocity?: number;
+  stock?: number;
+  productCreatedAt?: Date;
+  sourceApiSignal?: boolean;
   sourceTag: ShopeeSourceTag;
   fetchedAt: Date;
 };
@@ -113,6 +119,10 @@ export type ProductScore = {
   productScore: number;
   reason: string[];
   riskFlags: string[];
+  sourceSpecificScore?: number;
+  scoreBreakdown?: Record<string, unknown>;
+  finalRank?: number;
+  source?: ShopeeSourceTag;
 };
 
 export type ShopeePostPackage = {
@@ -293,10 +303,22 @@ async function summarizeResponse(response: Response) {
   return text.replace(/\s+/g, " ").slice(0, 500);
 }
 
+function assertManualKeywordProvided(query: ProductDiscoveryQuery) {
+  if (query.sourceTag === "manual" && !query.keyword?.trim()) {
+    throw new ShopeeProviderError(
+      "Manual keyword search requires a keyword",
+      400,
+      "manual_keyword_required",
+      "internal_api"
+    );
+  }
+}
+
 export class MockShopeeProvider implements ShopeeProductProvider {
   name = "mock_shopee_provider";
 
   async fetchProducts(query: ProductDiscoveryQuery): Promise<ShopeeProductRecord[]> {
+    assertManualKeywordProvided(query);
     const now = new Date();
     const sourceTag = query.sourceTag ?? "trending";
     const keyword = query.keyword?.trim() || "ของใช้ยอดนิยม";
@@ -396,6 +418,7 @@ export class ShopeeOfficialApiProvider implements ShopeeProductProvider {
   name = "shopee_official_api_provider";
 
   async fetchProducts(query: ProductDiscoveryQuery): Promise<ShopeeProductRecord[]> {
+    assertManualKeywordProvided(query);
     const endpoint = process.env.SHOPEE_AFFILIATE_API_URL;
     const { partnerId, partnerKey } = getShopeeCredentialEnv();
     const envStatus = getShopeeEnvStatus();
@@ -527,7 +550,7 @@ export class ShopeeOfficialApiProvider implements ShopeeProductProvider {
       endpointPath: url.pathname,
       productsCount: payload.products?.length ?? 0
     });
-    return (payload.products ?? []).map(mapExternalProduct(query.sourceTag ?? "trending"));
+    return (payload.products ?? []).map(mapExternalProduct(query.sourceTag ?? "trending", { sourceApiSignal: Boolean(query.sourceTag) }));
   }
 }
 
@@ -551,55 +574,87 @@ function escapeGraphqlString(value: string) {
   return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, " ");
 }
 
-function buildShopeeAffiliateGraphqlQuery(query: ProductDiscoveryQuery) {
+type ShopeeAffiliateGraphqlQueryBuild = {
+  graphqlQuery: string;
+  listType?: number;
+  listTypeApplied: boolean;
+  listTypeSkippedReason?: string;
+  matchId?: string;
+};
+
+function getShopeeAffiliateMatchId() {
+  return process.env.SHOPEE_AFFILIATE_MATCH_ID?.trim() || "";
+}
+
+function shouldApplyShopeeAffiliateListType(listType: number, matchId: string) {
+  if (listType === 0) return true;
+  if (matchId) return true;
+  return process.env.SHOPEE_AFFILIATE_ALLOW_LISTTYPE_WITHOUT_MATCH_ID === "true";
+}
+
+function getShopeeAffiliateGraphqlFields() {
+  return `      productName
+      itemId
+      shopId
+      productLink
+      offerLink
+      imageUrl
+      price
+      priceMin
+      priceMax
+      sales
+      ratingStar
+      commissionRate
+      shopName`;
+}
+
+function buildShopeeAffiliateGraphqlQuery(query: ProductDiscoveryQuery): ShopeeAffiliateGraphqlQueryBuild {
   const limit = Math.max(1, Math.min(query.limit ?? 20, 50));
   const listType = getShopeeAffiliateListType(query.sourceTag);
-  const args = [`limit: ${limit}`, "page: 1", `listType: ${listType}`];
+  const matchId = getShopeeAffiliateMatchId();
+  const listTypeApplied = shouldApplyShopeeAffiliateListType(listType, matchId);
+  const args = [`limit: ${limit}`, "page: 1"];
+  if (listTypeApplied) {
+    args.push(`listType: ${listType}`);
+  } else {
+    console.warn("[shopee/provider] affiliate graphql listType skipped", {
+      sourceTag: query.sourceTag ?? "trending",
+      listType,
+      reason: "listType_requires_matchId_but_matchId_missing"
+    });
+  }
+  if (matchId) args.push(`matchId: "${escapeGraphqlString(matchId)}"`);
   const keyword = query.keyword?.trim() || getShopeeCategorySearchTerms(query.category)[0] || "";
   if (keyword) args.push(`keyword: "${escapeGraphqlString(keyword)}"`);
 
-  return `query {
+  return {
+    graphqlQuery: `query {
   productOfferV2(${args.join(", ")}) {
     nodes {
-      productName
-      itemId
-      shopId
-      productLink
-      offerLink
-      imageUrl
-      price
-      priceMin
-      priceMax
-      sales
-      ratingStar
-      commissionRate
-      shopName
+${getShopeeAffiliateGraphqlFields()}
     }
   }
-}`;
+}`,
+    listType,
+    listTypeApplied,
+    listTypeSkippedReason: listTypeApplied ? undefined : "listType_requires_matchId_but_matchId_missing",
+    matchId: matchId || undefined
+  };
 }
 
-function buildShopeeAffiliateGraphqlFallbackQuery(query: ProductDiscoveryQuery) {
+function buildShopeeAffiliateGraphqlFallbackQuery(query: ProductDiscoveryQuery): ShopeeAffiliateGraphqlQueryBuild {
   const limit = Math.max(1, Math.min(query.limit ?? 20, 50));
-  return `query {
+  return {
+    graphqlQuery: `query {
   productOfferV2(limit: ${limit}, page: 1) {
     nodes {
-      productName
-      itemId
-      shopId
-      productLink
-      offerLink
-      imageUrl
-      price
-      priceMin
-      priceMax
-      sales
-      ratingStar
-      commissionRate
-      shopName
+${getShopeeAffiliateGraphqlFields()}
     }
   }
-}`;
+}`,
+    listTypeApplied: false,
+    listTypeSkippedReason: "minimal_fallback_query"
+  };
 }
 
 function isShopeeGraphqlSystemError(payload: Record<string, any>) {
@@ -608,6 +663,18 @@ function isShopeeGraphqlSystemError(payload: Record<string, any>) {
     const message = String(error?.message ?? error?.extensions?.message ?? "").toLowerCase();
     return String(code) === "10000" || message.includes("system error");
   });
+}
+
+function optionalShopeeNumber(value: unknown) {
+  if (value === undefined || value === null || value === "") return undefined;
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : undefined;
+}
+
+function optionalShopeeDate(value: unknown) {
+  if (!value) return undefined;
+  const date = new Date(String(value));
+  return Number.isNaN(date.getTime()) ? undefined : date;
 }
 
 function normalizeCachedShopeeProduct(product: any, sourceTag: ShopeeSourceTag): ShopeeProductRecord {
@@ -630,6 +697,12 @@ function normalizeCachedShopeeProduct(product: any, sourceTag: ShopeeSourceTag):
     shopName: product.shopName ? String(product.shopName) : undefined,
     rating: product.rating === undefined || product.rating === null ? undefined : Number(product.rating),
     commissionRate: product.commissionRate === undefined || product.commissionRate === null ? undefined : Number(product.commissionRate),
+    searchVolume: optionalShopeeNumber(product.searchVolume),
+    recentSales: optionalShopeeNumber(product.recentSales),
+    salesVelocity: optionalShopeeNumber(product.salesVelocity),
+    stock: optionalShopeeNumber(product.stock),
+    productCreatedAt: optionalShopeeDate(product.productCreatedAt),
+    sourceApiSignal: Boolean(product.sourceApiSignal),
     sourceTag,
     fetchedAt: product.fetchedAt ? new Date(product.fetchedAt) : new Date()
   };
@@ -686,11 +759,30 @@ async function fetchShopeeAffiliateGraphqlProducts(input: {
 }) {
   const primaryQuery = buildShopeeAffiliateGraphqlQuery(input.query);
   try {
-    return await fetchShopeeAffiliateGraphqlProductsWithQuery({
+    const products = await fetchShopeeAffiliateGraphqlProductsWithQuery({
       ...input,
-      graphqlQuery: primaryQuery,
+      graphqlQuery: primaryQuery.graphqlQuery,
+      listTypeApplied: primaryQuery.listTypeApplied,
+      listTypeSkippedReason: primaryQuery.listTypeSkippedReason,
       queryMode: "primary"
     });
+    if (!products.length && primaryQuery.listTypeApplied) {
+      console.warn("[shopee/provider] affiliate graphql returned empty listType result; retrying without listType", {
+        sourceTag: input.query.sourceTag ?? "trending",
+        listType: primaryQuery.listType,
+        hasKeyword: Boolean(input.query.keyword),
+        hasCategory: normalizeShopeeCategory(input.query.category) !== DEFAULT_SHOPEE_CATEGORY
+      });
+      const fallbackQuery = buildShopeeAffiliateGraphqlFallbackQuery(input.query);
+      return await fetchShopeeAffiliateGraphqlProductsWithQuery({
+        ...input,
+        graphqlQuery: fallbackQuery.graphqlQuery,
+        listTypeApplied: fallbackQuery.listTypeApplied,
+        listTypeSkippedReason: "empty_listType_result",
+        queryMode: "minimal"
+      });
+    }
+    return products;
   } catch (error) {
     if (!(error instanceof ShopeeProviderError) || error.code !== "shopee_graphql_system_error") {
       throw error;
@@ -705,7 +797,9 @@ async function fetchShopeeAffiliateGraphqlProducts(input: {
     try {
       return await fetchShopeeAffiliateGraphqlProductsWithQuery({
         ...input,
-        graphqlQuery: buildShopeeAffiliateGraphqlFallbackQuery(input.query),
+        graphqlQuery: buildShopeeAffiliateGraphqlFallbackQuery(input.query).graphqlQuery,
+        listTypeApplied: false,
+        listTypeSkippedReason: "minimal_fallback_query",
         queryMode: "minimal"
       });
     } catch (fallbackError) {
@@ -726,6 +820,8 @@ async function fetchShopeeAffiliateGraphqlProductsWithQuery(input: {
   secret: string;
   query: ProductDiscoveryQuery;
   graphqlQuery: string;
+  listTypeApplied: boolean;
+  listTypeSkippedReason?: string;
   queryMode: "primary" | "minimal";
 }) {
   const url = new URL(input.endpoint);
@@ -747,6 +843,8 @@ async function fetchShopeeAffiliateGraphqlProductsWithQuery(input: {
     hasSecret: Boolean(input.secret),
     authMode: "affiliate_graphql",
     queryMode: input.queryMode,
+    listTypeApplied: input.listTypeApplied,
+    listTypeSkippedReason: input.listTypeSkippedReason,
     signatureGenerated: Boolean(signature),
     authorizationScheme: "SHA256"
   });
@@ -762,6 +860,8 @@ async function fetchShopeeAffiliateGraphqlProductsWithQuery(input: {
         authMode: "affiliate_graphql",
         queryMode: input.queryMode,
         sourceTag: input.query.sourceTag ?? "trending",
+        listTypeApplied: input.listTypeApplied,
+        listTypeSkippedReason: input.listTypeSkippedReason,
         endpointHost: url.host,
         endpointPath: url.pathname
       }
@@ -790,6 +890,8 @@ async function fetchShopeeAffiliateGraphqlProductsWithQuery(input: {
       metadata: {
         authMode: "affiliate_graphql",
         queryMode: input.queryMode,
+        listTypeApplied: input.listTypeApplied,
+        listTypeSkippedReason: input.listTypeSkippedReason,
         bodySummary,
         endpointHost: url.host,
         endpointPath: url.pathname
@@ -802,6 +904,8 @@ async function fetchShopeeAffiliateGraphqlProductsWithQuery(input: {
       bodySummary,
       authMode: "affiliate_graphql",
       queryMode: input.queryMode,
+      listTypeApplied: input.listTypeApplied,
+      listTypeSkippedReason: input.listTypeSkippedReason,
       signatureGenerated: Boolean(signature)
     });
     const message =
@@ -825,6 +929,8 @@ async function fetchShopeeAffiliateGraphqlProductsWithQuery(input: {
       metadata: {
         authMode: "affiliate_graphql",
         queryMode: input.queryMode,
+        listTypeApplied: input.listTypeApplied,
+        listTypeSkippedReason: input.listTypeSkippedReason,
         endpointHost: url.host,
         endpointPath: url.pathname,
         graphqlErrors: summary
@@ -834,6 +940,8 @@ async function fetchShopeeAffiliateGraphqlProductsWithQuery(input: {
       endpointHost: url.host,
       endpointPath: url.pathname,
       queryMode: input.queryMode,
+      listTypeApplied: input.listTypeApplied,
+      listTypeSkippedReason: input.listTypeSkippedReason,
       errorSummary: summary
     });
     const isSystemError = isShopeeGraphqlSystemError(payload);
@@ -858,17 +966,22 @@ async function fetchShopeeAffiliateGraphqlProductsWithQuery(input: {
     endpointHost: url.host,
     endpointPath: url.pathname,
     queryMode: input.queryMode,
+    listTypeApplied: input.listTypeApplied,
+    listTypeSkippedReason: input.listTypeSkippedReason,
     productsCount: Array.isArray(nodes) ? nodes.length : 0
   });
 
-  return (Array.isArray(nodes) ? nodes : []).map(mapExternalProduct(input.query.sourceTag ?? "trending"));
+  return (Array.isArray(nodes) ? nodes : []).map(
+    mapExternalProduct(input.query.sourceTag ?? "trending", { sourceApiSignal: input.listTypeApplied })
+  );
 }
 
-function mapExternalProduct(sourceTag: ShopeeSourceTag) {
+function mapExternalProduct(sourceTag: ShopeeSourceTag, options: { sourceApiSignal?: boolean } = {}) {
   return (item: Record<string, unknown>): ShopeeProductRecord => {
-    const productId = String(item.product_id ?? item.productId ?? item.item_id ?? crypto.randomUUID());
+    const productId = String(item.product_id ?? item.productId ?? item.item_id ?? item.itemId ?? crypto.randomUUID());
     const shopId = String(item.shop_id ?? item.shopId ?? "");
     const itemId = String(item.item_id ?? item.itemId ?? productId);
+    const productCreatedAt = item.product_created_at ?? item.productCreatedAt ?? item.created_at ?? item.createdAt;
     return {
       productId,
       shopId,
@@ -892,6 +1005,12 @@ function mapExternalProduct(sourceTag: ShopeeSourceTag) {
       shopName: item.shop_name === undefined && item.shopName === undefined ? undefined : String(item.shop_name ?? item.shopName),
       rating: item.rating === undefined && item.ratingStar === undefined ? undefined : Number(item.rating ?? item.ratingStar),
       commissionRate: item.commission_rate === undefined && item.commissionRate === undefined ? undefined : Number(item.commission_rate ?? item.commissionRate),
+      searchVolume: optionalShopeeNumber(item.search_volume ?? item.searchVolume ?? item.search_count ?? item.searchCount),
+      recentSales: optionalShopeeNumber(item.recent_sales ?? item.recentSales),
+      salesVelocity: optionalShopeeNumber(item.sales_velocity ?? item.salesVelocity),
+      stock: optionalShopeeNumber(item.stock ?? item.stockCount ?? item.availability),
+      productCreatedAt: optionalShopeeDate(productCreatedAt),
+      sourceApiSignal: Boolean(options.sourceApiSignal),
       sourceTag,
       fetchedAt: new Date()
     };
@@ -2436,12 +2555,23 @@ type ShopeeProductEntity = {
   keySellingPoint: string;
   realUsageScenario: string;
   targetUser: string;
+  targetAudience?: string;
   captionAngle: string;
+  confidence?: number;
   removedNoiseWords: readonly string[];
+};
+
+type ShopeeProductUnderstanding = ShopeeProductEntity & {
+  targetAudience: string;
+  confidence: number;
+  source: "rule_entity_extraction";
+  failureReasons: string[];
 };
 
 function extractShopeeKnownBrand(text: string) {
   if (/coway|โคเวย์/i.test(text)) return "Coway";
+  if (/tempur/i.test(text)) return "TEMPUR";
+  if (/maui\s*&\s*sons|maui\s+and\s+sons/i.test(text)) return "MAUI & SONS";
   if (/dior/i.test(text)) return "Dior";
   if (/bosch/i.test(text)) return "Bosch";
   if (/yonex/i.test(text)) return "YONEX";
@@ -2468,6 +2598,52 @@ function extractShopeeProductEntity(product: ShopeeProductRecord): ShopeeProduct
     getShopeeProductImageSourceText(product)
   ].filter(Boolean).join(" ")).toLowerCase();
 
+  if (/tempur|travel\s?pillow|neck\s?pillow|หมอนรองคอ|หมอนเดินทาง/i.test(haystack)) {
+    const brand = extractShopeeKnownBrand(haystack);
+    const productEntity = compactProductText(["หมอนรองคอ", brand].filter(Boolean).join(" "), 64);
+    return {
+      rawTitle,
+      cleanedTitle: productEntity || cleanedTitle,
+      productEntity: productEntity || "หมอนรองคอเดินทาง",
+      brand,
+      model: extractShopeeKnownModel(haystack),
+      productType: "travel_pillow",
+      whatItIs: "หมอนรองคอสำหรับใช้ระหว่างเดินทาง",
+      mainUseCase: "รองคอระหว่างเดินทางด้วยรถ เครื่องบิน หรือรถไฟ",
+      keySellingPoint: "ช่วยรองรับต้นคอให้เดินทางไกลได้สบายขึ้น",
+      realUsageScenario: "ใช้ในรถ บนเครื่องบิน หรือระหว่างนั่งพักระหว่างเดินทาง",
+      targetUser: "นักเดินทางหรือคนที่ต้องนั่งรถและเครื่องบินนาน",
+      targetAudience: "นักเดินทาง",
+      captionAngle: "เล่าการใช้หมอนรองคอระหว่างเดินทางไกล ช่วยรองรับต้นคอในรถหรือบนเครื่องบิน",
+      confidence: 96,
+      removedNoiseWords: titleInfo.removedNoiseWords
+    };
+  }
+
+  if (/(ไส้กรอง|filter\s?(?:cartridge|element|replacement)|อะไหล่|อุปกรณ์เสริม|accessory).*(เครื่องกรองน้ำ|กรองน้ำ|water\s?(?:purifier|filter))|(เครื่องกรองน้ำ|กรองน้ำ|water\s?(?:purifier|filter)).*(ไส้กรอง|filter\s?(?:cartridge|element|replacement)|อะไหล่|อุปกรณ์เสริม|accessory)/i.test(haystack)) {
+    const brand = extractShopeeKnownBrand(haystack);
+    const productEntity = /ไส้กรอง|filter\s?(?:cartridge|element|replacement)/i.test(haystack)
+      ? "ไส้กรองเครื่องกรองน้ำ"
+      : "อุปกรณ์เครื่องกรองน้ำ";
+    return {
+      rawTitle,
+      cleanedTitle: compactProductText([productEntity, brand].filter(Boolean).join(" "), 64) || cleanedTitle,
+      productEntity,
+      brand,
+      model: extractShopeeKnownModel(haystack),
+      productType: "water_purifier_accessory",
+      whatItIs: "อุปกรณ์หรือไส้กรองสำหรับใช้งานร่วมกับเครื่องกรองน้ำ",
+      mainUseCase: "ใช้เปลี่ยนหรือใช้งานร่วมกับเครื่องกรองน้ำเพื่อกรองน้ำดื่ม",
+      keySellingPoint: "ช่วยให้เครื่องกรองน้ำพร้อมกรองน้ำดื่มสะอาดได้ต่อเนื่อง",
+      realUsageScenario: "เปลี่ยนกับเครื่องกรองน้ำในบ้าน คอนโด หรือมุมครัว",
+      targetUser: "คนที่มีเครื่องกรองน้ำและต้องการเปลี่ยนไส้กรองหรืออะไหล่",
+      targetAudience: "ผู้ใช้เครื่องกรองน้ำ",
+      captionAngle: "เล่าเรื่องการเปลี่ยนไส้กรองหรืออุปกรณ์เครื่องกรองน้ำเพื่อให้มีน้ำดื่มสะอาดพร้อมใช้",
+      confidence: 94,
+      removedNoiseWords: titleInfo.removedNoiseWords
+    };
+  }
+
   if (/เครื่องกรองน้ำ|กรองน้ำ|น้ำดื่ม|coway|โคเวย์|water\s?(?:purifier|filter)/i.test(haystack)) {
     const brand = extractShopeeKnownBrand(haystack);
     const model = extractShopeeKnownModel(haystack);
@@ -2488,7 +2664,9 @@ function extractShopeeProductEntity(product: ShopeeProductRecord): ShopeeProduct
       keySellingPoint: "ช่วยให้มีน้ำดื่มพร้อมกดใช้โดยไม่ต้องซื้อน้ำขวดบ่อย",
       realUsageScenario: "วางไว้ในบ้าน คอนโด หรือมุมครัวสำหรับกดน้ำดื่มระหว่างวัน",
       targetUser: "คนอยู่บ้าน คอนโด หรือครอบครัวที่อยากมีน้ำดื่มสะอาดไว้กดใช้",
+      targetAudience: "คนอยู่บ้านหรือคอนโด",
       captionAngle: "เล่าเรื่องความสะดวกของการมีน้ำดื่มสะอาดไว้กดใช้ในบ้าน ลดการซื้อน้ำขวดและเหมาะกับบ้านหรือคอนโด",
+      confidence: 94,
       removedNoiseWords: titleInfo.removedNoiseWords
     };
   }
@@ -2508,13 +2686,17 @@ function extractShopeeProductEntity(product: ShopeeProductRecord): ShopeeProduct
       keySellingPoint: "ช่วยให้มีน้ำหรือเครื่องดื่มติดตัวไว้จิบระหว่างวันได้สะดวก",
       realUsageScenario: "โต๊ะทำงาน กระเป๋าเดินทาง ฟิตเนส หรือวันที่ออกไปข้างนอก",
       targetUser: "คนทำงาน คนเดินทาง หรือคนออกกำลังกายที่อยากพกน้ำติดตัว",
+      targetAudience: "คนทำงาน คนเดินทาง หรือคนออกกำลังกาย",
       captionAngle: "เล่าเรื่องการพกน้ำ เก็บอุณหภูมิ และใช้จริงระหว่างทำงาน เดินทาง หรือออกกำลังกาย",
+      confidence: 94,
       removedNoiseWords: titleInfo.removedNoiseWords
     };
   }
 
   if (/เสื้อ|shirt|t-?shirt|tee|blouse|polo|กระโปรง|skirt|เดรส|dress|กางเกง|pants|แฟชั่น|fashion/i.test(haystack) && !/รองเท้า|shoe|sneaker|ถุงเท้า|sock|กระเป๋า|bag|wallet/i.test(haystack)) {
-    const productType = /กระโปรง|skirt/i.test(haystack)
+    const productType = /sport\s?shirt|เสื้อกีฬา|maui\s*&\s*sons/i.test(haystack)
+      ? "sport_shirt"
+      : /กระโปรง|skirt/i.test(haystack)
       ? "กระโปรง"
       : /เดรส|dress/i.test(haystack)
         ? "เดรส"
@@ -2523,26 +2705,37 @@ function extractShopeeProductEntity(product: ShopeeProductRecord): ShopeeProduct
           : /เสื้อ|shirt|t-?shirt|tee|blouse|polo/i.test(haystack)
             ? "เสื้อ"
             : "เสื้อผ้าแฟชั่น";
-    const isTop = /เสื้อ|shirt|t-?shirt|tee|blouse|polo/i.test(productType);
+    const isTop = /เสื้อ|shirt|t-?shirt|tee|blouse|polo|sport_shirt/i.test(productType);
     const isSkirt = /กระโปรง/i.test(productType);
+    const brand = extractShopeeKnownBrand(haystack);
+    const productEntity = productType === "sport_shirt"
+      ? compactProductText(["เสื้อกีฬา", brand].filter(Boolean).join(" "), 64)
+      : productType;
     const wearAction = isSkirt
       ? "ใส่แมตช์กับเสื้อให้เข้ากับวันทำงาน ไปเที่ยว หรือวันลำลอง"
       : isTop
         ? "ใส่แมตช์กับกางเกงหรือกระโปรงได้ทั้งวันทำงาน ไปเที่ยว และวันลำลอง"
         : "ใส่แต่งตัวให้เข้ากับวันทำงาน ไปเที่ยว หรือวันลำลอง";
+    const mainUseCase = productType === "sport_shirt"
+      ? "สวมใส่ออกกำลังกาย เล่นกีฬา หรือแต่งลุคลำลองแบบสปอร์ต"
+      : wearAction;
     return {
       rawTitle,
-      cleanedTitle: cleanedTitle || productType,
-      productEntity: productType,
-      brand: extractShopeeKnownBrand(haystack),
+      cleanedTitle: productEntity || cleanedTitle || productType,
+      productEntity,
+      brand,
       model: extractShopeeKnownModel(haystack),
       productType,
-      whatItIs: `${productType}สำหรับแต่งตัวและแมตช์ลุค`,
-      mainUseCase: wearAction,
+      whatItIs: productType === "sport_shirt" ? "เสื้อกีฬาสำหรับออกกำลังกายและใส่ลำลอง" : `${productType}สำหรับแต่งตัวและแมตช์ลุค`,
+      mainUseCase,
       keySellingPoint: "ทรง ดีไซน์ และเนื้อผ้าช่วยให้แต่งตัวได้ง่ายขึ้น",
-      realUsageScenario: "ใส่ไปทำงาน ไปเที่ยว คาเฟ่ หรือวันสบาย ๆ",
-      targetUser: "คนที่หาเสื้อผ้าใส่ง่าย แมตช์ง่าย และใช้ได้หลายโอกาส",
-      captionAngle: "รีวิวจากตัวเสื้อผ้าจริง เน้นการใส่สบาย ทรง ดีไซน์ เนื้อผ้า และการแมตช์ลุค",
+      realUsageScenario: productType === "sport_shirt" ? "ใส่ตอนออกกำลังกาย เล่นกีฬา เดินทาง หรือวันลำลอง" : "ใส่ไปทำงาน ไปเที่ยว คาเฟ่ หรือวันสบาย ๆ",
+      targetUser: productType === "sport_shirt" ? "ผู้ชายหรือคนที่หาเสื้อกีฬาใส่ออกกำลังกายและใส่ลำลอง" : "คนที่หาเสื้อผ้าใส่ง่าย แมตช์ง่าย และใช้ได้หลายโอกาส",
+      targetAudience: productType === "sport_shirt" ? "ผู้ชาย" : "คนที่หาเสื้อผ้าใส่ง่าย",
+      captionAngle: productType === "sport_shirt"
+        ? "รีวิวเสื้อกีฬาจากการใส่จริง เน้นความคล่องตัว เนื้อผ้า ทรง และลุคสปอร์ต"
+        : "รีวิวจากตัวเสื้อผ้าจริง เน้นการใส่สบาย ทรง ดีไซน์ เนื้อผ้า และการแมตช์ลุค",
+      confidence: productType === "sport_shirt" ? 95 : 90,
       removedNoiseWords: titleInfo.removedNoiseWords
     };
   }
@@ -2565,8 +2758,183 @@ function extractShopeeProductEntity(product: ShopeeProductRecord): ShopeeProduct
     realUsageScenario: "",
     targetUser: "",
     captionAngle: "",
+    confidence: 35,
     removedNoiseWords: titleInfo.removedNoiseWords
   };
+}
+
+function getShopeeFallbackUnderstandingDetails(productType: string, haystack: string) {
+  const normalizedType = normalizeTextEncoding(productType);
+  const text = `${normalizedType} ${haystack}`;
+  const details: Partial<Pick<
+    ShopeeProductEntity,
+    "productEntity" | "productType" | "whatItIs" | "mainUseCase" | "keySellingPoint" | "realUsageScenario" | "targetUser" | "targetAudience" | "captionAngle" | "confidence"
+  >> = {};
+
+  if (/travel_pillow|หมอนรองคอ|travel\s?pillow|neck\s?pillow|tempur/i.test(text)) {
+    details.productEntity = /tempur/i.test(text) ? "หมอนรองคอ TEMPUR" : "หมอนรองคอเดินทาง";
+    details.productType = "travel_pillow";
+    details.whatItIs = "หมอนรองคอสำหรับใช้ระหว่างเดินทาง";
+    details.mainUseCase = "รองคอระหว่างเดินทางด้วยรถ เครื่องบิน หรือรถไฟ";
+    details.keySellingPoint = "ช่วยรองรับต้นคอให้เดินทางไกลได้สบายขึ้น";
+    details.realUsageScenario = "ใช้ในรถ บนเครื่องบิน หรือระหว่างนั่งพักระหว่างเดินทาง";
+    details.targetUser = "นักเดินทางหรือคนที่ต้องนั่งรถและเครื่องบินนาน";
+    details.targetAudience = "นักเดินทาง";
+    details.captionAngle = "เล่าการใช้หมอนรองคอระหว่างเดินทางไกลในรถหรือบนเครื่องบิน";
+    details.confidence = 92;
+  } else if (/water_purifier_accessory|ไส้กรองเครื่องกรองน้ำ|อุปกรณ์เครื่องกรองน้ำ|filter\s?(?:cartridge|element|replacement)/i.test(text)) {
+    details.productEntity = /ไส้กรอง|filter/i.test(text) ? "ไส้กรองเครื่องกรองน้ำ" : "อุปกรณ์เครื่องกรองน้ำ";
+    details.productType = "water_purifier_accessory";
+    details.whatItIs = "อุปกรณ์หรือไส้กรองสำหรับใช้งานร่วมกับเครื่องกรองน้ำ";
+    details.mainUseCase = "ใช้เปลี่ยนหรือใช้งานร่วมกับเครื่องกรองน้ำเพื่อกรองน้ำดื่ม";
+    details.keySellingPoint = "ช่วยให้เครื่องกรองน้ำพร้อมกรองน้ำดื่มสะอาดได้ต่อเนื่อง";
+    details.realUsageScenario = "เปลี่ยนกับเครื่องกรองน้ำในบ้าน คอนโด หรือมุมครัว";
+    details.targetUser = "คนที่มีเครื่องกรองน้ำและต้องการเปลี่ยนไส้กรองหรืออะไหล่";
+    details.targetAudience = "ผู้ใช้เครื่องกรองน้ำ";
+    details.captionAngle = "เล่าเรื่องการเปลี่ยนไส้กรองหรืออุปกรณ์เครื่องกรองน้ำเพื่อให้มีน้ำดื่มสะอาดพร้อมใช้";
+    details.confidence = 90;
+  } else if (/เครื่องกรองน้ำ|กรองน้ำ|น้ำดื่ม|water\s?(?:purifier|filter)|coway|โคเวย์/i.test(text)) {
+    details.productType = "water_purifier";
+    details.mainUseCase = "กดน้ำดื่มสะอาดไว้ใช้ในบ้าน คอนโด หรือมุมครัว";
+    details.targetAudience = "คนอยู่บ้านหรือคอนโด";
+    details.confidence = 88;
+  } else if (/sport_shirt|เสื้อกีฬา|sport\s?shirt/i.test(text)) {
+    details.productEntity = "เสื้อกีฬา";
+    details.productType = "sport_shirt";
+    details.whatItIs = "เสื้อกีฬาสำหรับออกกำลังกายและใส่ลำลอง";
+    details.mainUseCase = "สวมใส่ออกกำลังกาย เล่นกีฬา หรือแต่งลุคลำลองแบบสปอร์ต";
+    details.keySellingPoint = "เนื้อผ้า ทรง และดีไซน์ช่วยให้เคลื่อนไหวคล่องตัว";
+    details.realUsageScenario = "ใส่ตอนออกกำลังกาย เล่นกีฬา เดินทาง หรือวันลำลอง";
+    details.targetUser = "ผู้ชายหรือคนที่หาเสื้อกีฬาใส่ออกกำลังกายและใส่ลำลอง";
+    details.targetAudience = "ผู้ชาย";
+    details.captionAngle = "รีวิวเสื้อกีฬาจากการใส่จริง เน้นความคล่องตัว เนื้อผ้า ทรง และลุคสปอร์ต";
+    details.confidence = 90;
+  } else if (/เสื้อ|กระโปรง|เดรส|กางเกง|เสื้อผ้า|แฟชั่น|shirt|skirt|dress|pants/i.test(text)) {
+    details.productType = /กระโปรง|skirt/i.test(text) ? "skirt" : /เดรส|dress/i.test(text) ? "dress" : /กางเกง|pants/i.test(text) ? "pants" : "shirt";
+    details.mainUseCase = "ใส่แต่งตัวให้เข้ากับวันทำงาน ไปเที่ยว หรือวันลำลอง";
+    details.targetAudience = "คนที่หาเสื้อผ้าใส่ง่าย";
+    details.confidence = 82;
+  } else if (/กระบอกน้ำ|ขวดน้ำ|กระติก|แก้วเก็บ|tumbler|water\s?bottle|เก็บอุณหภูมิ|เก็บความเย็น/i.test(text)) {
+    details.productType = "drinkware";
+    details.mainUseCase = "พกน้ำหรือเครื่องดื่มไปทำงาน เดินทาง หรือออกกำลังกาย";
+    details.targetAudience = "คนทำงาน คนเดินทาง หรือคนออกกำลังกาย";
+    details.confidence = 86;
+  } else if (/กล้องติดรถ|dash\s?cam|บันทึกภาพรถ/i.test(text)) {
+    details.productType = "dashcam";
+    details.mainUseCase = "ติดหน้ารถเพื่อบันทึกเส้นทาง เหตุการณ์ และหลักฐานระหว่างขับขี่";
+    details.targetAudience = "คนใช้รถ";
+    details.confidence = 86;
+  } else if (/รองเท้า|running\s?shoe|sneaker|shoe/i.test(text)) {
+    details.productType = /วิ่ง|running/i.test(text) ? "running_shoes" : "sport_shoes";
+    details.mainUseCase = "ใส่เดิน วิ่ง หรือทำกิจกรรมที่ต้องเคลื่อนไหว";
+    details.targetAudience = "คนที่วิ่ง ออกกำลังกาย หรือเดินเยอะ";
+    details.confidence = 82;
+  } else if (/กระเป๋า|bag|เป้|คาดอก|crossbody|wallet/i.test(text)) {
+    details.productType = "bag";
+    details.mainUseCase = "ใส่ของจุกจิก โทรศัพท์ กระเป๋าสตางค์ หรือของใช้ส่วนตัวเวลาออกจากบ้าน";
+    details.targetAudience = "คนที่เดินทางหรือพกของออกจากบ้านบ่อย";
+    details.confidence = 80;
+  } else if (/โคมไฟ|lamp|desk\s?light|led\s?light/i.test(text)) {
+    details.productType = "desk_lamp";
+    details.mainUseCase = "เพิ่มแสงสว่างตอนอ่านหนังสือ ทำงาน หรือใช้คอม";
+    details.targetAudience = "คนทำงานหรืออ่านหนังสือ";
+    details.confidence = 78;
+  } else if (/หูฟัง|earbud|earphone|headphone|bluetooth|ลำโพง|speaker/i.test(text)) {
+    details.productType = "audio_gadget";
+    details.mainUseCase = "ใช้ฟังเสียงระหว่างเดินทาง ทำงาน หรือพักผ่อน";
+    details.targetAudience = "คนใช้มือถือหรือฟังเพลงบ่อย";
+    details.confidence = 78;
+  } else if (/สกินแคร์|serum|เซรั่ม|ครีม|กันแดด|sunscreen|spf|ผิว/i.test(text)) {
+    details.productType = "skincare";
+    details.mainUseCase = "ใช้เป็นส่วนหนึ่งของ routine ดูแลผิว";
+    details.targetAudience = "คนที่มองหาไอเทมดูแลผิว";
+    details.confidence = 78;
+  }
+
+  if (details.mainUseCase) {
+    details.productEntity = details.productEntity || normalizedType;
+    details.whatItIs = details.whatItIs || normalizedType;
+    details.keySellingPoint = details.keySellingPoint || `จุดเด่นของ${details.productEntity}ช่วยตอบโจทย์การใช้งานจริง`;
+    details.realUsageScenario = details.realUsageScenario || `บริบทใช้งานจริงของ${details.productEntity}`;
+    details.targetUser = details.targetUser || details.targetAudience || `คนที่กำลังมองหา${details.productEntity}`;
+    details.captionAngle = details.captionAngle || `เล่าประโยชน์ของ${details.productEntity}จากการใช้งานจริง`;
+  }
+
+  return details;
+}
+
+function getShopeeProductUnderstandingFailureReasons(understanding: Pick<ShopeeProductUnderstanding, "productEntity" | "productType" | "mainUseCase" | "confidence">) {
+  const reasons: string[] = [];
+  if (!understanding.productEntity?.trim()) reasons.push("missing_product_entity");
+  if (!understanding.productType?.trim()) reasons.push("missing_product_type");
+  if (!understanding.mainUseCase?.trim()) reasons.push("missing_main_use_case");
+  if (/^(?:สินค้า|ไอเทม|ของใช้ทั่วไป|ไอเทมใช้งานประจำวัน|general|generic_product|home|living|daily_life|home_solution)$/iu.test(understanding.productType?.trim() ?? "")) {
+    reasons.push("generic_product_type");
+  }
+  if (/^(?:สินค้า|ไอเทม|ของใช้ทั่วไป|ไอเทมใช้งานประจำวัน)$/iu.test(understanding.productEntity?.trim() ?? "")) {
+    reasons.push("generic_product_entity");
+  }
+  return reasons;
+}
+
+function extractShopeeProductUnderstanding(product: ShopeeProductRecord): ShopeeProductUnderstanding {
+  const entity = extractShopeeProductEntity(product);
+  const haystack = getShopeeStoryboardInputText({
+    ...product,
+    productName: entity.cleanedTitle || product.productName
+  });
+  const fallback = getShopeeFallbackUnderstandingDetails(entity.productType, haystack);
+  const understanding: ShopeeProductUnderstanding = {
+    ...entity,
+    productEntity: fallback.productEntity || entity.productEntity,
+    productType: fallback.productType || entity.productType,
+    whatItIs: fallback.whatItIs || entity.whatItIs,
+    mainUseCase: entity.mainUseCase || fallback.mainUseCase || "",
+    keySellingPoint: entity.keySellingPoint || fallback.keySellingPoint || "",
+    realUsageScenario: entity.realUsageScenario || fallback.realUsageScenario || "",
+    targetUser: entity.targetUser || fallback.targetUser || fallback.targetAudience || "",
+    targetAudience: entity.targetAudience || fallback.targetAudience || entity.targetUser || fallback.targetUser || "",
+    captionAngle: entity.captionAngle || fallback.captionAngle || "",
+    confidence: Math.max(entity.confidence ?? 0, fallback.confidence ?? 0),
+    source: "rule_entity_extraction",
+    failureReasons: []
+  };
+  understanding.failureReasons = getShopeeProductUnderstandingFailureReasons(understanding);
+  return understanding;
+}
+
+function assertValidShopeeProductUnderstanding(understanding: ShopeeProductUnderstanding, product: ShopeeProductRecord) {
+  if (!understanding.failureReasons.length) return;
+  console.warn("[PRODUCT_UNDERSTANDING_FAILED]", {
+    productId: product.productId,
+    productName: product.productName,
+    rawTitle: understanding.rawTitle,
+    cleanedTitle: understanding.cleanedTitle,
+    productEntity: understanding.productEntity,
+    productType: understanding.productType,
+    mainUseCase: understanding.mainUseCase,
+    targetAudience: understanding.targetAudience,
+    confidence: understanding.confidence,
+    failureReasons: understanding.failureReasons
+  });
+  throw new ShopeeProviderError(
+    `PRODUCT_UNDERSTANDING_FAILED for ${product.productId}: ${understanding.failureReasons.join(", ")}`,
+    422,
+    "product_understanding_failed",
+    "internal_api",
+    JSON.stringify({
+      productId: product.productId,
+      productName: product.productName,
+      rawTitle: understanding.rawTitle,
+      cleanedTitle: understanding.cleanedTitle,
+      productEntity: understanding.productEntity,
+      productType: understanding.productType,
+      mainUseCase: understanding.mainUseCase,
+      targetAudience: understanding.targetAudience,
+      confidence: understanding.confidence,
+      failureReasons: understanding.failureReasons
+    })
+  );
 }
 
 function getShopeeStoryboardInputText(product: ShopeeProductRecord) {
@@ -2584,13 +2952,14 @@ function getShopeeStoryboardInputText(product: ShopeeProductRecord) {
 }
 
 function getShopeeStoryboardEmoji(productType: string) {
-  if (/เครื่องกรองน้ำ|กรองน้ำ|น้ำดื่ม|water\s?(?:purifier|filter)|coway|โคเวย์/i.test(productType)) return "💧";
+  if (/travel_pillow|หมอนรองคอ|neck\s?pillow|travel\s?pillow/i.test(productType)) return "✈️";
+  if (/water_purifier|water_filter|เครื่องกรองน้ำ|กรองน้ำ|น้ำดื่ม|water\s?(?:purifier|filter)|coway|โคเวย์/i.test(productType)) return "💧";
   if (/ลูกแบด|แบดมินตัน/.test(productType)) return "🏸";
   if (/กล้องติดรถ|กล้องหน้ารถ|dash\s?cam|บันทึกภาพรถ/i.test(productType)) return "🚗";
   if (/กล้อง|camera|แอคชั่น/i.test(productType)) return "📷";
   if (/อาหารเสริม|วิตามิน|เวย์|โปรตีน/.test(productType)) return "💚";
   if (/เก้าอี้/.test(productType)) return "🪑";
-  if (/เสื้อ|กระโปรง|เดรส|กางเกง|เสื้อผ้า|แฟชั่น/.test(productType)) return "👕";
+  if (/sport_shirt|เสื้อ|กระโปรง|เดรส|กางเกง|เสื้อผ้า|แฟชั่น/.test(productType)) return "👕";
   if (/รองเท้า/.test(productType)) return "👟";
   if (/ถุงเท้า|กีฬา|วิ่ง|ฟิตเนส/.test(productType)) return "🏃";
   if (/แก้ว|กระติก|ขวดน้ำ/.test(productType)) return "🥤";
@@ -2598,7 +2967,7 @@ function getShopeeStoryboardEmoji(productType: string) {
   if (/หูฟัง|มือถือ|แกดเจ็ต|สมาร์ทวอทช์/.test(productType)) return "📱";
   if (/สกินแคร์|เซรั่ม|กันแดด|ผิว/.test(productType)) return "✨";
   if (/สร้อย|เครื่องประดับ|จี้|ต่างหู|แหวน|กำไล|jewelry|necklace/i.test(productType)) return "💎";
-  if (/กระเป๋า/.test(productType)) return "🎒";
+  if (/bag|กระเป๋า/.test(productType)) return "🎒";
   if (/รถ|จัมป์สตาร์ท|ยาง/.test(productType)) return "🚗";
   if (/อาหาร|ขนม|น้ำพริก|ครัว/.test(productType)) return "🍳";
   if (/สัตว์/.test(productType)) return "🐾";
@@ -2630,24 +2999,35 @@ function makeShopeeStoryboard(
     | "primaryPainPoint"
   >
 ): ShopeeProductStoryboard {
-  const entity = extractShopeeProductEntity(product);
+  const entity = extractShopeeProductUnderstanding(product);
+  assertValidShopeeProductUnderstanding(entity, product);
   const base = {
-    productSimpleName: buildShopeeStoryboardName(entity.cleanedTitle || input.productType, getShopeeStoryboardEmoji(input.productType), {
+    productSimpleName: buildShopeeStoryboardName(entity.cleanedTitle || entity.productEntity || input.productType, getShopeeStoryboardEmoji(entity.productType || input.productType), {
       ...product,
       productName: entity.cleanedTitle || product.productName
     }),
     productEntity: entity.productEntity || input.productType,
     brand: entity.brand,
     model: entity.model,
-    ...input
+    ...input,
+    productType: entity.productType || input.productType,
+    whatItIs: entity.whatItIs || input.whatItIs,
+    mainUseCase: entity.mainUseCase || input.mainUseCase,
+    targetUser: entity.targetAudience || entity.targetUser || input.targetUser,
+    keySellingPoint: entity.keySellingPoint || input.keySellingPoint,
+    usageScene: entity.realUsageScenario || input.usageScene,
+    captionAngle: entity.captionAngle || input.captionAngle
   };
   return enrichShopeeStoryboardForAffiliateReview(base);
 }
 
-function getShopeeStoryboardProductGroup(storyboard: Pick<ShopeeProductStoryboard, "productType" | "mainUseCase" | "usageScene">) {
-  const haystack = `${storyboard.productType} ${storyboard.mainUseCase} ${storyboard.usageScene}`;
-  if (/เครื่องกรองน้ำ|กรองน้ำ|น้ำดื่ม|water\s?(?:purifier|filter)|coway|โคเวย์/i.test(haystack)) return "water_filter";
+function getShopeeStoryboardProductGroup(storyboard: Pick<ShopeeProductStoryboard, "productEntity" | "productType" | "mainUseCase" | "usageScene">) {
+  const haystack = `${storyboard.productEntity} ${storyboard.productType} ${storyboard.mainUseCase} ${storyboard.usageScene}`;
+  if (/travel_pillow|หมอนรองคอ|travel\s?pillow|neck\s?pillow|รองคอระหว่างเดินทาง/i.test(haystack)) return "travel_pillow";
+  if (/water_purifier_accessory|ไส้กรองเครื่องกรองน้ำ|อุปกรณ์เครื่องกรองน้ำ/i.test(haystack)) return "water_filter_accessory";
+  if (/water_purifier|เครื่องกรองน้ำ|กรองน้ำ|น้ำดื่ม|water\s?(?:purifier|filter)|coway|โคเวย์/i.test(haystack)) return "water_filter";
   if (/เสื้อ|กระโปรง|เดรส|กางเกง|เสื้อผ้า|เครื่องแต่งกาย|แฟชั่น|ใส่แมตช์|แต่งตัว/i.test(haystack) && !/รองเท้า|ถุงเท้า|กีฬา|วิ่ง/i.test(haystack)) return "apparel";
+  if (/sport_shirt|เสื้อกีฬา|สวมใส่ออกกำลังกาย/i.test(haystack)) return "sports";
   if (/กระบอกน้ำ|ขวดน้ำ|กระติก|แก้วเก็บ|tumbler|water\s?bottle|เก็บอุณหภูมิ|เก็บความเย็น/i.test(haystack)) return "drinkware";
   if (/กล้องติดรถ|กล้องหน้ารถ|dash\s?cam|car\s?camera|บันทึกภาพรถ/i.test(haystack)) return "dashcam";
   if (/รถ|จัมป์|จั๊ม|ยาง|สตาร์ท|แบต/i.test(haystack)) return "automotive";
@@ -2660,6 +3040,26 @@ function getShopeeStoryboardProductGroup(storyboard: Pick<ShopeeProductStoryboar
   if (/กระเป๋า|เดินทาง|แคมป์|เที่ยว/i.test(haystack)) return "travel";
   if (/ทำความสะอาด|ไม้ถู|ชั้นวาง|กล่องเก็บ|จัดระเบียบ|ของใช้ในบ้าน/i.test(haystack)) return "home";
   return "generic_product";
+}
+
+function buildEntitySpecificStoryboardPreset(input: {
+  storyboard: Omit<
+    ShopeeProductStoryboard,
+    "problemSolved" | "dailyBenefit" | "emotionalBenefit" | "realUsageScenario" | "purchaseReason" | "primaryPainPoint"
+  >;
+  productLabel: string;
+  mainUseCase: string;
+  usageScene: string;
+}) {
+  const target = input.storyboard.targetUser || `คนที่กำลังมองหา${input.productLabel}`;
+  const keySellingPoint = input.storyboard.keySellingPoint || `ช่วยให้${input.mainUseCase}ได้ตรงกับการใช้งานจริง`;
+  return {
+    primaryPainPoint: `กำลังมองหา${input.productLabel}ที่ใช้กับ${input.mainUseCase}ได้จริง`,
+    problemSolved: keySellingPoint,
+    dailyBenefit: input.mainUseCase,
+    emotionalBenefit: `ใช้${input.productLabel}ได้ตรงกับจุดประสงค์มากขึ้น`,
+    purchaseReason: `เหมาะกับ${target}ที่อยากได้${input.productLabel}สำหรับ${input.mainUseCase}`
+  };
 }
 
 function enrichShopeeStoryboardForAffiliateReview(
@@ -2757,22 +3157,13 @@ function enrichShopeeStoryboardForAffiliateReview(
       emotionalBenefit: "พกไว้แล้วรู้สึกพร้อมกว่าเดิม",
       purchaseReason: "เหมาะกับคนที่เดินทางหรือพกของออกจากบ้านบ่อย"
     },
-    home: {
-      primaryPainPoint: "มุมบ้านที่ต้องจัดหรือทำความสะอาดยังไม่ลงตัว",
-      problemSolved: "ช่วยให้กิจวัตรในบ้านสะดวกและเป็นระเบียบขึ้น",
-      dailyBenefit: "ใช้กับมุมที่ต้องจัดเก็บหรือทำความสะอาดได้ง่าย",
-      emotionalBenefit: "ช่วยให้มุมบ้านเป็นระเบียบและใช้งานสบายขึ้น",
-      purchaseReason: "น่าลองสำหรับคนที่อยากจัดบ้านหรือดูแลมุมใช้งานให้ลงตัว"
-    },
-    generic_product: {
-      primaryPainPoint: `กำลังมองหา${productLabel}ที่ตรงกับการใช้งานจริง`,
-      problemSolved: storyboard.keySellingPoint || `ช่วยให้${mainUseCase}ได้ตรงขึ้น`,
-      dailyBenefit: mainUseCase,
-      emotionalBenefit: `ใช้${productLabel}ได้ตรงกับจุดประสงค์มากขึ้น`,
-      purchaseReason: `เหมาะกับ${storyboard.targetUser || `คนที่กำลังมองหา${productLabel}`}ที่อยากได้สินค้าตรงการใช้งาน`
-    }
   };
-  const preset = templates[group] ?? templates.generic_product;
+  const preset = templates[group] ?? buildEntitySpecificStoryboardPreset({
+    storyboard,
+    productLabel,
+    mainUseCase,
+    usageScene
+  });
   const enriched = {
     ...storyboard,
     primaryPainPoint: compactProductText(preset.primaryPainPoint, 110),
@@ -3237,37 +3628,60 @@ function validateShopeeProductStoryboard(storyboard?: ShopeeProductStoryboard | 
 
 function getShopeeStoryboardHashtags(product: ShopeeProductRecord, storyboard: ShopeeProductStoryboard) {
   const group = getShopeeStoryboardProductGroup(storyboard);
-  const groupTags: Record<string, string[]> = {
-    water_filter: ["#เครื่องกรองน้ำ", "#น้ำดื่มสะอาด", "#น้ำดื่มในบ้าน"],
-    apparel: ["#เสื้อผ้า", "#แฟชั่น", "#แต่งตัว"],
+  const entityText = getShopeeStoryboardEntityText(storyboard);
+  const productSpecificTags: Record<string, string[]> = {
+    travel_pillow: ["#หมอนรองคอ", "#เดินทาง", "#TravelEssentials"],
+    water_filter_accessory: ["#ไส้กรองน้ำ", "#เครื่องกรองน้ำ", "#น้ำดื่มสะอาด"],
+    water_filter: ["#เครื่องกรองน้ำ", "#น้ำดื่มสะอาด", "#กดน้ำดื่ม"],
+    apparel: /sport_shirt|เสื้อกีฬา|ออกกำลังกาย|กีฬา/i.test(entityText)
+      ? ["#เสื้อกีฬา", "#ออกกำลังกาย", "#SportStyle"]
+      : ["#เสื้อผ้า", "#แต่งตัว", "#แมตช์ลุค"],
     drinkware: ["#กระบอกน้ำ", "#พกน้ำ", "#เก็บอุณหภูมิ"],
-    jewelry: ["#เครื่องประดับ", "#สร้อยคอ", "#แฟชั่น"],
+    jewelry: ["#เครื่องประดับ", "#สร้อยคอ", "#แต่งตัว"],
     automotive: ["#อุปกรณ์รถยนต์", "#ของใช้ติดรถ", "#รถยนต์"],
     sports: ["#กีฬา", "#ออกกำลังกาย", "#สายสปอร์ต"],
     beauty: ["#สกินแคร์", "#บำรุงผิว", "#ความงาม"],
-    electronics: ["#แกดเจ็ต", "#ไอที", "#ของใช้น่าใช้"],
+    electronics: ["#แกดเจ็ต", "#ไอที"],
     kitchen: ["#ของใช้ในครัว", "#ครัว", "#ทำอาหาร"],
-    travel: ["#พกพา", "#เดินทาง", "#ของใช้เดินทาง"],
-    food: ["#ของกิน", "#ของอร่อย", "#ของกินติดบ้าน"],
+    travel: ["#เดินทาง", "#พกพา"],
+    food: ["#ของกิน", "#ของกินติดบ้าน"],
     health: ["#อาหารเสริม", "#ดูแลสุขภาพ", "#สุขภาพ"],
     generic_product: []
   };
+  const brandTag = storyboard.brand ? normalizeHashtagToken(storyboard.brand) : "";
+  const entityTags = [
+    storyboard.productEntity,
+    storyboard.productType.includes("_") ? "" : storyboard.productType,
+    ...storyboard.mainUseCase.split(/[\/,]|หรือ|และ/u).slice(0, 2)
+  ]
+    .map((part) => normalizeHashtagToken(part))
+    .filter((tag) => tag && !isForbiddenShopeeHashtag(tag));
   const typeTags = storyboard.productType
     .split(/[\/\s]+/u)
+    .filter((part) => !part.includes("_"))
     .map((part) => normalizeHashtagToken(part))
     .filter((tag) => tag && !isForbiddenShopeeHashtag(tag));
-  const audienceTags = storyboard.targetUser
-    .split(/[\/\s]+/u)
-    .map((part) => normalizeHashtagToken(part))
-    .filter((tag) => tag && !isForbiddenShopeeHashtag(tag));
-  return Array.from(new Set([...(groupTags[group] ?? []), ...typeTags, ...audienceTags, "#Shopee"]))
+  return Array.from(new Set([...(productSpecificTags[group] ?? []), brandTag, ...entityTags, ...typeTags, "#Shopee"]))
     .filter((tag) => tag && !isShopeeProductNameDuplicateText(tag.replace(/^#/, ""), storyboard.productSimpleName))
+    .filter((tag) => isShopeeHashtagRelevantToStoryboard(tag, storyboard))
     .slice(0, SHOPEE_MAX_HASHTAGS);
 }
 
+function isShopeeHashtagRelevantToStoryboard(tag: string, storyboard: ShopeeProductStoryboard) {
+  const normalizedTag = normalizeTextEncoding(tag.replace(/^#/, "")).toLowerCase();
+  const entityText = normalizeTextEncoding(getShopeeStoryboardEntityText(storyboard)).toLowerCase();
+  if (!normalizedTag) return false;
+  if (/คนเลี้ยงแมว|แมว|สัตว์เลี้ยง|pet|cat|dog/i.test(normalizedTag)) return /สัตว์เลี้ยง|แมว|สุนัข|pet|cat|dog/i.test(entityText);
+  if (/เครื่องกรองน้ำ|กรองน้ำ|น้ำดื่ม/i.test(normalizedTag)) return /water_purifier|เครื่องกรองน้ำ|กรองน้ำ|น้ำดื่ม/i.test(entityText);
+  if (/แฟชั่น|เสื้อผ้า|แต่งตัว|แมตช์ลุค/i.test(normalizedTag)) return /เสื้อ|กระโปรง|เดรส|กางเกง|เครื่องประดับ|jewelry|แต่งตัว|แมตช์/i.test(entityText);
+  if (/ของกิน|อาหาร|ขนม/i.test(normalizedTag)) return /อาหาร|ขนม|น้ำพริก|กิน|food|snack/i.test(entityText) && !/อาหารเสริม|วิตามิน|เวย์|โปรตีน/i.test(entityText);
+  return true;
+}
+
 function getShopeeStoryboardBenefitEmojis(productType: string) {
-  if (/เครื่องกรองน้ำ|กรองน้ำ|น้ำดื่ม|water\s?(?:purifier|filter)|coway|โคเวย์/i.test(productType)) return ["💧", "🏠", "🥤", "✅"];
-  if (/เสื้อ|กระโปรง|เดรส|กางเกง|เสื้อผ้า|แฟชั่น/i.test(productType)) return ["👕", "✨", "👗", "✅"];
+  if (/travel_pillow|หมอนรองคอ|travel\s?pillow|neck\s?pillow/i.test(productType)) return ["✈️", "🚗", "💺", "✅"];
+  if (/water_purifier|เครื่องกรองน้ำ|กรองน้ำ|น้ำดื่ม|water\s?(?:purifier|filter)|coway|โคเวย์/i.test(productType)) return ["💧", "🏠", "🥤", "✅"];
+  if (/sport_shirt|เสื้อ|กระโปรง|เดรส|กางเกง|เสื้อผ้า|แฟชั่น/i.test(productType)) return ["👕", "✨", "👗", "✅"];
   if (/กระบอกน้ำ|ขวดน้ำ|กระติก|แก้วเก็บ|tumbler|bottle|เก็บอุณหภูมิ|เก็บความเย็น/i.test(productType)) return ["🥤", "💧", "🚶", "✅"];
   if (/กล้องติดรถ|กล้องหน้ารถ|dash\s?cam|บันทึกภาพรถ/i.test(productType)) return ["📹", "🛣️", "🚘", "🔎"];
   if (/รถ|จัมป์|จั๊ม|ยาง|แบต/.test(productType)) return ["🔋", "💨", "🔦", "📱"];
@@ -3283,6 +3697,7 @@ function getShopeeStoryboardBenefitEmojis(productType: string) {
 
 function formatShopeeStoryboardPriceLine(product: ShopeeProductRecord, storyboard: ShopeeProductStoryboard) {
   const price = formatShopeePrice(product);
+  const productLabel = getShopeeStoryboardProductLabel(storyboard);
   const numericPrice = typeof product.discountPrice === "number" && Number.isFinite(product.discountPrice)
     ? product.discountPrice
     : product.productPrice;
@@ -3290,8 +3705,8 @@ function formatShopeeStoryboardPriceLine(product: ShopeeProductRecord, storyboar
     if (/สร้อย|เครื่องประดับ|จี้|ต่างหู|แหวน|กำไล|jewelry|necklace/.test(storyboard.productType)) {
       return `${price} สำหรับคนชอบเครื่องประดับโทนเรียบหรู`;
     }
-    if (numericPrice < 300) return `${price} ของมันต้องมี`;
-    if (numericPrice > 1000) return `${price} คุ้มสำหรับคนใช้งานจริง`;
+    if (numericPrice < 300) return `${price} สำหรับ${compactProductText(storyboard.mainUseCase || productLabel, 42)}`;
+    if (numericPrice > 1000) return `${price} สำหรับคนที่ต้องใช้${productLabel}จริง`;
   }
   return /ใช้งานจริง|ระยะยาว|ฉุกเฉิน|เดินทาง/.test(storyboard.purchaseReason)
     ? `${price} ใช้งานได้ระยะยาว`
@@ -3330,7 +3745,7 @@ function getShopeeStoryboardProductLabel(storyboard: ShopeeStoryboardEntityLike)
 }
 
 function isShopeeWaterFilterStoryboard(storyboard: ShopeeStoryboardEntityLike) {
-  return /เครื่องกรองน้ำ|กรองน้ำ|น้ำดื่ม|water\s?(?:purifier|filter)|coway|โคเวย์/i.test([
+  return /water_purifier|water_filter|เครื่องกรองน้ำ|กรองน้ำ|น้ำดื่ม|water\s?(?:purifier|filter)|coway|โคเวย์/i.test([
     storyboard.productEntity,
     storyboard.productType,
     storyboard.whatItIs,
@@ -3340,7 +3755,7 @@ function isShopeeWaterFilterStoryboard(storyboard: ShopeeStoryboardEntityLike) {
 }
 
 function isShopeeApparelStoryboard(storyboard: ShopeeStoryboardEntityLike) {
-  return /เสื้อ|กระโปรง|เดรส|กางเกง|เสื้อผ้า|เครื่องแต่งกาย|แฟชั่น|ใส่แมตช์|แต่งตัว/i.test(getShopeeStoryboardEntityText(storyboard));
+  return /sport_shirt|shirt|skirt|dress|pants|เสื้อ|กระโปรง|เดรส|กางเกง|เสื้อผ้า|เครื่องแต่งกาย|แฟชั่น|ใส่แมตช์|แต่งตัว/i.test(getShopeeStoryboardEntityText(storyboard));
 }
 
 function isShopeeDrinkwareStoryboard(storyboard: ShopeeStoryboardEntityLike) {
@@ -3356,6 +3771,7 @@ function isShopeeHomeUtilityStoryboard(storyboard: ShopeeStoryboardEntityLike) {
 }
 
 function getShopeeEntityActionText(storyboard: ShopeeStoryboardEntityLike) {
+  if (/travel_pillow|หมอนรองคอ|รองคอระหว่างเดินทาง/i.test(getShopeeStoryboardEntityText(storyboard))) return "รองคอระหว่างเดินทาง";
   if (isShopeeWaterFilterStoryboard(storyboard)) return "กดน้ำดื่ม";
   if (isShopeeDrinkwareStoryboard(storyboard)) return "พกน้ำหรือเครื่องดื่ม";
   if (isShopeeApparelStoryboard(storyboard)) return "ใส่และแมตช์ลุค";
@@ -3367,6 +3783,7 @@ function getShopeeEntityActionText(storyboard: ShopeeStoryboardEntityLike) {
 }
 
 function getShopeeEntityContextText(storyboard: ShopeeStoryboardEntityLike) {
+  if (/travel_pillow|หมอนรองคอ|รองคอระหว่างเดินทาง/i.test(getShopeeStoryboardEntityText(storyboard))) return "ในรถ บนเครื่องบิน หรือระหว่างเดินทาง";
   if (isShopeeWaterFilterStoryboard(storyboard)) return "บ้าน คอนโด หรือมุมครัวสำหรับกดน้ำดื่ม";
   if (isShopeeDrinkwareStoryboard(storyboard)) return "ที่ทำงาน ระหว่างเดินทาง หรือออกกำลังกาย";
   if (isShopeeApparelStoryboard(storyboard)) return "วันทำงาน วันไปเที่ยว หรือวันลำลอง";
@@ -3385,6 +3802,10 @@ function repairShopeeGenericCaptionPhrasesForEntity(text: string, storyboard: Sh
       .replace(/หยิบใช้งาน/giu, "กดน้ำดื่ม")
       .replace(/หยิบใช้(?:เครื่องกรองน้ำ|สินค้า|ไอเทม|ของใช้)?/giu, "กดน้ำดื่ม")
       .replace(/ช่วงใช้งานในชีวิตประจำวัน/giu, "ช่วงกดน้ำดื่มระหว่างวัน")
+      .replace(/ใช้ในชีวิตประจำวัน/giu, "กดน้ำดื่มระหว่างวัน")
+      .replace(/มีตัวช่วยไว้สะดวกกว่าเดิม/giu, "มีเครื่องกรองน้ำไว้กดน้ำดื่มสะดวกขึ้น")
+      .replace(/ช่วยให้บ้านน่าอยู่ขึ้น/giu, "ช่วยให้มีน้ำดื่มสะอาดพร้อมใช้")
+      .replace(/เหมาะกับทุกบ้าน/giu, "เหมาะกับบ้านหรือคอนโดที่ต้องการน้ำดื่มสะอาด")
       .replace(/ช่วยให้บ้านดูใช้งานง่ายและสบายขึ้น/giu, "ช่วยให้มีน้ำดื่มพร้อมใช้ในบ้านได้สะดวกขึ้น")
       .replace(/ช่วยให้กิจวัตรในบ้านสะดวกและเป็นระเบียบขึ้น/giu, "ช่วยให้กดน้ำดื่มใช้ในบ้านได้สะดวกขึ้น")
       .replace(/น่าลองสำหรับคนที่อยากให้ชีวิตประจำวันง่ายขึ้น/giu, "เหมาะกับบ้านหรือคอนโดที่อยากมีน้ำดื่มสะอาดไว้ใช้ทุกวัน")
@@ -3405,6 +3826,10 @@ function repairShopeeGenericCaptionPhrasesForEntity(text: string, storyboard: Sh
     .replace(/หยิบใช้งาน/giu, action)
     .replace(/หยิบใช้(?:เครื่องกรองน้ำ|สินค้า|ไอเทม|ของใช้)?/giu, action)
     .replace(/ช่วงใช้งานในชีวิตประจำวัน/giu, context)
+    .replace(/ใช้ในชีวิตประจำวัน/giu, context)
+    .replace(/มีตัวช่วยไว้สะดวกกว่าเดิม/giu, specificBenefit)
+    .replace(/ช่วยให้บ้านน่าอยู่ขึ้น/giu, specificBenefit)
+    .replace(/เหมาะกับทุกบ้าน/giu, `เหมาะกับ${storyboard.targetUser || `คนที่กำลังมองหา${productLabel}`}`)
     .replace(/ช่วยให้บ้านดูใช้งานง่ายและสบายขึ้น/giu, specificBenefit)
     .replace(/ช่วยให้กิจวัตรในบ้านสะดวกและเป็นระเบียบขึ้น/giu, specificBenefit)
     .replace(/น่าลองสำหรับคนที่อยากให้ชีวิตประจำวันง่ายขึ้น/giu, `เหมาะกับ${storyboard.targetUser || `คนที่กำลังมองหา${productLabel}`}ที่อยากได้${productLabel}ตรงการใช้งาน`)
@@ -3434,12 +3859,18 @@ function buildShopeeStoryboardBenefits(storyboard: ShopeeProductStoryboard) {
 }
 
 function buildShopeeStoryboardSolutionLine(storyboard: ShopeeProductStoryboard) {
+  if (/travel_pillow|หมอนรองคอ|รองคอระหว่างเดินทาง/i.test(getShopeeStoryboardEntityText(storyboard))) return "รองคอระหว่างเดินทางได้สบายขึ้น ✅";
   if (isShopeeWaterFilterStoryboard(storyboard)) return "มีน้ำดื่มพร้อมกดใช้ สะดวกกว่าเดิม ✅";
   if (isShopeeDrinkwareStoryboard(storyboard)) return "พกน้ำหรือเครื่องดื่มไว้จิบระหว่างวันได้สะดวก ✅";
   if (isShopeeApparelStoryboard(storyboard)) return "ใส่แมตช์กับลุคทำงาน ไปเที่ยว หรือวันลำลองได้ง่าย ✅";
   const mainUseCase = compactProductText(sanitizeShopeeStoryboardTextForEntity(storyboard.mainUseCase, storyboard), 72).replace(/[.!。?？]+$/u, "");
   if (mainUseCase) return `${mainUseCase} ✅`;
   return `${getShopeeEntityActionText(storyboard)}ได้ตรงกับการใช้งานจริง ✅`;
+}
+
+function buildShopeeStoryboardCtaLine(storyboard: ShopeeProductStoryboard) {
+  const productLabel = getShopeeStoryboardProductLabel(storyboard);
+  return `🛒 ดูรายละเอียด${productLabel}ได้ที่ลิงก์ด้านล่าง`;
 }
 
 function repairStoryboardAffiliateCaption(caption: string, affiliateLink: string, storyboard?: ShopeeProductStoryboard) {
@@ -3470,7 +3901,7 @@ function repairStoryboardAffiliateCaption(caption: string, affiliateLink: string
   }
 
   if (!/🛒|กดสั่ง|ลิงก์ด้านล่าง|ดูรายละเอียด/iu.test(normalized)) {
-    normalized = `${normalized}\n\n🛒 กดสั่งได้ที่ลิงก์ด้านล่าง`;
+    normalized = `${normalized}\n\n${storyboard ? buildShopeeStoryboardCtaLine(storyboard) : "🛒 ดูรายละเอียดสินค้าได้ที่ลิงก์ด้านล่าง"}`;
   }
   if (!normalized.includes(affiliateLink)) {
     normalized = `${normalized}\n\n${formatShopeeShortLinkLine(affiliateLink)}`;
@@ -3487,16 +3918,41 @@ type StoryboardCaptionFailedRule = {
 };
 
 const SHOPEE_GENERIC_CAPTION_TEMPLATE_PATTERN =
-  /ของใช้ในบ้าน|หยิบใช้|ช่วยให้บ้านดูใช้งานง่าย|ช่วงใช้งานในชีวิตประจำวัน/iu;
+  /ของใช้ในบ้าน|หยิบใช้|ช่วยให้บ้านดูใช้งานง่าย|ช่วงใช้งานในชีวิตประจำวัน|ช่วยให้บ้านน่าอยู่ขึ้น|ใช้ในชีวิตประจำวัน|มีตัวช่วยไว้สะดวกกว่าเดิม|เหมาะกับทุกบ้าน/iu;
+
+function normalizeShopeeEntityMentionText(value?: string) {
+  return normalizeTextEncoding(value ?? "")
+    .replace(/[^\p{L}\p{N}]+/gu, "")
+    .toLowerCase();
+}
+
+function hasShopeeCaptionEntityOrUseCaseMention(line: string, storyboard: ShopeeProductStoryboard) {
+  const normalizedLine = normalizeShopeeEntityMentionText(line);
+  const entityTokens = [
+    storyboard.productEntity,
+    storyboard.whatItIs,
+    ...storyboard.productEntity.split(/\s+/u),
+    ...storyboard.mainUseCase.split(/\s+|หรือ|และ/u)
+  ]
+    .map((token) => normalizeShopeeEntityMentionText(token))
+    .filter((token) => token.length >= 3 && !/^(?:ใช้|หรือ|และ|สำหรับ|ระหว่าง|สินค้า|ไอเทม)$/u.test(token));
+  return entityTokens.some((token) => normalizedLine.includes(token));
+}
 
 function isShopeeGenericCaptionPhraseCompatibleWithEntity(line: string, storyboard: ShopeeProductStoryboard) {
   const normalizedLine = normalizeTextEncoding(line);
-  if (/ช่วยให้บ้านดูใช้งานง่าย|ช่วงใช้งานในชีวิตประจำวัน/iu.test(normalizedLine)) return false;
+  const mentionsEntity = hasShopeeCaptionEntityOrUseCaseMention(line, storyboard);
+  if (/ช่วยให้บ้านดูใช้งานง่าย|ช่วยให้บ้านน่าอยู่ขึ้น|เหมาะกับทุกบ้าน/iu.test(normalizedLine)) {
+    return isShopeeHomeUtilityStoryboard(storyboard) && mentionsEntity;
+  }
+  if (/ช่วงใช้งานในชีวิตประจำวัน|ใช้ในชีวิตประจำวัน|มีตัวช่วยไว้สะดวกกว่าเดิม/iu.test(normalizedLine)) {
+    return mentionsEntity;
+  }
   if (/ของใช้ในบ้าน/iu.test(normalizedLine)) {
-    return isShopeeHomeUtilityStoryboard(storyboard) && /จัดบ้าน|ทำความสะอาด|จัดเก็บ|ชั้นวาง|กล่องเก็บ|ไม้ถู|มุมบ้าน/iu.test(normalizedLine);
+    return isShopeeHomeUtilityStoryboard(storyboard) && mentionsEntity && /จัดบ้าน|ทำความสะอาด|จัดเก็บ|ชั้นวาง|กล่องเก็บ|ไม้ถู|มุมบ้าน/iu.test(normalizedLine);
   }
   if (/หยิบใช้/iu.test(normalizedLine)) {
-    return isShopeeHomeUtilityStoryboard(storyboard) && /จัดเก็บ|ทำความสะอาด|ชั้นวาง|กล่องเก็บ|ไม้ถู/iu.test(normalizedLine);
+    return mentionsEntity && (isShopeeHomeUtilityStoryboard(storyboard) ? /จัดเก็บ|ทำความสะอาด|ชั้นวาง|กล่องเก็บ|ไม้ถู/iu.test(normalizedLine) : true);
   }
   return true;
 }
@@ -3667,6 +4123,15 @@ function validateStoryboardAffiliateCaption(caption: string, storyboard: ShopeeP
       actual: genericTemplateViolation.phrase
     });
   }
+  const entitySpecificLine = lines.find((line) => hasShopeeCaptionEntityOrUseCaseMention(line, storyboard));
+  if (!entitySpecificLine) {
+    failedRules.push({
+      rule: "ENTITY_SPECIFIC_LANGUAGE",
+      message: "Caption does not mention the actual product entity or main use case",
+      expected: `caption references ${storyboard.productEntity} or ${storyboard.mainUseCase}`,
+      actual: "no productEntity/mainUseCase mention found"
+    });
+  }
   const bulletCount = (normalized.match(/^(?:🔋|💨|🔦|📱|🏃|💪|🎯|🏸|🌶️|🍽️|😋|🏠|✨|💖|🌸|💄|📸|🚶|🎥|🥤|🍳|💧|🎒|✈️|🏕️|🧹|👕|👗|👍|✅)\s/gmu) || []).length;
   if (!/🛒|กดสั่ง|ลิงก์ด้านล่าง|ดูรายละเอียด/iu.test(normalized)) {
     failedRules.push({
@@ -3752,7 +4217,7 @@ function buildShopeeStoryboardCaption(input: {
     "",
     formatShopeeStoryboardPriceLine(product, storyboard),
     "",
-    "🛒 กดสั่งได้ที่ลิงก์ด้านล่าง",
+    buildShopeeStoryboardCtaLine(storyboard),
     "",
     formatShopeeShortLinkLine(affiliateLink),
     "",
@@ -3765,6 +4230,8 @@ function buildShopeeStoryboardCaption(input: {
 }
 
 function createValidatedShopeeProductStoryboard(product: ShopeeProductRecord) {
+  const understanding = extractShopeeProductUnderstanding(product);
+  assertValidShopeeProductUnderstanding(understanding, product);
   let storyboard = createShopeeProductStoryboard(product);
   if (validateShopeeProductStoryboard(storyboard)) {
     console.info("[PRODUCT_STORYBOARD_CREATED]", {
@@ -4206,6 +4673,429 @@ export function scoreShopeeProduct(input: {
   };
 }
 
+type ShopeeSourceScoreInput = {
+  product: ShopeeProductRecord;
+  sourceTag: ShopeeSourceTag;
+  keyword?: string;
+  categories?: string[];
+};
+
+type ShopeeSourceScoreResult = {
+  score: ProductScore;
+  sourceSpecificScore: number;
+  scoreBreakdown: Record<string, unknown>;
+  sortPrimary: number;
+  sortSecondary: number;
+  sortTertiary: number;
+  topCandidateLimit: number;
+};
+
+type ShopeeSourceScoredCandidate = {
+  product: ShopeeProductRecord;
+  score: ProductScore;
+  sourceSpecificScore: number;
+  scoreBreakdown: Record<string, unknown>;
+  sortPrimary: number;
+  sortSecondary: number;
+  sortTertiary: number;
+  topCandidateLimit: number;
+  finalRank?: number;
+};
+
+const SHOPEE_MIN_SOURCE_SPECIFIC_SCORE = 35;
+
+function toFiniteNumber(value: unknown, fallback = 0) {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : fallback;
+}
+
+function clamp01(value: number) {
+  return Math.max(0, Math.min(1, value));
+}
+
+function clampScore(value: number) {
+  return Math.max(0, Math.min(100, value));
+}
+
+function roundScore(value: number) {
+  return Math.round(clampScore(value));
+}
+
+function roundMetric(value: number, digits = 2) {
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
+
+function normalizeCountScore(value: unknown, max = 20000) {
+  const count = Math.max(0, toFiniteNumber(value));
+  if (count <= 0) return 0;
+  return clampScore((Math.log10(count + 1) / Math.log10(max + 1)) * 100);
+}
+
+function normalizeLinearScore(value: unknown, max: number) {
+  return clampScore(clamp01(Math.max(0, toFiniteNumber(value)) / max) * 100);
+}
+
+function getEffectiveProductPrice(product: ShopeeProductRecord) {
+  const discountPrice = toFiniteNumber(product.discountPrice);
+  if (discountPrice > 0) return discountPrice;
+  return Math.max(0, toFiniteNumber(product.productPrice));
+}
+
+function getShopeeProductFreshnessScore(product: ShopeeProductRecord) {
+  const createdAt = product.productCreatedAt ? new Date(product.productCreatedAt) : null;
+  if (!createdAt || Number.isNaN(createdAt.getTime())) {
+    return { freshnessScore: 50, freshnessSource: "neutral_no_product_created_at" };
+  }
+  const ageDays = Math.max(0, (Date.now() - createdAt.getTime()) / (24 * 60 * 60 * 1000));
+  if (ageDays <= 7) return { freshnessScore: 100, freshnessSource: "product_created_at", ageDays: roundMetric(ageDays, 1) };
+  if (ageDays <= 30) return { freshnessScore: 85, freshnessSource: "product_created_at", ageDays: roundMetric(ageDays, 1) };
+  if (ageDays <= 90) return { freshnessScore: 65, freshnessSource: "product_created_at", ageDays: roundMetric(ageDays, 1) };
+  if (ageDays <= 180) return { freshnessScore: 40, freshnessSource: "product_created_at", ageDays: roundMetric(ageDays, 1) };
+  return { freshnessScore: 20, freshnessSource: "product_created_at", ageDays: roundMetric(ageDays, 1) };
+}
+
+function getShopeeProductQualityScore(product: ShopeeProductRecord) {
+  const price = getEffectiveProductPrice(product);
+  const priceScore = price > 0 ? (price <= 100000 ? 100 : 55) : 0;
+  const imageScore = product.productImageUrl || product.productImageUrls?.length ? 100 : 0;
+  const linkScore = product.productUrl || product.affiliateUrl ? 100 : 0;
+  const stock = product.stock;
+  const availabilityScore = stock === undefined || stock === null ? 70 : toFiniteNumber(stock) > 0 ? 100 : 0;
+  const ratingScore = normalizeLinearScore(product.rating, 5);
+  return roundMetric((priceScore * 0.25) + (imageScore * 0.2) + (linkScore * 0.2) + (availabilityScore * 0.2) + (ratingScore * 0.15));
+}
+
+function normalizeSearchText(value: string) {
+  return value.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function tokenizeSearchText(value?: string) {
+  return normalizeSearchText(value ?? "")
+    .split(/[\s,./|(){}\[\]:"'!?;+-]+/g)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2);
+}
+
+function getKeywordMatchScores(product: ShopeeProductRecord, keyword?: string) {
+  const normalizedKeyword = normalizeSearchText(keyword ?? "");
+  const title = normalizeSearchText(product.productName);
+  const haystack = normalizeSearchText(`${product.productName} ${product.productDescription} ${product.category}`);
+  if (!normalizedKeyword) {
+    return { exactKeywordMatchScore: 0, partialKeywordMatchScore: 0, keywordMatchScore: 0 };
+  }
+  const exactKeywordMatchScore = title.includes(normalizedKeyword) ? 100 : 0;
+  const tokens = tokenizeSearchText(normalizedKeyword);
+  const matchedTokens = tokens.filter((token) => haystack.includes(token)).length;
+  const partialKeywordMatchScore = tokens.length ? (matchedTokens / tokens.length) * 100 : exactKeywordMatchScore;
+  return {
+    exactKeywordMatchScore,
+    partialKeywordMatchScore: roundMetric(partialKeywordMatchScore),
+    keywordMatchScore: roundMetric(Math.max(exactKeywordMatchScore, partialKeywordMatchScore * 0.85))
+  };
+}
+
+function getSearchDemandKeyword(input: ShopeeSourceScoreInput) {
+  const keyword = input.keyword?.trim();
+  if (keyword) return keyword;
+  const categoryTerms = (input.categories ?? []).flatMap((category) => getShopeeCategorySearchTerms(category));
+  return categoryTerms[0] ?? "";
+}
+
+function getDemandWordScore(product: ShopeeProductRecord) {
+  const haystack = normalizeSearchText(`${product.productName} ${product.productDescription}`);
+  const demandWords = ["ยอดนิยม", "ขายดี", "ฮิต", "มาแรง", "ไวรัล", "รีวิวเยอะ", "best seller", "bestseller", "trend", "viral"];
+  return demandWords.some((word) => haystack.includes(word)) ? 100 : 0;
+}
+
+function getCategoryMatchScore(product: ShopeeProductRecord, categories?: string[]) {
+  return categories?.some((category) => isShopeeCategoryMatch(product.category, category)) ? 100 : 0;
+}
+
+function buildSourceProductScore(input: {
+  product: ShopeeProductRecord;
+  sourceTag: ShopeeSourceTag;
+  score: number;
+  reason: string;
+  breakdown: Record<string, unknown>;
+}): ProductScore {
+  const riskFlags: string[] = [];
+  if ((input.product.rating ?? 0) > 0 && (input.product.rating ?? 0) < 4.2) riskFlags.push("rating_low");
+  if (!input.product.productImageUrl && !input.product.productImageUrls?.length) riskFlags.push("missing_image");
+  if (!input.product.productUrl && !input.product.affiliateUrl) riskFlags.push("missing_product_url");
+  if (input.product.stock !== undefined && input.product.stock !== null && toFiniteNumber(input.product.stock) <= 0) riskFlags.push("out_of_stock");
+  return {
+    productScore: roundScore(input.score),
+    sourceSpecificScore: roundScore(input.score),
+    source: input.sourceTag,
+    reason: [input.reason],
+    riskFlags,
+    scoreBreakdown: input.breakdown
+  };
+}
+
+export function scoreShopeeProductForSource(input: ShopeeSourceScoreInput): ShopeeSourceScoreResult {
+  const { product, sourceTag } = input;
+  const sales = Math.max(0, toFiniteNumber(product.salesCount));
+  const rating = Math.max(0, toFiniteNumber(product.rating));
+  const reviewCount = Math.max(0, toFiniteNumber(product.reviewCount));
+  const discount = Math.max(0, toFiniteNumber(product.discountPercent));
+  const commissionRate = Math.max(0, toFiniteNumber(product.commissionRate));
+  const price = getEffectiveProductPrice(product);
+  const salesScore = normalizeCountScore(sales, 20000);
+  const ratingScore = normalizeLinearScore(rating, 5);
+  const reviewScore = normalizeCountScore(reviewCount, 5000);
+  const discountScore = normalizeLinearScore(discount, 60);
+  const commissionRateScore = normalizeLinearScore(commissionRate, 20);
+  const productQualityScore = getShopeeProductQualityScore(product);
+  const sourceApiBonus = product.sourceApiSignal ? 100 : 0;
+  const baseBreakdown = {
+    salesScore: roundMetric(salesScore),
+    ratingScore: roundMetric(ratingScore),
+    reviewScore: roundMetric(reviewScore),
+    discountScore: roundMetric(discountScore),
+    commissionRateScore: roundMetric(commissionRateScore),
+    productQualityScore,
+    sourceApiBonus,
+    sourceApiSignal: Boolean(product.sourceApiSignal)
+  };
+
+  if (sourceTag === "best_selling") {
+    const bestSellingScore =
+      (salesScore * 0.6) +
+      (reviewScore * 0.2) +
+      (ratingScore * 0.15) +
+      (productQualityScore * 0.05);
+    const breakdown = {
+      ...baseBreakdown,
+      formula: "salesScore*0.60 + reviewScore*0.20 + ratingScore*0.15 + productQualityScore*0.05"
+    };
+    return {
+      sourceSpecificScore: roundScore(bestSellingScore),
+      scoreBreakdown: breakdown,
+      sortPrimary: sales,
+      sortSecondary: bestSellingScore,
+      sortTertiary: reviewCount,
+      topCandidateLimit: 5,
+      score: buildSourceProductScore({
+        product,
+        sourceTag,
+        score: bestSellingScore,
+        reason: "best_selling_score prioritizes real sales count",
+        breakdown
+      })
+    };
+  }
+
+  if (sourceTag === "top_search") {
+    const searchVolume = Math.max(0, toFiniteNumber(product.searchVolume));
+    const demandKeyword = getSearchDemandKeyword(input);
+    const keywordScores = getKeywordMatchScores(product, demandKeyword);
+    const demandWordScore = getDemandWordScore(product);
+    const searchVolumeScore = normalizeCountScore(searchVolume, 100000);
+    const keywordMatchScore = searchVolume > 0
+      ? keywordScores.keywordMatchScore
+      : Math.max(keywordScores.keywordMatchScore, demandWordScore);
+    const searchDemandScore = searchVolume > 0
+      ? (searchVolumeScore * 0.55) +
+        (keywordMatchScore * 0.15) +
+        (salesScore * 0.1) +
+        (reviewScore * 0.1) +
+        (ratingScore * 0.05) +
+        (sourceApiBonus * 0.05)
+      : (keywordMatchScore * 0.35) +
+        (salesScore * 0.25) +
+        (reviewScore * 0.15) +
+        (ratingScore * 0.1) +
+        (sourceApiBonus * 0.15);
+    const searchSignalMode = searchVolume > 0
+      ? "search_volume"
+      : demandKeyword
+        ? "keyword_relevance_fallback_no_search_volume"
+        : "shopee_suggested_no_search_volume";
+    const breakdown = {
+      ...baseBreakdown,
+      searchVolume,
+      searchVolumeScore: roundMetric(searchVolumeScore),
+      demandKeyword,
+      demandWordScore,
+      exactKeywordMatchScore: keywordScores.exactKeywordMatchScore,
+      partialKeywordMatchScore: keywordScores.partialKeywordMatchScore,
+      keywordMatchScore: roundMetric(keywordMatchScore),
+      searchSignalMode,
+      formula: searchVolume > 0
+        ? "searchVolumeScore*0.55 + keywordMatchScore*0.15 + salesScore*0.10 + reviewScore*0.10 + ratingScore*0.05 + sourceApiBonus*0.05"
+        : "keywordMatchScore*0.35 + salesScore*0.25 + reviewScore*0.15 + ratingScore*0.10 + sourceApiBonus*0.15"
+    };
+    return {
+      sourceSpecificScore: roundScore(searchDemandScore),
+      scoreBreakdown: breakdown,
+      sortPrimary: searchDemandScore,
+      sortSecondary: searchVolume || sales,
+      sortTertiary: reviewCount,
+      topCandidateLimit: 10,
+      score: buildSourceProductScore({
+        product,
+        sourceTag,
+        score: searchDemandScore,
+        reason: searchVolume > 0
+          ? "top_search_score uses Shopee searchVolume"
+          : "top_search_score uses keyword demand fallback because searchVolume is unavailable",
+        breakdown
+      })
+    };
+  }
+
+  if (sourceTag === "best_roi") {
+    const estimatedCommission = price * (commissionRate / 100);
+    const estimatedCommissionScore = normalizeLinearScore(estimatedCommission, 500);
+    const conversionProxy =
+      (salesScore * 0.4) +
+      (ratingScore * 0.25) +
+      (reviewScore * 0.2) +
+      (discountScore * 0.15);
+    const roiScore =
+      (estimatedCommissionScore * 0.45) +
+      (conversionProxy * 0.45) +
+      (productQualityScore * 0.1);
+    const breakdown = {
+      ...baseBreakdown,
+      price,
+      estimatedCommission: roundMetric(estimatedCommission),
+      estimatedCommissionScore: roundMetric(estimatedCommissionScore),
+      conversionProxy: roundMetric(conversionProxy),
+      formula: "estimatedCommissionScore*0.45 + conversionProxy*0.45 + productQualityScore*0.10"
+    };
+    return {
+      sourceSpecificScore: roundScore(roiScore),
+      scoreBreakdown: breakdown,
+      sortPrimary: roiScore,
+      sortSecondary: estimatedCommission,
+      sortTertiary: sales,
+      topCandidateLimit: 5,
+      score: buildSourceProductScore({
+        product,
+        sourceTag,
+        score: roiScore,
+        reason: "best_roi_score estimates affiliate commission potential",
+        breakdown
+      })
+    };
+  }
+
+  if (sourceTag === "manual") {
+    const keywordScores = getKeywordMatchScores(product, input.keyword);
+    const categoryMatchScore = getCategoryMatchScore(product, input.categories);
+    const manualScore =
+      (keywordScores.exactKeywordMatchScore * 0.4) +
+      (keywordScores.partialKeywordMatchScore * 0.2) +
+      (categoryMatchScore * 0.1) +
+      (salesScore * 0.15) +
+      (ratingScore * 0.1) +
+      (commissionRateScore * 0.05);
+    const breakdown = {
+      ...baseBreakdown,
+      keyword: input.keyword?.trim() ?? "",
+      exactKeywordMatchScore: keywordScores.exactKeywordMatchScore,
+      partialKeywordMatchScore: keywordScores.partialKeywordMatchScore,
+      categoryMatchScore,
+      formula: "exactKeywordMatch*0.40 + partialKeywordMatch*0.20 + categoryMatch*0.10 + salesScore*0.15 + ratingScore*0.10 + commissionScore*0.05"
+    };
+    return {
+      sourceSpecificScore: roundScore(manualScore),
+      scoreBreakdown: breakdown,
+      sortPrimary: manualScore,
+      sortSecondary: keywordScores.exactKeywordMatchScore || keywordScores.partialKeywordMatchScore,
+      sortTertiary: sales,
+      topCandidateLimit: 10,
+      score: buildSourceProductScore({
+        product,
+        sourceTag,
+        score: manualScore,
+        reason: "manual_score prioritizes user keyword relevance",
+        breakdown
+      })
+    };
+  }
+
+  const velocityValue = Math.max(0, toFiniteNumber(product.salesVelocity || product.recentSales));
+  const velocityScore = velocityValue > 0 ? normalizeCountScore(velocityValue, 5000) : undefined;
+  const salesMomentumScore = velocityScore ?? salesScore;
+  const freshness = getShopeeProductFreshnessScore(product);
+  const trendingScore =
+    (salesMomentumScore * 0.35) +
+    (discountScore * 0.2) +
+    (ratingScore * 0.15) +
+    (reviewScore * 0.1) +
+    (freshness.freshnessScore * 0.1) +
+    (sourceApiBonus * 0.1);
+  const breakdown = {
+    ...baseBreakdown,
+    recentSales: product.recentSales ?? null,
+    salesVelocity: product.salesVelocity ?? null,
+    salesVelocityAvailable: velocityScore !== undefined,
+    salesMomentumScore: roundMetric(salesMomentumScore),
+    freshnessScore: freshness.freshnessScore,
+    freshnessSource: freshness.freshnessSource,
+    ageDays: "ageDays" in freshness ? freshness.ageDays : null,
+    formula: "salesMomentumScore*0.35 + discountScore*0.20 + ratingScore*0.15 + reviewScore*0.10 + freshnessScore*0.10 + sourceApiBonus*0.10"
+  };
+  return {
+    sourceSpecificScore: roundScore(trendingScore),
+    scoreBreakdown: breakdown,
+    sortPrimary: trendingScore,
+    sortSecondary: velocityValue || sales,
+    sortTertiary: discount,
+    topCandidateLimit: 10,
+    score: buildSourceProductScore({
+      product,
+      sourceTag,
+      score: trendingScore,
+      reason: velocityScore !== undefined
+        ? "trending_score uses recent sales velocity"
+        : "trending_score uses sales, discount, rating fallback",
+      breakdown
+    })
+  };
+}
+
+function sourceSpecificRankedSelection(candidates: ShopeeSourceScoredCandidate[], sourceTag: ShopeeSourceTag) {
+  return [...candidates]
+    .sort((left, right) => {
+      if (sourceTag === "best_selling") {
+        return (
+          right.sortPrimary - left.sortPrimary ||
+          right.sourceSpecificScore - left.sourceSpecificScore ||
+          right.sortTertiary - left.sortTertiary
+        );
+      }
+      return (
+        right.sourceSpecificScore - left.sourceSpecificScore ||
+        right.sortPrimary - left.sortPrimary ||
+        right.sortSecondary - left.sortSecondary ||
+        right.sortTertiary - left.sortTertiary
+      );
+    })
+    .map((candidate, index) => {
+      const finalRank = index + 1;
+      return {
+        ...candidate,
+        finalRank,
+        score: {
+          ...candidate.score,
+          finalRank
+        }
+      };
+    });
+}
+
+function pickRandomTopSourceCandidate(ranked: ShopeeSourceScoredCandidate[]) {
+  const topLimit = ranked[0]?.topCandidateLimit ?? 10;
+  const topCandidates = ranked.slice(0, Math.max(1, Math.min(topLimit, ranked.length)));
+  if (!topCandidates.length) return null;
+  return topCandidates[Math.floor(Math.random() * topCandidates.length)] ?? topCandidates[0];
+}
+
 export async function upsertShopeeProducts(products: ShopeeProductRecord[]) {
   const saved = [];
   for (const product of products) {
@@ -4231,6 +5121,12 @@ export async function upsertShopeeProducts(products: ShopeeProductRecord[]) {
           shopName: product.shopName ?? "",
           rating: product.rating,
           commissionRate: product.commissionRate,
+          searchVolume: product.searchVolume,
+          recentSales: product.recentSales,
+          salesVelocity: product.salesVelocity,
+          stock: product.stock,
+          productCreatedAt: product.productCreatedAt,
+          sourceApiSignal: Boolean(product.sourceApiSignal),
           sourceTag: product.sourceTag,
           fetchedAt: product.fetchedAt
         },
@@ -4290,16 +5186,6 @@ async function getShopeeProductLocksForDate(userId: string, postedDate = getBang
   return { productIds, identities, postedDate };
 }
 
-function weightedRandomProduct<T extends { score: ProductScore }>(items: T[]) {
-  const total = items.reduce((sum, item) => sum + Math.max(1, item.score.productScore), 0);
-  let cursor = Math.random() * total;
-  for (const item of items) {
-    cursor -= Math.max(1, item.score.productScore);
-    if (cursor <= 0) return item;
-  }
-  return items[items.length - 1];
-}
-
 function shuffleShopeeProducts(products: ShopeeProductRecord[]) {
   const shuffled = [...products];
   for (let index = shuffled.length - 1; index > 0; index -= 1) {
@@ -4313,7 +5199,7 @@ function dedupeShopeeProducts(products: ShopeeProductRecord[]) {
   const seen = new Set<string>();
   const deduped: ShopeeProductRecord[] = [];
   for (const product of products) {
-    const key = String(product.productId || `${product.shopId}:${product.itemId}`);
+    const key = getShopeeProductDedupeKey(product);
     if (!key || seen.has(key)) continue;
     seen.add(key);
     deduped.push(product);
@@ -4322,13 +5208,75 @@ function dedupeShopeeProducts(products: ShopeeProductRecord[]) {
 }
 
 function getShopeeProductDedupeKey(product: ShopeeProductRecord) {
-  return String(product.productId || `${product.shopId}:${product.itemId}`);
+  return getShopeeProductIdentity(product) || String(product.productId ?? "").trim();
 }
 
 function getRotatedShopeeCategories(categories: string[], seed = Math.random()) {
   if (!categories.length) return [];
   const offset = Math.floor(seed * categories.length) % categories.length;
   return [...categories.slice(offset), ...categories.slice(0, offset)];
+}
+
+function getShopeeProductFilterRejectionReason(input: {
+  product: ShopeeProductRecord;
+  excludedProductIds: Set<string>;
+  dailyLocks: { productIds: Set<string>; identities: Set<string> };
+  selectedProductIds: Set<string>;
+  selectedProductIdentities: Set<string>;
+  blockedCategories?: string[];
+  minPrice?: number;
+  maxPrice?: number;
+  minRating?: number;
+  minSales?: number;
+  minDiscountPercent?: number;
+}) {
+  const productId = String(input.product.productId);
+  const identity = getShopeeProductIdentity(input.product);
+  const effectivePrice = getEffectiveProductPrice(input.product);
+  if (input.selectedProductIds.has(productId) || input.selectedProductIdentities.has(identity)) return "already_selected_in_request";
+  if (input.excludedProductIds.has(productId)) return "excluded_product_id";
+  if (input.dailyLocks.productIds.has(productId) || input.dailyLocks.identities.has(identity)) return "already_posted_today";
+  if (!input.product.productImageUrl && !input.product.productImageUrls?.length) return "missing_image";
+  if (!input.product.productUrl && !input.product.affiliateUrl) return "missing_product_url";
+  if (input.product.stock !== undefined && input.product.stock !== null && toFiniteNumber(input.product.stock) <= 0) return "out_of_stock";
+  if (input.blockedCategories?.some((category) => isShopeeCategoryMatch(input.product.category, category))) return "blocked_category";
+  if ((input.minPrice ?? 0) > 0 && effectivePrice < (input.minPrice ?? 0)) return "below_min_price";
+  if ((input.maxPrice ?? 0) > 0 && effectivePrice > (input.maxPrice ?? 0)) return "above_max_price";
+  if ((input.minRating ?? 0) > 0 && (input.product.rating ?? 0) < (input.minRating ?? 0)) return "below_min_rating";
+  if ((input.minSales ?? 0) > 0 && (input.product.salesCount ?? 0) < (input.minSales ?? 0)) return "below_min_sales";
+  if ((input.minDiscountPercent ?? 0) > 0 && (input.product.discountPercent ?? 0) < (input.minDiscountPercent ?? 0)) return "below_min_discount";
+  return null;
+}
+
+function logShopeeSourceScoreBreakdown(input: {
+  sourceTag: ShopeeSourceTag;
+  pageId?: string;
+  product: ShopeeProductRecord;
+  scoreResult: ShopeeSourceScoreResult;
+  finalRank?: number | null;
+  selectionStatus: "selected" | "rejected";
+  rejectedReason?: string | null;
+}) {
+  console.info("SHOPEE_SOURCE_SCORE_BREAKDOWN", {
+    source: input.sourceTag,
+    pageId: input.pageId,
+    productId: input.product.productId,
+    shopId: input.product.shopId,
+    itemId: input.product.itemId,
+    productName: input.product.productName,
+    sales: input.product.salesCount ?? 0,
+    rating: input.product.rating ?? 0,
+    reviewCount: input.product.reviewCount ?? 0,
+    discount: input.product.discountPercent ?? 0,
+    commissionRate: input.product.commissionRate ?? 0,
+    price: getEffectiveProductPrice(input.product),
+    searchVolume: input.product.searchVolume ?? null,
+    sourceSpecificScore: input.scoreResult.sourceSpecificScore,
+    scoreBreakdown: input.scoreResult.scoreBreakdown,
+    finalRank: input.finalRank ?? null,
+    selectionStatus: input.selectionStatus,
+    rejectedReason: input.rejectedReason ?? null
+  });
 }
 
 export async function selectShopeeProductsForPages(input: {
@@ -4348,13 +5296,16 @@ export async function selectShopeeProductsForPages(input: {
   excludedProductIds?: string[];
 }) {
   const provider = getShopeeProductProvider();
+  const sourceTag = input.sourceTag ?? "trending";
+  assertManualKeywordProvided({ sourceTag, keyword: input.keyword });
   const excludedProductIds = new Set((input.excludedProductIds ?? []).map((productId) => String(productId)).filter(Boolean));
   const dailyLocks = process.env.AUTO_POST_NO_DUPLICATE_SAME_DAY === "false"
     ? { productIds: new Set<string>(), identities: new Set<string>(), postedDate: getBangkokPostedDate() }
     : await getShopeeProductLocksForDate(input.userId);
   const categories = normalizeShopeeCategories(input.categories?.length ? input.categories : input.category);
   const discoveryCategories = categories.length ? categories : [DEFAULT_SHOPEE_CATEGORY];
-  const limitPerCategory = Math.max(20, input.pageIds.length * Math.max(5, excludedProductIds.size + 5));
+  const requestedPoolSize = Math.max(30, input.pageIds.length * Math.max(5, excludedProductIds.size + 5));
+  const limitPerCategory = Math.max(30, Math.min(50, requestedPoolSize));
   const effectiveCategoryPriority = input.categoryPriority?.length ? input.categoryPriority : categories;
   const discoveredByCategory: ShopeeProductRecord[][] = [];
   const discoveredCategoryHints = new Map<string, Set<string>>();
@@ -4362,7 +5313,7 @@ export async function selectShopeeProductsForPages(input: {
   for (const category of discoveryCategories) {
     try {
       const categoryProducts = await provider.fetchProducts({
-        sourceTag: input.sourceTag ?? "trending",
+        sourceTag,
         keyword: input.keyword,
         category,
         limit: limitPerCategory
@@ -4387,19 +5338,6 @@ export async function selectShopeeProductsForPages(input: {
   const selected: Array<{ pageId: string; product: ShopeeProductRecord; score: ProductScore }> = [];
   const selectedProductIds = new Set<string>();
   const selectedProductIdentities = new Set<string>();
-  const filteredProducts = discovered.filter((product) => {
-    const productId = String(product.productId);
-    const identity = getShopeeProductIdentity(product);
-    if (excludedProductIds.has(productId)) return false;
-    if (dailyLocks.productIds.has(productId) || dailyLocks.identities.has(identity)) return false;
-    const effectivePrice = product.discountPrice || product.productPrice || 0;
-    if ((input.minPrice ?? 0) > 0 && effectivePrice < (input.minPrice ?? 0)) return false;
-    if ((input.maxPrice ?? 0) > 0 && effectivePrice > (input.maxPrice ?? 0)) return false;
-    if ((input.minRating ?? 0) > 0 && (product.rating ?? 0) < (input.minRating ?? 0)) return false;
-    if ((input.minSales ?? 0) > 0 && (product.salesCount ?? 0) < (input.minSales ?? 0)) return false;
-    if ((input.minDiscountPercent ?? 0) > 0 && (product.discountPercent ?? 0) < (input.minDiscountPercent ?? 0)) return false;
-    return true;
-  });
 
   const rotatedCategories = getRotatedShopeeCategories(categories);
   const productMatchesPreferredCategory = (product: ShopeeProductRecord, category: string) => {
@@ -4408,34 +5346,104 @@ export async function selectShopeeProductsForPages(input: {
   };
 
   for (const pageId of input.pageIds) {
-    const scored = [];
-    for (const product of filteredProducts) {
-      const productId = String(product.productId);
-      const identity = getShopeeProductIdentity(product);
-      if (selectedProductIds.has(productId) || selectedProductIdentities.has(identity)) continue;
+    const scored: ShopeeSourceScoredCandidate[] = [];
+    for (const product of discovered) {
+      const scoreResult = scoreShopeeProductForSource({
+        product,
+        sourceTag,
+        keyword: input.keyword,
+        categories: effectiveCategoryPriority
+      });
+      const staticRejection = getShopeeProductFilterRejectionReason({
+        product,
+        excludedProductIds,
+        dailyLocks,
+        selectedProductIds,
+        selectedProductIdentities,
+        blockedCategories: input.blockedCategories,
+        minPrice: input.minPrice,
+        maxPrice: input.maxPrice,
+        minRating: input.minRating,
+        minSales: input.minSales,
+        minDiscountPercent: input.minDiscountPercent
+      });
+      if (staticRejection) {
+        logShopeeSourceScoreBreakdown({
+          sourceTag,
+          pageId,
+          product,
+          scoreResult,
+          finalRank: null,
+          selectionStatus: "rejected",
+          rejectedReason: staticRejection
+        });
+        continue;
+      }
       const recentlyPosted = await wasProductRecentlyPosted(input.userId, pageId, product.productId);
-      const score = scoreShopeeProduct({
+      if (recentlyPosted) {
+        logShopeeSourceScoreBreakdown({
+          sourceTag,
+          pageId,
+          product,
+          scoreResult,
+          finalRank: null,
+          selectionStatus: "rejected",
+          rejectedReason: "recently_posted"
+        });
+        continue;
+      }
+      if (scoreResult.sourceSpecificScore < SHOPEE_MIN_SOURCE_SPECIFIC_SCORE) {
+        logShopeeSourceScoreBreakdown({
+          sourceTag,
+          pageId,
+          product,
+          scoreResult,
+          finalRank: null,
+          selectionStatus: "rejected",
+          rejectedReason: "below_min_source_score"
+        });
+        continue;
+      }
+      const legacyRiskScore = scoreShopeeProduct({
         product,
         recentlyPosted,
         categoryPriority: effectiveCategoryPriority,
         blockedCategories: input.blockedCategories
       });
-      if (!score.riskFlags.includes("blocked_category") && !score.riskFlags.includes("missing_product_url")) {
-        scored.push({ product, score });
-      }
+      const mergedRiskFlags = Array.from(new Set([...scoreResult.score.riskFlags, ...legacyRiskScore.riskFlags]));
+      scored.push({
+        product,
+        ...scoreResult,
+        score: {
+          ...scoreResult.score,
+          riskFlags: mergedRiskFlags
+        }
+      });
     }
 
-    const eligibleScored = scored.filter((item) => item.score.productScore >= 35);
     const pageIndex = input.pageIds.indexOf(pageId);
     const preferredCategory = rotatedCategories.length ? rotatedCategories[pageIndex % rotatedCategories.length] : "";
-    const preferredEligible = preferredCategory
-      ? eligibleScored.filter((item) => productMatchesPreferredCategory(item.product, preferredCategory))
+    const preferredCandidates = preferredCategory
+      ? scored.filter((item) => productMatchesPreferredCategory(item.product, preferredCategory))
       : [];
-    const best = preferredEligible.length
-      ? weightedRandomProduct(preferredEligible)
-      : eligibleScored.length
-        ? weightedRandomProduct(eligibleScored)
-        : null;
+    const ranked = sourceSpecificRankedSelection(preferredCandidates.length ? preferredCandidates : scored, sourceTag);
+    const best = pickRandomTopSourceCandidate(ranked);
+
+    for (const candidate of ranked) {
+      logShopeeSourceScoreBreakdown({
+        sourceTag,
+        pageId,
+        product: candidate.product,
+        scoreResult: candidate,
+        finalRank: candidate.finalRank ?? null,
+        selectionStatus: best?.product.productId === candidate.product.productId ? "selected" : "rejected",
+        rejectedReason: best?.product.productId === candidate.product.productId
+          ? null
+          : (candidate.finalRank ?? 0) <= candidate.topCandidateLimit
+            ? "top_candidate_not_randomly_selected"
+            : "outside_top_candidates"
+      });
+    }
 
     if (!best) {
       continue;
@@ -4471,7 +5479,7 @@ export async function generateShopeeCaption(input: {
 }) {
   const { product } = input;
   const titleInfo = getShopeeCleanedProductTitleInfo(product.productName);
-  const productEntity = extractShopeeProductEntity(product);
+  const productUnderstanding = extractShopeeProductUnderstanding(product);
   const imageCount = [product.productImageUrl, ...(product.productImageUrls ?? [])].filter((url) => Boolean(url?.trim())).length;
 
   await logShopeePackageStage({
@@ -4484,11 +5492,74 @@ export async function generateShopeeCaption(input: {
     metadata: {
       productId: product.productId,
       rawTitle: titleInfo.rawTitle,
-      cleanedTitle: productEntity.cleanedTitle || titleInfo.cleanedTitle,
-      productEntity: productEntity.productEntity,
-      brand: productEntity.brand ?? "",
-      model: productEntity.model ?? "",
-      removedNoiseWords: productEntity.removedNoiseWords
+      cleanedTitle: productUnderstanding.cleanedTitle || titleInfo.cleanedTitle,
+      productEntity: productUnderstanding.productEntity,
+      productType: productUnderstanding.productType,
+      mainUseCase: productUnderstanding.mainUseCase,
+      targetAudience: productUnderstanding.targetAudience,
+      confidence: productUnderstanding.confidence,
+      brand: productUnderstanding.brand ?? "",
+      model: productUnderstanding.model ?? "",
+      removedNoiseWords: productUnderstanding.removedNoiseWords
+    }
+  });
+
+  await logShopeePackageStage({
+    userId: input.userId,
+    jobId: input.jobId,
+    product,
+    step: "PRODUCT_UNDERSTANDING_STARTED",
+    status: "started",
+    message: "Extracting Shopee product entity, type, use case, and target audience",
+    metadata: {
+      productId: product.productId,
+      rawTitle: titleInfo.rawTitle,
+      cleanedTitle: productUnderstanding.cleanedTitle || titleInfo.cleanedTitle
+    }
+  });
+
+  try {
+    assertValidShopeeProductUnderstanding(productUnderstanding, product);
+  } catch (error) {
+    await logShopeePackageStage({
+      userId: input.userId,
+      jobId: input.jobId,
+      product,
+      step: "PRODUCT_UNDERSTANDING_FAILED",
+      status: "failed",
+      message: "Product understanding validation failed before Storyboard",
+      metadata: {
+        productId: product.productId,
+        rawTitle: productUnderstanding.rawTitle,
+        cleanedTitle: productUnderstanding.cleanedTitle || titleInfo.cleanedTitle,
+        productEntity: productUnderstanding.productEntity,
+        productType: productUnderstanding.productType,
+        mainUseCase: productUnderstanding.mainUseCase,
+        targetAudience: productUnderstanding.targetAudience,
+        confidence: productUnderstanding.confidence,
+        failureReasons: productUnderstanding.failureReasons
+      },
+      error
+    });
+    throw error;
+  }
+
+  await logShopeePackageStage({
+    userId: input.userId,
+    jobId: input.jobId,
+    product,
+    step: "PRODUCT_UNDERSTANDING_COMPLETED",
+    status: "success",
+    message: "Product understanding validated before Storyboard",
+    metadata: {
+      productId: product.productId,
+      rawTitle: productUnderstanding.rawTitle,
+      cleanedTitle: productUnderstanding.cleanedTitle || titleInfo.cleanedTitle,
+      productEntity: productUnderstanding.productEntity,
+      productType: productUnderstanding.productType,
+      mainUseCase: productUnderstanding.mainUseCase,
+      targetAudience: productUnderstanding.targetAudience,
+      confidence: productUnderstanding.confidence
     }
   });
 
@@ -4501,8 +5572,11 @@ export async function generateShopeeCaption(input: {
     message: "Validating minimum Shopee product data before Storyboard",
     metadata: {
       productId: product.productId,
-      cleanedTitle: productEntity.cleanedTitle || titleInfo.cleanedTitle,
-      productEntity: productEntity.productEntity,
+      cleanedTitle: productUnderstanding.cleanedTitle || titleInfo.cleanedTitle,
+      productEntity: productUnderstanding.productEntity,
+      productType: productUnderstanding.productType,
+      mainUseCase: productUnderstanding.mainUseCase,
+      targetAudience: productUnderstanding.targetAudience,
       rawTitle: titleInfo.rawTitle,
       imageCount,
       shortLinkExists: Boolean(input.affiliateLink?.trim())
@@ -4520,7 +5594,7 @@ export async function generateShopeeCaption(input: {
       metadata: {
         productId: product.productId,
         rawTitle: titleInfo.rawTitle,
-        cleanedTitle: productEntity.cleanedTitle || titleInfo.cleanedTitle,
+        cleanedTitle: productUnderstanding.cleanedTitle || titleInfo.cleanedTitle,
         reason: "missing_title",
         validatorName: "minimumProductData"
       }
@@ -4543,7 +5617,7 @@ export async function generateShopeeCaption(input: {
       metadata: {
         productId: product.productId,
         rawTitle: titleInfo.rawTitle,
-        cleanedTitle: productEntity.cleanedTitle || titleInfo.cleanedTitle,
+        cleanedTitle: productUnderstanding.cleanedTitle || titleInfo.cleanedTitle,
         reason: "missing_images",
         validatorName: "minimumProductData"
       }
@@ -4588,8 +5662,11 @@ export async function generateShopeeCaption(input: {
     message: "Product passed minimum validation before Storyboard",
     metadata: {
       productId: product.productId,
-      cleanedTitle: productEntity.cleanedTitle || titleInfo.cleanedTitle,
-      productEntity: productEntity.productEntity,
+      cleanedTitle: productUnderstanding.cleanedTitle || titleInfo.cleanedTitle,
+      productEntity: productUnderstanding.productEntity,
+      productType: productUnderstanding.productType,
+      mainUseCase: productUnderstanding.mainUseCase,
+      targetAudience: productUnderstanding.targetAudience,
       validatorName: "minimumProductData"
     }
   });
@@ -4603,8 +5680,11 @@ export async function generateShopeeCaption(input: {
     message: "Product input is ready for Storyboard",
     metadata: {
       productId: product.productId,
-      cleanedTitle: productEntity.cleanedTitle || titleInfo.cleanedTitle,
-      productEntity: productEntity.productEntity,
+      cleanedTitle: productUnderstanding.cleanedTitle || titleInfo.cleanedTitle,
+      productEntity: productUnderstanding.productEntity,
+      productType: productUnderstanding.productType,
+      mainUseCase: productUnderstanding.mainUseCase,
+      targetAudience: productUnderstanding.targetAudience,
       descriptionExists: Boolean(product.productDescription?.trim()),
       imageCount,
       shortLinkExists: Boolean(input.affiliateLink?.trim())
@@ -4613,7 +5693,7 @@ export async function generateShopeeCaption(input: {
 
   const productForStoryboard: ShopeeProductRecord = {
     ...product,
-    productName: productEntity.cleanedTitle || titleInfo.cleanedTitle || product.productName
+    productName: productUnderstanding.cleanedTitle || titleInfo.cleanedTitle || product.productName
   };
 
   const storyboardStartedAt = new Date();
@@ -4626,10 +5706,14 @@ export async function generateShopeeCaption(input: {
     message: "Creating Product Storyboard for Shopee caption",
     metadata: {
       rawTitle: titleInfo.rawTitle,
-      cleanedTitle: productEntity.cleanedTitle || titleInfo.cleanedTitle,
-      productEntity: productEntity.productEntity,
-      brand: productEntity.brand ?? "",
-      model: productEntity.model ?? "",
+      cleanedTitle: productUnderstanding.cleanedTitle || titleInfo.cleanedTitle,
+      productEntity: productUnderstanding.productEntity,
+      productType: productUnderstanding.productType,
+      mainUseCase: productUnderstanding.mainUseCase,
+      targetAudience: productUnderstanding.targetAudience,
+      confidence: productUnderstanding.confidence,
+      brand: productUnderstanding.brand ?? "",
+      model: productUnderstanding.model ?? "",
       hasProductName: hasShopeeProductName(productForStoryboard),
       hasProductImage: hasShopeeProductImage(productForStoryboard),
       imageCount,

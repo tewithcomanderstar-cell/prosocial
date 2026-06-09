@@ -87,6 +87,10 @@ export async function POST(request: Request) {
       return jsonError("Select at least one Facebook page first", 400);
     }
 
+    if (config.shopeeSourceTag === "manual" && !config.shopeeKeyword?.trim()) {
+      return jsonError("Manual keyword search requires a keyword", 400, "manual_keyword_required");
+    }
+
     if (config.targetPageIds.length > 100) {
       return jsonError("Select up to 100 Facebook pages", 400);
     }

@@ -3,7 +3,7 @@ import { jsonError, jsonOk, normalizeRouteError, parseBody, requireAuth } from "
 import {
   getShopeeEnvStatus,
   getShopeeProductProvider,
-  scoreShopeeProduct,
+  scoreShopeeProductForSource,
   ShopeeProviderError,
   upsertShopeeProducts,
   ShopeeSourceTag
@@ -33,6 +33,15 @@ async function fetchProductsForCategories(input: {
   const categories = input.categories.length ? input.categories : [DEFAULT_SHOPEE_CATEGORY];
   const batches = [];
   const errors: string[] = [];
+
+  if (input.sourceTag === "manual" && !input.keyword?.trim()) {
+    throw new ShopeeProviderError(
+      "Manual keyword search requires a keyword",
+      400,
+      "manual_keyword_required",
+      "internal_api"
+    );
+  }
 
   for (const category of categories) {
     try {
@@ -98,7 +107,7 @@ export async function GET(request: Request) {
     return jsonOk({
       products: products.map((product) => ({
         ...product,
-        score: scoreShopeeProduct({ product })
+        score: scoreShopeeProductForSource({ product, sourceTag, keyword, categories }).score
       })),
       count: products.length,
       provider: provider.name
@@ -153,7 +162,12 @@ export async function POST(request: Request) {
     return jsonOk({
       products: products.map((product) => ({
         ...product,
-        score: scoreShopeeProduct({ product })
+        score: scoreShopeeProductForSource({
+          product,
+          sourceTag: payload.sourceTag ?? "trending",
+          keyword: payload.keyword,
+          categories: normalizeShopeeCategories((payload.categories ?? []).length ? payload.categories : payload.category)
+        }).score
       })),
       count: products.length,
       provider: provider.name

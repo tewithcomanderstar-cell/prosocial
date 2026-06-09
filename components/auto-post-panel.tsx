@@ -229,6 +229,14 @@ const defaults: AutoPostConfig = {
   retryCount: 0
 };
 
+const SHOPEE_SOURCE_HELPER_TEXT: Record<AutoPostConfig["shopeeSourceTag"], string> = {
+  trending: "คัดสินค้ากำลังมาแรง โดยดูยอดขาย ส่วนลด เรตติ้ง และสัญญาณความนิยม",
+  best_selling: "คัดสินค้ายอดขายสูงจริงเป็นหลัก",
+  top_search: "คัดสินค้าที่มี demand สูงจาก keyword/search signal ถ้ามีข้อมูลจาก Shopee",
+  best_roi: "คัดสินค้าที่คาดว่าทำรายได้ Affiliate ดี จากค่าคอม ราคา ยอดขาย และเรตติ้ง",
+  manual: "ค้นสินค้าตาม keyword ที่กำหนดเอง"
+};
+
 function getConfigShopeeCategories(config?: Partial<AutoPostConfig> | null) {
   return normalizeShopeeCategories(
     Array.isArray(config?.shopeeCategories) && config.shopeeCategories.length
@@ -751,6 +759,9 @@ export function AutoPostPanel() {
       shopeeCategory: shopeeCategories[0] ?? DEFAULT_SHOPEE_CATEGORY,
       enabled: enabledOverride ?? config.enabled
     };
+    if (payload.shopeeSourceTag === "manual" && !payload.shopeeKeyword.trim()) {
+      throw new Error("Manual keyword search requires a keyword");
+    }
     const response = await fetch("/api/auto-post", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -842,7 +853,8 @@ export function AutoPostPanel() {
   const hasFacebookPages = pages.length > 0;
   const setupRequired = visibleState === "setup_required" || controlPanel?.affiliateConfigStatus === "setup_required";
   const displayStatus = ((controlPanel?.autoPostEngineStatus as AutoPostStatus | undefined) ?? config.autoPostStatus ?? "paused");
-  const startDisabled = starting || saving || setupRequired || ["running", "posting", "retrying"].includes(displayStatus);
+  const manualKeywordMissing = config.shopeeSourceTag === "manual" && !config.shopeeKeyword.trim();
+  const startDisabled = starting || saving || setupRequired || manualKeywordMissing || ["running", "posting", "retrying"].includes(displayStatus);
   const facebookRequired = visibleState === "facebook_required" || !hasFacebookPages;
   const blockingError = visibleState === "error" ? error || "Unable to load Auto Post control panel" : "";
   const missingConfig = controlPanel?.missingEnv?.length ? ` Missing: ${controlPanel.missingEnv.join(", ")}` : "";
@@ -990,6 +1002,7 @@ export function AutoPostPanel() {
               <option value="best_roi">Best ROI products</option>
               <option value="manual">Manual keyword search</option>
             </select>
+            <span className="muted">{SHOPEE_SOURCE_HELPER_TEXT[config.shopeeSourceTag]}</span>
           </label>
 
           <label className="label">
@@ -1015,6 +1028,9 @@ export function AutoPostPanel() {
               onChange={(event) => updateConfig((current) => ({ ...current, shopeeKeyword: event.target.value }))}
               placeholder="เช่น ของใช้ในบ้าน, แก้วเก็บความเย็น"
             />
+            {manualKeywordMissing ? (
+              <span className="muted">Manual keyword search requires a keyword</span>
+            ) : null}
           </label>
 
           <div className="label" ref={categoryDropdownRef}>

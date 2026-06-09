@@ -178,8 +178,14 @@ function testStoryboardCaptionSourceUsesProductEntityGuards() {
   const source = readShopeeAffiliateServiceSource();
   const entitySource = sourceBetween(source, "function extractShopeeProductEntity", "function getShopeeStoryboardInputText");
   const groupSource = sourceBetween(source, "function getShopeeStoryboardProductGroup", "function enrichShopeeStoryboardForAffiliateReview");
+  const enrichSource = sourceBetween(source, "function enrichShopeeStoryboardForAffiliateReview", "const SHOPEE_STORYBOARD_RULES");
   const captionSource = sourceBetween(source, "function buildShopeeStoryboardCaption", "function createValidatedShopeeProductStoryboard");
   const validationSource = sourceBetween(source, "const SHOPEE_GENERIC_CAPTION_TEMPLATE_PATTERN", "function getStoryboardCaptionDebugPayload");
+  assert.ok(source.includes("type ShopeeProductUnderstanding"));
+  assert.ok(source.includes("PRODUCT_UNDERSTANDING_FAILED"));
+  assert.ok(entitySource.includes("travel_pillow"));
+  assert.ok(entitySource.includes("water_purifier_accessory"));
+  assert.ok(entitySource.includes("sport_shirt"));
 
   assert.ok(entitySource.includes("กระบอกน้ำ"));
   assert.ok(entitySource.includes("พกน้ำหรือเครื่องดื่มไปทำงาน เดินทาง หรือออกกำลังกาย"));
@@ -188,13 +194,36 @@ function testStoryboardCaptionSourceUsesProductEntityGuards() {
   assert.ok(groupSource.includes('return "generic_product"'));
   const groupReturns = Array.from(groupSource.matchAll(/return "([^"]+)";/g)).map((match) => match[1]);
   assert.equal(groupReturns.at(-1), "generic_product");
+  assert.equal(enrichSource.includes("home: {"), false);
+  assert.equal(enrichSource.includes("generic_product: {"), false);
   assert.ok(captionSource.includes("buildShopeeStoryboardSolutionLine"));
+  assert.ok(captionSource.includes("buildShopeeStoryboardCtaLine"));
   assert.equal(captionSource.includes("มีตัวช่วยไว้สะดวกกว่าเดิม"), false);
   assert.ok(source.includes("NO_GENERIC_CATEGORY_TEMPLATE"));
+  assert.ok(source.includes("ENTITY_SPECIFIC_LANGUAGE"));
+  assert.ok(source.includes("isShopeeHashtagRelevantToStoryboard"));
+  assert.equal(source.includes("audienceTags"), false);
   for (const phrase of ["ของใช้ในบ้าน", "หยิบใช้", "ช่วยให้บ้านดูใช้งานง่าย", "ช่วงใช้งานในชีวิตประจำวัน"]) {
     assert.ok(validationSource.includes(phrase), `Missing generic phrase validation for ${phrase}`);
   }
   console.log("PASS Shopee storyboard caption source uses product-entity guards");
+}
+
+function testShopeeSourceSpecificSelectionGuards() {
+  const source = readShopeeAffiliateServiceSource();
+  const scoringSource = sourceBetween(source, "export function scoreShopeeProductForSource", "function sourceSpecificRankedSelection");
+  const selectionSource = sourceBetween(source, "function sourceSpecificRankedSelection", "export async function selectShopeeProductsForPages");
+
+  assert.ok(scoringSource.includes("salesScore*0.60 + reviewScore*0.20 + ratingScore*0.15 + productQualityScore*0.05"));
+  assert.ok(scoringSource.includes("estimatedCommissionScore*0.45 + conversionProxy*0.45 + productQualityScore*0.10"));
+  assert.ok(scoringSource.includes("keywordMatchScore*0.35 + salesScore*0.25 + reviewScore*0.15 + ratingScore*0.10 + sourceApiBonus*0.15"));
+  assert.ok(scoringSource.includes("exactKeywordMatch*0.40 + partialKeywordMatch*0.20 + categoryMatch*0.10 + salesScore*0.15 + ratingScore*0.10 + commissionScore*0.05"));
+  assert.ok(selectionSource.includes("pickRandomTopSourceCandidate"));
+  assert.ok(source.includes("SHOPEE_SOURCE_SCORE_BREAKDOWN"));
+  assert.ok(source.includes("manual_keyword_required"));
+  assert.ok(source.includes("listType_requires_matchId_but_matchId_missing"));
+  assert.equal(source.includes("function weightedRandomProduct"), false);
+  console.log("PASS Shopee source-specific selection guards");
 }
 
 await testMockProviderReturnsProducts();
@@ -209,3 +238,4 @@ testProductNameOccurrenceCounting();
 testImagePromptIncludesSafetyRules();
 testImagePromptSetCreatesFourConsistentPrompts();
 testStoryboardCaptionSourceUsesProductEntityGuards();
+testShopeeSourceSpecificSelectionGuards();

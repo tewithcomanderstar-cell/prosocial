@@ -20,6 +20,12 @@ const shopeeProductSchema = new Schema(
     shopName: { type: String, default: "" },
     rating: { type: Number, default: 0, index: true },
     commissionRate: { type: Number, default: 0, index: true },
+    searchVolume: { type: Number, default: null, index: true },
+    recentSales: { type: Number, default: null, index: true },
+    salesVelocity: { type: Number, default: null, index: true },
+    stock: { type: Number, default: null },
+    productCreatedAt: { type: Date, default: null, index: true },
+    sourceApiSignal: { type: Boolean, default: false },
     sourceTag: {
       type: String,
       enum: ["trending", "best_selling", "top_search", "best_roi", "manual"],

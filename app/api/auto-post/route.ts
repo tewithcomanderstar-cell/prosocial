@@ -218,6 +218,10 @@ export async function POST(request: Request) {
     const targetPageIds = uniquePageIds(payload.targetPageIds);
     const current = (await AutoPostConfig.findOne({ userId }).lean()) as LeanAutoPostConfig | null;
 
+    if (payload.shopeeSourceTag === "manual" && !shopeeKeyword) {
+      return jsonError("Manual keyword search requires a keyword", 400, "manual_keyword_required");
+    }
+
     const nextRunAt = payload.enabled
       ? current?.enabled
         ? current.nextRunAt ?? new Date()
