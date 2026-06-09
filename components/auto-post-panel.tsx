@@ -145,6 +145,18 @@ type ControlPanelStatus = {
       indexBytes: number;
     }>;
   };
+  statusSourceTrace?: {
+    currentRunId?: string | null;
+    templatePostId?: string | null;
+    lastPostId?: string | null;
+    templatePostIdSource?: string;
+    storyboardStatusSource?: string;
+    captionStatusSource?: string;
+    imageStatusSource?: string;
+    blobStatusSource?: string;
+    createdTasksSource?: string;
+    publishedSource?: string;
+  };
 };
 
 type StatusLog = {

@@ -2,11 +2,9 @@ import { isUnauthorizedError, jsonError, jsonOk } from "@/lib/api";
 import { AutoPostConfig } from "@/models/AutoPostConfig";
 import { ActionLog } from "@/models/ActionLog";
 import { FacebookConnection } from "@/models/FacebookConnection";
-import { FacebookPostQueue } from "@/models/FacebookPostQueue";
 import { Job } from "@/models/Job";
 import { ShopeeProduct } from "@/models/ShopeeProduct";
 import { getShopeeAffiliateConfigStatus, getShopeeEnvStatus, getShopeeProductProvider } from "@/lib/services/shopee-affiliate";
-import { repairMissingShopeePageTasks } from "@/lib/services/queue";
 import { getStorageStatus, mapStorageQuotaMessage } from "@/lib/services/storage-cleanup";
 import { DEFAULT_SHOPEE_CATEGORY, normalizeShopeeCategories, normalizeShopeeCategory } from "@/lib/shopee-categories";
 
@@ -28,9 +26,11 @@ type AutoPostConfigStatusDoc = {
 
 type LeanJobStatus = {
   _id: unknown;
+  postId?: unknown;
   targetPageId?: string;
   status?: string;
   createdAt?: Date;
+  updatedAt?: Date;
   nextRunAt?: Date;
   completedAt?: Date;
   processingStartedAt?: Date;
@@ -44,7 +44,6 @@ type LeanJobStatus = {
 const STATUS_FAST_TIMEOUT_MS = Number(process.env.AUTO_POST_STATUS_FAST_TIMEOUT_MS ?? 1200);
 const STATUS_OPTIONAL_TIMEOUT_MS = Number(process.env.AUTO_POST_STATUS_OPTIONAL_TIMEOUT_MS ?? 1500);
 const STATUS_JOB_TIMEOUT_MS = Number(process.env.AUTO_POST_STATUS_JOB_TIMEOUT_MS ?? 1800);
-const STATUS_REPAIR_TIMEOUT_MS = Number(process.env.AUTO_POST_STATUS_REPAIR_TIMEOUT_MS ?? 6000);
 const AUTO_POST_STATUS_PRE_TASK_TIMEOUT_MS = Number(process.env.AUTO_POST_JOB_TIMEOUT_MS ?? 300000);
 
 function sanitizeLegacyMessage(value?: string | null) {
@@ -208,6 +207,16 @@ function getStageStatusSummary(logs: StageLog[], input: {
     return "started";
   }
   return "pending";
+}
+
+function getStageStatusSource(logs: StageLog[], input: {
+  started: string[];
+  completed: string[];
+  failed: string[];
+}) {
+  const latest = getLatestStageLog(logs, [...input.failed, ...input.completed, ...input.started]);
+  if (!latest) return "action_log:none";
+  return `action_log:${getStageStep(latest) || "unknown"}`;
 }
 
 function getMetadataString(metadata: Record<string, unknown>, key: string) {
@@ -445,15 +454,30 @@ export async function GET() {
       lastWorkflowRunId?: unknown;
       _id?: unknown;
     };
+    const targetPageIds = Array.isArray(effectiveConfigDoc?.targetPageIds) ? effectiveConfigDoc.targetPageIds : [];
+    const workflowRunId = effectiveConfigDoc?.lastWorkflowRunId ? String(effectiveConfigDoc.lastWorkflowRunId) : null;
+    const lastRunAtDate =
+      effectiveConfigDoc?.lastRunAt instanceof Date
+        ? effectiveConfigDoc.lastRunAt
+        : effectiveConfigDoc?.lastRunAt
+          ? new Date(String(effectiveConfigDoc.lastRunAt))
+          : null;
+
+    const actionLogQuery: Record<string, unknown> = {
+      userId,
+      $or: [
+        { "metadata.autoPost": true },
+        { "metadata.shopeeAffiliate": true }
+      ]
+    };
+    if (workflowRunId) {
+      actionLogQuery["metadata.workflowRunId"] = workflowRunId;
+    } else if (lastRunAtDate instanceof Date && !Number.isNaN(lastRunAtDate.getTime())) {
+      actionLogQuery.createdAt = { $gte: lastRunAtDate };
+    }
 
     const logsPromise = withSoftTimeout(
-      ActionLog.find({
-        userId,
-        $or: [
-          { "metadata.autoPost": true },
-          { "metadata.shopeeAffiliate": true }
-        ]
-      })
+      ActionLog.find(actionLogQuery)
         .sort({ createdAt: -1 })
         .limit(80)
         .select("level message createdAt metadata")
@@ -484,23 +508,11 @@ export async function GET() {
       null,
       "last-product"
     );
-    const lastPublishedQueueItemPromise = withSoftTimeout(
-      FacebookPostQueue.findOne({ userId, status: "published" })
-        .sort({ updatedAt: -1 })
-        .select("updatedAt")
-        .maxTimeMS(STATUS_FAST_TIMEOUT_MS)
-        .lean()
-        .exec(),
-      STATUS_FAST_TIMEOUT_MS,
-      null,
-      "last-published"
-    );
-    const [logs, facebookConnection, storage, lastProduct, lastPublishedQueueItem] = await Promise.all([
+    const [logs, facebookConnection, storage, lastProduct] = await Promise.all([
       logsPromise,
       facebookConnectionPromise,
       storagePromise,
-      lastProductPromise,
-      lastPublishedQueueItemPromise
+      lastProductPromise
     ]);
     const facebookPages = Array.isArray((facebookConnection as any)?.pages) ? (facebookConnection as any).pages : [];
     const connectedPageCount = facebookPages.length;
@@ -515,22 +527,7 @@ export async function GET() {
     const affiliateStatus = getShopeeAffiliateConfigStatus(
       typeof effectiveConfig?.shopeeTrackingId === "string" ? effectiveConfig.shopeeTrackingId : ""
     );
-    const targetPageIds = Array.isArray(effectiveConfigDoc?.targetPageIds) ? effectiveConfigDoc.targetPageIds : [];
-    const workflowRunId = effectiveConfigDoc?.lastWorkflowRunId ? String(effectiveConfigDoc.lastWorkflowRunId) : null;
-    const shouldAutoRepairMissingTasks =
-      effectiveConfigDoc?._id &&
-      contentSource === "shopee-affiliate" &&
-      targetPageIds.length > 0 &&
-      ["posting", "waiting"].includes(String(effectiveConfigDoc.autoPostStatus ?? effectiveConfig?.autoPostStatus ?? ""));
-
-    const repairedTasks = shouldAutoRepairMissingTasks
-      ? await withSoftTimeout(
-          repairMissingShopeePageTasks(userId, effectiveConfigDoc as Record<string, any>, workflowRunId),
-          STATUS_REPAIR_TIMEOUT_MS,
-          { created: 0, expected: targetPageIds.length },
-          "repair-missing-shopee-page-tasks"
-        )
-      : { created: 0, expected: targetPageIds.length };
+    const repairedTasks = { created: 0, expected: targetPageIds.length };
 
     const jobQuery: Record<string, unknown> = {
       userId,
@@ -541,13 +538,16 @@ export async function GET() {
       jobQuery["payload.workflowRunId"] = workflowRunId;
     } else if (effectiveConfigDoc?._id) {
       jobQuery["payload.autoPostConfigId"] = String(effectiveConfigDoc._id);
+      if (lastRunAtDate instanceof Date && !Number.isNaN(lastRunAtDate.getTime())) {
+        jobQuery.createdAt = { $gte: lastRunAtDate };
+      }
     }
 
     const runJobs = (await withSoftTimeout(
       Job.find(jobQuery)
         .sort({ createdAt: -1 })
         .limit(Math.max(40, targetPageIds.length * 3 || 20))
-        .select("_id targetPageId status createdAt nextRunAt completedAt processingStartedAt lastError failureReason errorCode result payload")
+        .select("_id postId targetPageId status createdAt updatedAt nextRunAt completedAt processingStartedAt lastError failureReason errorCode result payload")
         .maxTimeMS(STATUS_JOB_TIMEOUT_MS)
         .lean()
         .exec(),
@@ -555,12 +555,6 @@ export async function GET() {
       [],
       "publish-jobs"
     )) as LeanJobStatus[];
-    const lastRunAtDate =
-      effectiveConfigDoc?.lastRunAt instanceof Date
-        ? effectiveConfigDoc.lastRunAt
-        : effectiveConfigDoc?.lastRunAt
-          ? new Date(String(effectiveConfigDoc.lastRunAt))
-          : null;
     const autoPostEngineStatus = String(effectiveConfigDoc.autoPostStatus ?? effectiveConfig?.autoPostStatus ?? "");
     const latestRunLog = logs.find((log) => {
       const metadata = (log.metadata ?? {}) as Record<string, unknown>;
@@ -609,28 +603,36 @@ export async function GET() {
     const templatePostLog = getLatestStageLog(runStageLogs, ["TEMPLATE_POST_CREATED", "TEMPLATE_POST_RESULT"]);
     const templatePostMetadata = (templatePostLog?.metadata ?? {}) as Record<string, unknown>;
     const preTaskBlockingStep = derivePreTaskBlockingStep(runStageLogs);
-    const storyboardStatus = getStageStatusSummary(runStageLogs, {
+    const storyboardStatusInput = {
       started: ["STORYBOARD_STARTED", "OPENAI_STORYBOARD_REQUEST_START", "STORYBOARD_RETRYING"],
       completed: ["STORYBOARD_CREATED", "OPENAI_STORYBOARD_REQUEST_END"],
       failed: ["STORYBOARD_FAILED", "STORYBOARD_TIMEOUT", "OPENAI_STORYBOARD_REQUEST_FAILED", "OPENAI_STORYBOARD_REQUEST_TIMEOUT"]
-    });
-    const captionStatus = getStageStatusSummary(runStageLogs, {
+    };
+    const captionStatusInput = {
       started: ["CAPTION_STARTED"],
       completed: ["CAPTION_CREATED"],
       failed: ["CAPTION_FAILED", "CAPTION_VALIDATION_FAILED_DETAIL"],
       staleStartedAfterMs: 120_000
-    });
-    const imageStatus = getStageStatusSummary(runStageLogs, {
+    };
+    const imageStatusInput = {
       started: ["UGC_IMAGES_STARTED", "OPENAI_IMAGE_REQUEST_START"],
       completed: ["UGC_IMAGES_CREATED", "OPENAI_IMAGE_REQUEST_END"],
       failed: ["UGC_IMAGES_FAILED", "OPENAI_IMAGE_REQUEST_FAILED", "OPENAI_IMAGE_TIMEOUT", "shopee_ugc_image_generation_failed"],
       staleStartedAfterMs: 195_000
-    });
-    let blobStatus = getStageStatusSummary(runStageLogs, {
+    };
+    const blobStatusInput = {
       started: ["BLOB_UPLOAD_STARTED"],
       completed: ["BLOB_UPLOAD_COMPLETED", "UGC_IMAGES_CREATED"],
       failed: ["BLOB_UPLOAD_FAILED"]
-    });
+    };
+    let storyboardStatus = getStageStatusSummary(runStageLogs, storyboardStatusInput);
+    let captionStatus = getStageStatusSummary(runStageLogs, captionStatusInput);
+    let imageStatus = getStageStatusSummary(runStageLogs, imageStatusInput);
+    let blobStatus = getStageStatusSummary(runStageLogs, blobStatusInput);
+    let storyboardStatusSource = getStageStatusSource(runStageLogs, storyboardStatusInput);
+    let captionStatusSource = getStageStatusSource(runStageLogs, captionStatusInput);
+    let imageStatusSource = getStageStatusSource(runStageLogs, imageStatusInput);
+    let blobStatusSource = getStageStatusSource(runStageLogs, blobStatusInput);
     const latestImageRequestLog = getLatestStageLog(runStageLogs, [
       "OPENAI_IMAGE_REQUEST_END",
       "OPENAI_IMAGE_REQUEST_FAILED",
@@ -656,6 +658,7 @@ export async function GET() {
       isStageLogOlderThan(latestImageRequestLog, 120_000)
     ) {
       blobStatus = "failed";
+      blobStatusSource = "status_mapping:stale_after_OPENAI_IMAGE_REQUEST_END";
     }
     const latestImageRequestMetadata = (latestImageRequestLog?.metadata ?? {}) as Record<string, unknown>;
     const imageStartedLogIsStale =
@@ -821,6 +824,47 @@ export async function GET() {
     const pendingPagesCount = Math.max(0, selectedPagesCount - publishedPagesCount - failedPagesCount - activePagesCount);
     const createdTasksCount = pageResults.filter((page) => page.jobId).length;
     const missingTasksCount = Math.max(0, selectedPagesCount - createdTasksCount);
+    const templatePostJob = runJobs.find((job) => job.postId) ?? null;
+    const templatePostId =
+      templatePostMetadata.templatePostId
+        ? String(templatePostMetadata.templatePostId)
+        : templatePostMetadata.aiGeneratedPostId
+          ? String(templatePostMetadata.aiGeneratedPostId)
+          : templatePostJob?.postId
+            ? String(templatePostJob.postId)
+            : null;
+    const lastPostId = templatePostJob?.postId ? String(templatePostJob.postId) : null;
+    const templatePostIdSource =
+      templatePostMetadata.templatePostId || templatePostMetadata.aiGeneratedPostId
+        ? `action_log:${getStageStep(templatePostLog as StageLog)}`
+        : templatePostJob?.postId
+          ? "job.postId"
+          : "none";
+    const createdTasksSource = workflowRunId
+      ? `Job(payload.workflowRunId=${workflowRunId})`
+      : lastRunAtDate instanceof Date && !Number.isNaN(lastRunAtDate.getTime())
+        ? `Job(payload.autoPostConfigId=${String(effectiveConfigDoc?._id ?? "")}, no currentRunId)`
+        : "Job(autoPostConfigId fallback)";
+    const publishedSource = createdTasksSource;
+    const hasCreatedRunPackage = Boolean(templatePostId && createdTasksCount > 0);
+    if (hasCreatedRunPackage) {
+      if (storyboardStatus === "pending") {
+        storyboardStatus = "created";
+        storyboardStatusSource = "template_post_inferred:created_tasks_guard";
+      }
+      if (captionStatus === "pending") {
+        captionStatus = "created";
+        captionStatusSource = "template_post_inferred:created_tasks_guard";
+      }
+      if (imageStatus === "pending") {
+        imageStatus = "created";
+        imageStatusSource = "template_post_inferred:created_tasks_guard";
+      }
+      if (blobStatus === "pending") {
+        blobStatus = "created";
+        blobStatusSource = "template_post_inferred:created_tasks_guard";
+      }
+    }
     const latestRunStep = String(((latestRunLog?.metadata ?? {}) as Record<string, unknown>).step ?? "");
     const currentStep = noTaskRunIsActive
       ? preTaskBlockingStep || latestRunStep || "PREPARING_SHOPEE_POST_PACKAGE"
@@ -916,7 +960,10 @@ export async function GET() {
       facebookPageStatus: facebookReady ? "connected" : "missing",
       autoPostEngineStatus: affiliateStatus.status === "setup_required" ? "blocked_setup_required" : effectiveConfig?.autoPostStatus ?? "paused",
       lastProductFetchAt: (lastProduct as any)?.fetchedAt ?? null,
-      lastPublishAt: (lastPublishedQueueItem as any)?.updatedAt ?? null,
+      lastPublishAt:
+        runJobs.find((job) => job.status === "success")?.completedAt ??
+        runJobs.find((job) => job.status === "success")?.updatedAt ??
+        null,
       provider: shopeeProvider.name,
       connectedPageCount,
       facebookPages: facebookPages.map((page: any) => ({
@@ -940,12 +987,7 @@ export async function GET() {
           : productStageMetadata.productId
             ? String(productStageMetadata.productId)
             : null,
-      templatePostId:
-        templatePostMetadata.templatePostId
-          ? String(templatePostMetadata.templatePostId)
-          : templatePostMetadata.aiGeneratedPostId
-            ? String(templatePostMetadata.aiGeneratedPostId)
-            : null,
+      templatePostId,
       storyboardStatus,
       storyboardStartedAt:
         typeof latestStoryboardRequestMetadata.startedAt === "string"
@@ -1011,6 +1053,18 @@ export async function GET() {
       },
       lastError,
       storage,
+      statusSourceTrace: {
+        currentRunId: workflowRunId,
+        templatePostId,
+        lastPostId,
+        templatePostIdSource,
+        storyboardStatusSource,
+        captionStatusSource,
+        imageStatusSource,
+        blobStatusSource,
+        createdTasksSource,
+        publishedSource
+      },
       responseShape: {
         pages: "data.pages",
         status: "config.logs.controlPanel"
@@ -1038,6 +1092,8 @@ export async function GET() {
         createdAt: log.createdAt,
         metadata: log.metadata ?? {}
       }));
+
+    console.info("[STATUS_SOURCE_TRACE]", controlPanel.statusSourceTrace);
 
     console.info("[auto-post/control-panel] status fetch completed", {
       userId,
