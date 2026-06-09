@@ -183,6 +183,11 @@ function testStoryboardCaptionSourceUsesProductEntityGuards() {
   const validationSource = sourceBetween(source, "const SHOPEE_GENERIC_CAPTION_TEMPLATE_PATTERN", "function getStoryboardCaptionDebugPayload");
   assert.ok(source.includes("type ShopeeProductUnderstanding"));
   assert.ok(source.includes("PRODUCT_UNDERSTANDING_FAILED"));
+  assert.ok(source.includes("PRODUCT_UNDERSTANDING_DEBUG"));
+  assert.ok(source.includes("getShopeeProductUnderstandingDebugPayload"));
+  assert.ok(source.includes("descriptionSnippet"));
+  assert.ok(source.includes("missingFields"));
+  assert.ok(source.includes("imageCount"));
   assert.ok(entitySource.includes("travel_pillow"));
   assert.ok(entitySource.includes("water_purifier_accessory"));
   assert.ok(entitySource.includes("sport_shirt"));

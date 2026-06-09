@@ -2903,37 +2903,42 @@ function extractShopeeProductUnderstanding(product: ShopeeProductRecord): Shopee
   return understanding;
 }
 
-function assertValidShopeeProductUnderstanding(understanding: ShopeeProductUnderstanding, product: ShopeeProductRecord) {
-  if (!understanding.failureReasons.length) return;
-  console.warn("[PRODUCT_UNDERSTANDING_FAILED]", {
+function getShopeeProductUnderstandingDebugPayload(product: ShopeeProductRecord, understanding: ShopeeProductUnderstanding) {
+  const imageUrls = Array.from(new Set([
+    product.productImageUrl,
+    ...(product.productImageUrls ?? [])
+  ].map((url) => String(url ?? "").trim()).filter(Boolean)));
+  return {
     productId: product.productId,
-    productName: product.productName,
-    rawTitle: understanding.rawTitle,
-    cleanedTitle: understanding.cleanedTitle,
+    rawTitle: understanding.rawTitle || product.productName,
+    descriptionSnippet: compactProductText(product.productDescription || "", 300),
+    cleanTitle: understanding.cleanedTitle,
+    removedNoiseWords: understanding.removedNoiseWords,
     productEntity: understanding.productEntity,
     productType: understanding.productType,
     mainUseCase: understanding.mainUseCase,
     targetAudience: understanding.targetAudience,
     confidence: understanding.confidence,
+    missingFields: understanding.failureReasons,
+    imageCount: imageUrls.length
+  };
+}
+
+function assertValidShopeeProductUnderstanding(understanding: ShopeeProductUnderstanding, product: ShopeeProductRecord) {
+  if (!understanding.failureReasons.length) return;
+  const debugPayload = getShopeeProductUnderstandingDebugPayload(product, understanding);
+  console.warn("[PRODUCT_UNDERSTANDING_FAILED]", {
+    ...debugPayload,
+    productName: product.productName,
     failureReasons: understanding.failureReasons
   });
+  console.warn("[PRODUCT_UNDERSTANDING_DEBUG]", debugPayload);
   throw new ShopeeProviderError(
     `PRODUCT_UNDERSTANDING_FAILED for ${product.productId}: ${understanding.failureReasons.join(", ")}`,
     422,
     "product_understanding_failed",
     "internal_api",
-    JSON.stringify({
-      productId: product.productId,
-      productName: product.productName,
-      rawTitle: understanding.rawTitle,
-      cleanedTitle: understanding.cleanedTitle,
-      productEntity: understanding.productEntity,
-      productType: understanding.productType,
-      mainUseCase: understanding.mainUseCase,
-      targetAudience: understanding.targetAudience,
-      confidence: understanding.confidence,
-      failureReasons: understanding.failureReasons
-    })
+    JSON.stringify(debugPayload)
   );
 }
 
@@ -5521,6 +5526,15 @@ export async function generateShopeeCaption(input: {
   try {
     assertValidShopeeProductUnderstanding(productUnderstanding, product);
   } catch (error) {
+    await logShopeePackageStage({
+      userId: input.userId,
+      jobId: input.jobId,
+      product,
+      step: "PRODUCT_UNDERSTANDING_DEBUG",
+      status: "failed",
+      message: "Product understanding debug payload captured",
+      metadata: getShopeeProductUnderstandingDebugPayload(product, productUnderstanding)
+    });
     await logShopeePackageStage({
       userId: input.userId,
       jobId: input.jobId,
