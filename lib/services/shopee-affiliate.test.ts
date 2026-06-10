@@ -419,7 +419,10 @@ function testShopeeCaptionFallbackGenerationGuards() {
   assert.ok(aiSource.includes("Caption Style"));
   assert.ok(aiSource.includes("Thai Facebook review page"));
   assert.ok(aiSource.includes("ดูรายละเอียด/เช็กราคาได้ที่นี่"));
-  assert.ok(aiSource.includes("อย่างน้อย 3 bullet lines"));
+  assert.ok(aiSource.includes("Exactly 3 benefit bullets"));
+  assert.ok(aiSource.includes("Do not include rating, review score, price"));
+  assert.ok(aiSource.includes("Keep captionText under 7 lines"));
+  assert.ok(aiSource.includes("ห้ามใส่คะแนนรีวิวหรือราคาใน captionText"));
   assert.ok(aiSource.includes("story | question | before_after | friend_tip | shock_hook | list_benefit"));
   assert.ok(aiSource.includes("captionText"));
   assert.ok(aiSource.includes("genericWordsFound"));
@@ -428,6 +431,7 @@ function testShopeeCaptionFallbackGenerationGuards() {
   assert.ok(captionSource.includes("generateThaiSocialProductCaption"));
   assert.ok(captionSource.includes("validateThaiSocialCaptionCandidate"));
   assert.ok(captionSource.includes("thai_social_caption_missing_review_bullets"));
+  assert.ok(captionSource.includes("thai_social_caption_contains_price_or_rating"));
   assert.ok(captionSource.includes("THAI_SOCIAL_CAPTION_USED"));
   assert.ok(captionSource.includes("THAI_SOCIAL_CAPTION_FAILED"));
   assert.ok(captionSource.indexOf("generateThaiSocialProductCaption") < captionSource.indexOf("CAPTION_RAW_OUTPUT"));
@@ -445,6 +449,7 @@ function testShopeeCaptionFallbackGenerationGuards() {
   assert.ok(captionSource.includes("SHOPEE_CAPTION_JSON_METADATA_PATTERN"));
   assert.ok(captionSource.includes("buildDeterministicShopeeFallbackCaption"));
   assert.ok(captionSource.includes("ดูรายละเอียด/เช็กราคาได้ที่นี่"));
+  assert.equal(captionSource.includes("formatShopeeStoryboardPriceLine(input.product, input.storyboard)"), false);
   assert.ok(captionSource.includes("CAPTION_PRIMARY_FAILED"));
   assert.ok(captionSource.includes("CAPTION_GENERATION_ERROR_DETAIL"));
   assert.ok(captionSource.includes("CAPTION_FALLBACK_RAW_OUTPUT"));
@@ -452,7 +457,7 @@ function testShopeeCaptionFallbackGenerationGuards() {
   assert.ok(captionSource.includes("CAPTION_FALLBACK_FAILED"));
   assert.ok(captionSource.includes("throw fallbackError"));
   assert.ok(captionSource.includes("validateStoryboardAffiliateCaption(fallbackCaption"));
-  assert.ok(captionSource.includes("formatShopeeStoryboardPriceLine(product, storyboard)"));
+  assert.ok(captionSource.includes("formatShopeeShortLinkLine(affiliateLink)"));
   assert.ok(captionSource.includes("formatShopeeShortLinkLine(affiliateLink)"));
   assert.ok(captionSource.includes("buildShopeeStoryboardCtaLine(storyboard)"));
   assert.ok(source.includes("caption_readability_failed"));
@@ -667,6 +672,16 @@ function testAutoPostStopsOnCaptionImageProductMismatch() {
   console.log("PASS auto-post stops on caption/image product mismatch");
 }
 
+function testStatusDoesNotDeriveImageFailedFromStaleStartOnly() {
+  const statusSource = readAutoPostStatusRouteSource();
+  assert.ok(statusSource.includes("status_mapping:stale_OPENAI_IMAGE_REQUEST_START_without_failure_log"));
+  assert.ok(statusSource.includes("imageStatus = \"stale\""));
+  assert.ok(statusSource.includes("imageStatus === \"started\" && imageStartedLogIsStale && !latestImageFailureLog"));
+  assert.equal(statusSource.includes("imageStatus was derived as failed because the latest OPENAI_IMAGE_REQUEST_START log is stale and no later image failure log was found"), false);
+  assert.equal(statusSource.includes("staleStartedAfterMs: 195_000"), false);
+  console.log("PASS status does not derive image failed from stale start only");
+}
+
 function testShopeeAllProductsAndCooldownGuards() {
   const source = readShopeeAffiliateServiceSource();
   const panelSource = readAutoPostPanelSource();
@@ -732,5 +747,6 @@ testShopeeCaptionFallbackGenerationGuards();
 testShopeeProductIntelligenceLayerGuards();
 testShopeeCaptionQualityAndSoldThresholdGuards();
 testAutoPostStopsOnCaptionImageProductMismatch();
+testStatusDoesNotDeriveImageFailedFromStaleStartOnly();
 testShopeeAllProductsAndCooldownGuards();
 testAutoPostProcessStepNoEligibleProductsReturnsDiagnostics();

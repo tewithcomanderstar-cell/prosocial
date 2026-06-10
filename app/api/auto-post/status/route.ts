@@ -628,8 +628,7 @@ export async function GET() {
     const imageStatusInput = {
       started: ["UGC_IMAGES_STARTED", "OPENAI_IMAGE_REQUEST_START"],
       completed: ["UGC_IMAGES_CREATED", "OPENAI_IMAGE_REQUEST_END"],
-      failed: ["UGC_IMAGES_FAILED", "OPENAI_IMAGE_REQUEST_FAILED", "OPENAI_IMAGE_TIMEOUT", "shopee_ugc_image_generation_failed"],
-      staleStartedAfterMs: 195_000
+      failed: ["UGC_IMAGES_FAILED", "OPENAI_IMAGE_REQUEST_FAILED", "OPENAI_IMAGE_TIMEOUT", "shopee_ugc_image_generation_failed"]
     };
     const blobStatusInput = {
       started: ["BLOB_UPLOAD_STARTED"],
@@ -764,14 +763,13 @@ export async function GET() {
       Boolean(latestImageRequestLog) &&
       getStageStep(latestImageRequestLog as StageLog) === "OPENAI_IMAGE_REQUEST_START" &&
       isStageLogOlderThan(latestImageRequestLog, 195_000);
+    if (imageStatus === "started" && imageStartedLogIsStale && !latestImageFailureLog) {
+      imageStatus = "stale";
+      imageStatusSource = "status_mapping:stale_OPENAI_IMAGE_REQUEST_START_without_failure_log";
+    }
     const imageFailureDetails = getStageFailureDetails(
       latestImageFailureLog,
-      imageStatus === "failed" && imageStartedLogIsStale
-        ? {
-            source: "status_mapping",
-            reason: "imageStatus was derived as failed because the latest OPENAI_IMAGE_REQUEST_START log is stale and no later image failure log was found"
-          }
-        : imageStatus === "failed"
+      imageStatus === "failed"
           ? {
               source: "status_mapping",
               reason: "imageStatus was derived as failed by stage status mapping without a failure log containing an error"

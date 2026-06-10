@@ -5351,17 +5351,11 @@ function buildDeterministicShopeeFallbackCaption(input: {
   const buyerHook = compactProductText(productIntelligence?.humanVoice.oneLinerHook || productIntelligence?.painPoint.primary || "", 120);
   const triggerMoment = compactProductText(productIntelligence?.triggerMoment.time || context || storyboard.realUsageScenario, 92);
   const soldCount = toFiniteNumber(product.salesCount);
-  const rating = toFiniteNumber(product.rating);
   const hookLine = soldCount > 1000
     ? `🔥 ยอดขาย ${soldCount.toLocaleString("th-TH")}+ ชิ้น เพราะคนใช้จริงมองหา${productLabel}แบบนี้`
     : buyerHook
       ? `✨ ${buyerHook}`
       : `✨ กำลังมองหา${productLabel}ที่ใช้จริงแล้วเห็นประโยชน์ชัด ๆ?`;
-  const proofLine = [
-    rating ? `คะแนนรีวิว ${rating}` : "",
-    product.discountPercent ? `มีส่วนลด ${product.discountPercent}%` : "",
-    getEffectiveProductPrice(product) ? `ราคาโปร ${formatShopeePrice(product).replace(/^ราคาโปร\s*/u, "")}` : ""
-  ].filter(Boolean).join(" • ");
   const benefitPool = dedupeCaptionBenefitLines([
     productIntelligence?.humanVoice.howFriendDescribes,
     productIntelligence?.humanVoice.beforeAfter,
@@ -5376,28 +5370,21 @@ function buildDeterministicShopeeFallbackCaption(input: {
   ].filter((line): line is string => Boolean(line)))
     .map((line) => compactProductText(humanizeShopeeStoryboardCaptionLine(line, storyboard), 82).replace(/[.!。?？]+$/u, ""))
     .filter(Boolean);
-  const [benefit1, benefit2, benefit3, benefit4] = [
+  const [benefit1, benefit2, benefit3] = [
     benefitPool[0] || action || `${productLabel}ช่วยตอบโจทย์การใช้งานนี้ได้ตรงขึ้น`,
     benefitPool[1] || storyboard.dailyBenefit || `เลือกใช้กับ${context || "สถานการณ์จริง"}ได้`,
-    context || benefitPool[2] || storyboard.realUsageScenario || `เหมาะกับการใช้${action}`,
-    benefitPool[3] || storyboard.purchaseReason || `ช่วยให้ดูแล${productLabel}หรือพื้นที่ใช้งานได้ง่ายขึ้น`
+    context || benefitPool[2] || storyboard.realUsageScenario || `เหมาะกับการใช้${action}`
   ];
-  const priceLine = formatShopeeStoryboardPriceLine(product, storyboard).replace(/^💰\s*/u, "");
   const caption = [
     hookLine,
     productLabel,
     "",
     `${action}${triggerMoment ? ` สำหรับ${triggerMoment}` : ""}`,
-    proofLine || `เหมาะกับ${targetCustomer}`,
     "",
     `✓ ${benefit1}`,
     `✓ ${benefit2}`,
     `✓ ${benefit3}`,
-    `✓ ${benefit4}`,
     "",
-    `เหมาะกับ${targetCustomer} และคนที่อยากเลือกให้ตรงกับการใช้งานจริง`,
-    "",
-    `💰 ${priceLine}`,
     "ดูรายละเอียด/เช็กราคาได้ที่นี่ 👇",
     "",
     formatShopeeShortLinkLine(affiliateLink),
@@ -6026,6 +6013,9 @@ function validateThaiSocialCaptionCandidate(input: {
   if (!caption) throw new Error("thai_social_caption_empty");
   if (genericWordsFound.length) throw new Error(`thai_social_caption_generic_words:${genericWordsFound.join(",")}`);
   if (productName && firstLine.startsWith(productName)) throw new Error("thai_social_caption_starts_with_product_name");
+  if (/คะแนนรีวิว|ราคาโปร|฿|\b\d+(?:\.\d+)?\s*บาท/u.test(caption)) {
+    throw new Error("thai_social_caption_contains_price_or_rating");
+  }
   const reviewBulletCount = caption
     .split(/\r?\n/)
     .filter((line) => /^[✓✔]\s*\S/u.test(line.trim())).length;
@@ -6049,9 +6039,6 @@ function buildThaiSocialCaptionForValidation(input: {
   const body = normalizeShopeeCaptionLinkLine(input.captionText, input.affiliateLink).trim();
   return [
     body,
-    "",
-    formatShopeeStoryboardPriceLine(input.product, input.storyboard),
-    "🛒 ดูรายละเอียดได้ที่ลิงก์ด้านล่าง",
     "",
     formatShopeeShortLinkLine(input.affiliateLink),
     "",

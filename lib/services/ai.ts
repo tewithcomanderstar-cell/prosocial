@@ -593,13 +593,14 @@ Target style:
 - Use this structure inside captionText:
   1. Hook line with an emoji or short attention phrase. Do NOT start with the product name.
   2. Product name line or short product mention.
-  3. 1-2 short sentences explaining who it is for and why it is interesting.
-  4. 3-5 benefit bullets using ✓ or ✔ only.
+  3. 1 short sentence explaining the real use case.
+  4. Exactly 3 benefit bullets using ✓ or ✔ only.
   5. Short CTA sentence such as "ดูรายละเอียด/เช็กราคาได้ที่นี่ 👇" but do not include the URL.
-- Make the hook click-worthy by using painPoint, triggerMoment, soldCount, rating, price, or a concrete use case.
+- Make the hook click-worthy by using painPoint, triggerMoment, soldCount, or a concrete use case.
 - Bullets must be specific and tangible, like "จับถนัดมือ", "กันน้ำและคราบเปื้อน", "พกไปทำงานได้", not generic claims.
 - Keep lines short like a mobile Facebook post.
-- Do not include price, hashtags, or the Shopee URL in captionText; the system will append them.
+- Do not include rating, review score, price, hashtags, or the Shopee URL in captionText; the system will append the link.
+- Keep captionText under 7 lines total before CTA.
 
 Rules by style:
 
@@ -652,7 +653,8 @@ Hard Rules:
 - ต้องใช้ข้อมูลจาก painPoint หรือ triggerMoment อย่างน้อย 1 อย่าง
 - ห้ามขึ้นต้นด้วยชื่อสินค้า
 - caption ต้องอ่านออกเสียงได้ฟังดูเป็นคนพูด ไม่ใช่อ่านสเปก
-- caption ต้องมีอย่างน้อย 3 bullet lines ที่ขึ้นต้นด้วย ✓ หรือ ✔`;
+- caption ต้องมี exactly 3 bullet lines ที่ขึ้นต้นด้วย ✓ หรือ ✔
+- ห้ามใส่คะแนนรีวิวหรือราคาใน captionText`;
 
   const result = await traceExternalRequest(
     {
