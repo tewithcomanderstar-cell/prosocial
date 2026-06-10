@@ -587,6 +587,20 @@ Post Platform: Facebook
 
 Write a Thai Facebook caption for this product.
 
+Target style:
+- Write like a Thai Facebook review page that makes readers want to click the Shopee link.
+- The post should feel like a practical recommendation, not an ad or metadata summary.
+- Use this structure inside captionText:
+  1. Hook line with an emoji or short attention phrase. Do NOT start with the product name.
+  2. Product name line or short product mention.
+  3. 1-2 short sentences explaining who it is for and why it is interesting.
+  4. 3-5 benefit bullets using ✓ or ✔ only.
+  5. Short CTA sentence such as "ดูรายละเอียด/เช็กราคาได้ที่นี่ 👇" but do not include the URL.
+- Make the hook click-worthy by using painPoint, triggerMoment, soldCount, rating, price, or a concrete use case.
+- Bullets must be specific and tangible, like "จับถนัดมือ", "กันน้ำและคราบเปื้อน", "พกไปทำงานได้", not generic claims.
+- Keep lines short like a mobile Facebook post.
+- Do not include price, hashtags, or the Shopee URL in captionText; the system will append them.
+
 Rules by style:
 
 [story]
@@ -634,9 +648,11 @@ Output Format (JSON):
 
 Hard Rules:
 - ห้ามใช้: คุณภาพดี, คุ้มค่า, คุ้มราคา, เหมาะสำหรับทุกเพศทุกวัย, สินค้าดีมีคุณภาพ, ไม่ควรพลาด, รีบสั่ง
+- ห้ามใช้ประโยคแนว metadata เช่น ใช้ตามลักษณะสินค้าที่ระบุ, ดูรายละเอียดให้ตรงกับการใช้งานที่ต้องการ, ใช้ได้ตรงกับจุดประสงค์มากขึ้น
 - ต้องใช้ข้อมูลจาก painPoint หรือ triggerMoment อย่างน้อย 1 อย่าง
 - ห้ามขึ้นต้นด้วยชื่อสินค้า
-- caption ต้องอ่านออกเสียงได้ฟังดูเป็นคนพูด ไม่ใช่อ่านสเปก`;
+- caption ต้องอ่านออกเสียงได้ฟังดูเป็นคนพูด ไม่ใช่อ่านสเปก
+- caption ต้องมีอย่างน้อย 3 bullet lines ที่ขึ้นต้นด้วย ✓ หรือ ✔`;
 
   const result = await traceExternalRequest(
     {
@@ -653,7 +669,7 @@ Hard Rules:
         {
           role: "system",
           content:
-            "You write Thai Facebook captions like a real person. Return strict JSON only. Never use generic marketing words. Never start with the product name."
+            "You write Thai Facebook review-page captions that make readers want to click. Return strict JSON only. Never use generic marketing words. Never start with the product name."
         },
         { role: "user", content: prompt }
       ]

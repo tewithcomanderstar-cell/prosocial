@@ -417,6 +417,9 @@ function testShopeeCaptionFallbackGenerationGuards() {
   assert.ok(aiSource.includes("generateThaiSocialProductCaption"));
   assert.ok(aiSource.includes("ThaiSocialCaptionResult"));
   assert.ok(aiSource.includes("Caption Style"));
+  assert.ok(aiSource.includes("Thai Facebook review page"));
+  assert.ok(aiSource.includes("ดูรายละเอียด/เช็กราคาได้ที่นี่"));
+  assert.ok(aiSource.includes("อย่างน้อย 3 bullet lines"));
   assert.ok(aiSource.includes("story | question | before_after | friend_tip | shock_hook | list_benefit"));
   assert.ok(aiSource.includes("captionText"));
   assert.ok(aiSource.includes("genericWordsFound"));
@@ -424,6 +427,7 @@ function testShopeeCaptionFallbackGenerationGuards() {
   assert.ok(aiSource.includes("ห้ามขึ้นต้นด้วยชื่อสินค้า"));
   assert.ok(captionSource.includes("generateThaiSocialProductCaption"));
   assert.ok(captionSource.includes("validateThaiSocialCaptionCandidate"));
+  assert.ok(captionSource.includes("thai_social_caption_missing_review_bullets"));
   assert.ok(captionSource.includes("THAI_SOCIAL_CAPTION_USED"));
   assert.ok(captionSource.includes("THAI_SOCIAL_CAPTION_FAILED"));
   assert.ok(captionSource.indexOf("generateThaiSocialProductCaption") < captionSource.indexOf("CAPTION_RAW_OUTPUT"));
@@ -440,6 +444,7 @@ function testShopeeCaptionFallbackGenerationGuards() {
   assert.ok(captionSource.includes("SHOPEE_CAPTION_METADATA_LINE_PATTERN"));
   assert.ok(captionSource.includes("SHOPEE_CAPTION_JSON_METADATA_PATTERN"));
   assert.ok(captionSource.includes("buildDeterministicShopeeFallbackCaption"));
+  assert.ok(captionSource.includes("ดูรายละเอียด/เช็กราคาได้ที่นี่"));
   assert.ok(captionSource.includes("CAPTION_PRIMARY_FAILED"));
   assert.ok(captionSource.includes("CAPTION_GENERATION_ERROR_DETAIL"));
   assert.ok(captionSource.includes("CAPTION_FALLBACK_RAW_OUTPUT"));

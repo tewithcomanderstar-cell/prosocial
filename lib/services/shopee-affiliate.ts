@@ -3584,7 +3584,11 @@ const THAI_SOCIAL_CAPTION_FORBIDDEN_WORDS = [
   "เหมาะสำหรับทุกเพศทุกวัย",
   "สินค้าดีมีคุณภาพ",
   "ไม่ควรพลาด",
-  "รีบสั่ง"
+  "รีบสั่ง",
+  "ใช้ตามลักษณะสินค้าที่ระบุ",
+  "ดูรายละเอียดให้ตรงกับการใช้งานที่ต้องการ",
+  "ใช้ได้ตรงกับจุดประสงค์มากขึ้น",
+  "เลือกใช้ได้ตรงกับประเภทสินค้า"
 ];
 
 function getShopeeProductIntelligenceFromProduct(product: ShopeeProductRecord) {
@@ -5345,6 +5349,19 @@ function buildDeterministicShopeeFallbackCaption(input: {
   const context = compactProductText(productIntelligence?.usageScenarios[0] || getShopeeEntityContextText(storyboard), 90);
   const targetCustomer = compactProductText(productIntelligence?.targetCustomer || storyboard.targetUser || "คนที่มีโจทย์ใช้งานแบบนี้", 92);
   const buyerHook = compactProductText(productIntelligence?.humanVoice.oneLinerHook || productIntelligence?.painPoint.primary || "", 120);
+  const triggerMoment = compactProductText(productIntelligence?.triggerMoment.time || context || storyboard.realUsageScenario, 92);
+  const soldCount = toFiniteNumber(product.salesCount);
+  const rating = toFiniteNumber(product.rating);
+  const hookLine = soldCount > 1000
+    ? `🔥 ยอดขาย ${soldCount.toLocaleString("th-TH")}+ ชิ้น เพราะคนใช้จริงมองหา${productLabel}แบบนี้`
+    : buyerHook
+      ? `✨ ${buyerHook}`
+      : `✨ กำลังมองหา${productLabel}ที่ใช้จริงแล้วเห็นประโยชน์ชัด ๆ?`;
+  const proofLine = [
+    rating ? `คะแนนรีวิว ${rating}` : "",
+    product.discountPercent ? `มีส่วนลด ${product.discountPercent}%` : "",
+    getEffectiveProductPrice(product) ? `ราคาโปร ${formatShopeePrice(product).replace(/^ราคาโปร\s*/u, "")}` : ""
+  ].filter(Boolean).join(" • ");
   const benefitPool = dedupeCaptionBenefitLines([
     productIntelligence?.humanVoice.howFriendDescribes,
     productIntelligence?.humanVoice.beforeAfter,
@@ -5367,19 +5384,21 @@ function buildDeterministicShopeeFallbackCaption(input: {
   ];
   const priceLine = formatShopeeStoryboardPriceLine(product, storyboard).replace(/^💰\s*/u, "");
   const caption = [
+    hookLine,
     productLabel,
     "",
-    `${buyerHook || `${action}${context ? ` ใน${context}` : ""}`} ✅`,
+    `${action}${triggerMoment ? ` สำหรับ${triggerMoment}` : ""}`,
+    proofLine || `เหมาะกับ${targetCustomer}`,
     "",
-    `✅ ${benefit1}`,
-    `✨ ${benefit2}`,
-    `👍 ${benefit3}`,
-    `📌 ${benefit4}`,
+    `✓ ${benefit1}`,
+    `✓ ${benefit2}`,
+    `✓ ${benefit3}`,
+    `✓ ${benefit4}`,
     "",
-    `เหมาะกับ${targetCustomer}`,
+    `เหมาะกับ${targetCustomer} และคนที่อยากเลือกให้ตรงกับการใช้งานจริง`,
     "",
     `💰 ${priceLine}`,
-    "🛒 ดูรายละเอียดได้ที่ลิงก์ด้านล่าง",
+    "ดูรายละเอียด/เช็กราคาได้ที่นี่ 👇",
     "",
     formatShopeeShortLinkLine(affiliateLink),
     "",
@@ -6007,6 +6026,10 @@ function validateThaiSocialCaptionCandidate(input: {
   if (!caption) throw new Error("thai_social_caption_empty");
   if (genericWordsFound.length) throw new Error(`thai_social_caption_generic_words:${genericWordsFound.join(",")}`);
   if (productName && firstLine.startsWith(productName)) throw new Error("thai_social_caption_starts_with_product_name");
+  const reviewBulletCount = caption
+    .split(/\r?\n/)
+    .filter((line) => /^[✓✔]\s*\S/u.test(line.trim())).length;
+  if (reviewBulletCount < 3) throw new Error("thai_social_caption_missing_review_bullets");
   const hasBuyerMoment = [painPoint, triggerTime, triggerEmotion]
     .filter((token) => token.length >= 6)
     .some((token) => normalizeShopeeEntityMentionText(caption).includes(token));
