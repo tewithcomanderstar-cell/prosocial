@@ -3824,7 +3824,8 @@ function mergeThaiBuyerProductIntelligence(
   base: ShopeeProductIntelligence,
   thaiBuyer: ThaiBuyerProductIntelligenceResult
 ): ShopeeProductIntelligence {
-  const confidence = Math.round(Math.max(0, Math.min(1, thaiBuyer.confidenceScore)) * 100);
+  const thaiBuyerConfidence = Math.round(Math.max(0, Math.min(1, thaiBuyer.confidenceScore)) * 100);
+  const confidence = Math.max(base.confidence, thaiBuyerConfidence);
   const productNameThai = cleanShopeeProductIntelligenceLine(thaiBuyer.productNameThai, product, base.productNameThai);
   const productType = cleanShopeeProductIntelligenceLine(thaiBuyer.productType, product, base.productType);
   const mainPurpose = cleanShopeeProductIntelligenceLine(thaiBuyer.mainPurpose, product, base.mainPurpose);
@@ -3861,7 +3862,7 @@ function mergeThaiBuyerProductIntelligence(
     contentTone: thaiBuyer.contentTone || base.contentTone,
     confidenceScore: confidence,
     confidence,
-    lowConfidenceReason: thaiBuyer.lowConfidenceReason
+    lowConfidenceReason: confidence < 70 ? thaiBuyer.lowConfidenceReason : undefined
   };
 }
 
@@ -3927,6 +3928,7 @@ async function createShopeeProductIntelligenceWithTracing(input: {
     .flatMap((key) => stringifyShopeeMetadataValue((input.product as ShopeeProductRecord & Record<string, unknown>)[key]))
     .join("; ");
   try {
+    const baseConfidenceBeforeThaiBuyer = intelligence.confidence;
     const thaiBuyerIntelligence = await analyzeThaiBuyerProductIntelligence({
       userId: input.userId,
       productTitle: input.product.productName,
@@ -3939,6 +3941,28 @@ async function createShopeeProductIntelligenceWithTracing(input: {
       imageProductSummary: intelligence.imageProductSummary
     });
     intelligence = mergeThaiBuyerProductIntelligence(input.product, intelligence, thaiBuyerIntelligence);
+    const thaiBuyerConfidence = Math.round(Math.max(0, Math.min(1, thaiBuyerIntelligence.confidenceScore)) * 100);
+    if (thaiBuyerConfidence < 70 && intelligence.confidence >= 70) {
+      await logShopeePackageStage({
+        userId: input.userId,
+        jobId: input.jobId,
+        pageId: input.pageId,
+        product: input.product,
+        step: "PRODUCT_INTELLIGENCE_CONFIDENCE_RESCUED",
+        status: "success",
+        message: "Thai buyer confidence was low, but deterministic product understanding was sufficient",
+        metadata: {
+          productId: input.product.productId,
+          thaiBuyerConfidence,
+          baseConfidence: baseConfidenceBeforeThaiBuyer,
+          finalConfidence: intelligence.confidence,
+          lowConfidenceReason: thaiBuyerIntelligence.lowConfidenceReason ?? "",
+          productNameThai: intelligence.productNameThai,
+          productType: intelligence.productType,
+          mainPurpose: intelligence.mainPurpose
+        }
+      });
+    }
     await logShopeePackageStage({
       userId: input.userId,
       jobId: input.jobId,
@@ -3950,6 +3974,9 @@ async function createShopeeProductIntelligenceWithTracing(input: {
       metadata: {
         productId: input.product.productId,
         confidenceScore: thaiBuyerIntelligence.confidenceScore,
+        thaiBuyerConfidence,
+        baseConfidence: baseConfidenceBeforeThaiBuyer,
+        finalConfidence: intelligence.confidence,
         lowConfidenceReason: thaiBuyerIntelligence.lowConfidenceReason ?? "",
         painPoint: thaiBuyerIntelligence.painPoint,
         triggerMoment: thaiBuyerIntelligence.triggerMoment,

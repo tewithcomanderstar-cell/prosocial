@@ -528,6 +528,10 @@ function testShopeeProductIntelligenceLayerGuards() {
   assert.ok(source.includes("analyzeThaiBuyerProductIntelligence"));
   assert.ok(source.includes("THAI_BUYER_PRODUCT_INTELLIGENCE_COMPLETED"));
   assert.ok(source.includes("THAI_BUYER_PRODUCT_INTELLIGENCE_FAILED"));
+  assert.ok(source.includes("PRODUCT_INTELLIGENCE_CONFIDENCE_RESCUED"));
+  assert.ok(source.includes("Math.max(base.confidence, thaiBuyerConfidence)"));
+  assert.ok(source.includes("baseConfidenceBeforeThaiBuyer"));
+  assert.ok(source.includes("finalConfidence"));
   assert.ok(source.includes("mergeThaiBuyerProductIntelligence"));
   assert.ok(aiSource.includes("ThaiBuyerProductIntelligenceResult"));
   assert.ok(aiSource.includes("You are a Thai consumer psychologist and product analyst"));
