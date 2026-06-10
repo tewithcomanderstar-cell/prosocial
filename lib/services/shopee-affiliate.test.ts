@@ -545,6 +545,7 @@ function testShopeeCaptionQualityAndSoldThresholdGuards() {
   const routeSource = readAutoPostRouteSource();
   const autoPostSource = readAutoPostServiceSource();
   const fallbackSource = sourceBetween(source, "function buildDeterministicShopeeFallbackCaption", "function getShopeeCaptionHumanReadableLines");
+  const autoPostRouteSchemaSource = sourceBetween(routeSource, "const schema = z.object", "const DEFAULT_POSTING_WINDOW_START");
 
   assert.ok(source.includes("SHOPEE_FORBIDDEN_PRODUCT_INTELLIGENCE_PHRASE_PATTERN"));
   assert.ok(source.includes("ดูรายละเอียดให้ตรงกับการใช้งานที่ต้องการ"));
@@ -557,12 +558,12 @@ function testShopeeCaptionQualityAndSoldThresholdGuards() {
   assert.ok(fallbackSource.includes("keyBenefits"));
 
   for (const sourceTag of ["sold_500_plus", "sold_1000_plus", "sold_1500_plus", "sold_2000_plus"]) {
-    assert.ok(source.includes(sourceTag), `Missing Shopee source tag ${sourceTag}`);
-    assert.ok(panelSource.includes(sourceTag), `Missing UI source tag ${sourceTag}`);
-    assert.ok(routeSource.includes(sourceTag), `Missing API source tag ${sourceTag}`);
+    assert.equal(source.includes(sourceTag), false, `SOLD filter must not be a Shopee source tag: ${sourceTag}`);
+    assert.equal(panelSource.includes(`value="${sourceTag}"`), false, `SOLD filter must not appear in source dropdown: ${sourceTag}`);
+    assert.equal(autoPostRouteSchemaSource.includes(sourceTag), false, `SOLD filter must not be accepted as API source tag: ${sourceTag}`);
   }
   for (const threshold of ["500", "1000", "1500", "2000"]) {
-    assert.ok(source.includes(threshold), `Missing sold threshold ${threshold}`);
+    assert.ok(panelSource.includes(`value={${threshold}}`), `Missing sold filter option ${threshold}`);
   }
   assert.ok(source.includes("below_min_sold_count"));
   assert.ok(source.includes("SOLD_COUNT_FILTER_APPLIED"));
@@ -576,6 +577,8 @@ function testShopeeCaptionQualityAndSoldThresholdGuards() {
   assert.ok(panelSource.includes("SOLD 1000+"));
   assert.ok(panelSource.includes("SOLD 1500+"));
   assert.ok(panelSource.includes("SOLD 2000+"));
+  assert.ok(panelSource.includes("Sold Count Filter"));
+  assert.ok(panelSource.includes("No sold filter"));
   assert.ok(panelSource.includes("shopeeMinSoldCount"));
   assert.ok(autoPostSource.includes("shopeeMinSoldCount"));
   assert.ok(autoPostSource.includes("product_understanding_low_confidence"));

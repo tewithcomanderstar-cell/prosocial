@@ -19,7 +19,7 @@ type LeanAutoPostConfig = {
   targetPageIds: string[];
   intervalMinutes: number;
   contentSource?: "shopee-affiliate" | "google-drive";
-  shopeeSourceTag?: "trending" | "best_selling" | "top_search" | "best_roi" | "manual" | "all_products" | "sold_500_plus" | "sold_1000_plus" | "sold_1500_plus" | "sold_2000_plus";
+  shopeeSourceTag?: "trending" | "best_selling" | "top_search" | "best_roi" | "manual" | "all_products";
   shopeeKeyword?: string;
   shopeeCategory?: string;
   shopeeCategories?: string[];
@@ -53,6 +53,9 @@ function sanitizeLegacyMessage(value?: string | null) {
 const BROKEN_FOLDER_ID = "1sbp9Ql8moMDs9xBSha5IWoKdE1WlEEWz";
 const FIXED_FOLDER_ID = "1sbp9Ql8moMDs9xBSha5lWoKdE1WiEEWz";
 const AUTO_POST_JOB_TIMEOUT_MS = Number(process.env.AUTO_POST_JOB_TIMEOUT_MS ?? "300000");
+const LEGACY_SOLD_SOURCE_THRESHOLDS = Object.fromEntries(
+  [500, 1000, 1500, 2000].map((threshold) => [`sold_${threshold}_plus`, threshold])
+) as Record<string, number>;
 
 function normalizeFolderId(value: string) {
   const trimmed = value.trim();
@@ -81,6 +84,16 @@ export async function POST(request: Request) {
 
     if (!config) {
       return jsonError("Auto Post settings not found", 404);
+    }
+
+    const legacySoldThreshold = LEGACY_SOLD_SOURCE_THRESHOLDS[String((config as Record<string, unknown>).shopeeSourceTag ?? "")] ?? 0;
+    if (legacySoldThreshold > 0) {
+      await AutoPostConfig.findByIdAndUpdate(config._id, {
+        shopeeSourceTag: "best_selling",
+        shopeeMinSoldCount: legacySoldThreshold
+      });
+      (config as Record<string, unknown>).shopeeSourceTag = "best_selling";
+      (config as Record<string, unknown>).shopeeMinSoldCount = legacySoldThreshold;
     }
 
     if (!config.targetPageIds.length) {

@@ -41,11 +41,7 @@ export type ShopeeSourceTag =
   | "top_search"
   | "best_roi"
   | "manual"
-  | "all_products"
-  | "sold_500_plus"
-  | "sold_1000_plus"
-  | "sold_1500_plus"
-  | "sold_2000_plus";
+  | "all_products";
 export type ShopeeCaptionStyle = "soft_sell" | "urgency" | "problem_solution" | "review_style" | "deal_alert" | "lifestyle";
 
 export type ShopeeProductIntelligence = {
@@ -91,12 +87,6 @@ const OPENAI_IMAGE_MAX_ATTEMPTS = 2;
 const VISION_RESCUE_TIMEOUT_MS = 30_000;
 const SHOPEE_REPOST_COOLDOWN_HOURS = Math.max(1, Number(process.env.SHOPEE_REPOST_COOLDOWN_HOURS ?? "48"));
 const SHOPEE_PRODUCT_RESERVATION_TTL_MS = 30 * 60 * 1000;
-const SHOPEE_SOLD_SOURCE_THRESHOLDS: Partial<Record<ShopeeSourceTag, number>> = {
-  sold_500_plus: 500,
-  sold_1000_plus: 1000,
-  sold_1500_plus: 1500,
-  sold_2000_plus: 2000
-};
 const AUTO_POST_SLOW_STAGE_WARNING_MS = 30_000;
 const SHOPEE_ACTION_LOG_TIMEOUT_MS = Math.max(
   500,
@@ -625,10 +615,6 @@ function getShopeeAffiliateListType(sourceTag?: ShopeeSourceTag) {
       return 3;
     case "manual":
     case "all_products":
-    case "sold_500_plus":
-    case "sold_1000_plus":
-    case "sold_1500_plus":
-    case "sold_2000_plus":
       return 0;
     case "trending":
     default:
@@ -6590,38 +6576,6 @@ export function scoreShopeeProductForSource(input: ShopeeSourceScoreInput): Shop
     };
   }
 
-  if (isShopeeSoldThresholdSource(sourceTag)) {
-    const threshold = getShopeeSoldThresholdForSource(sourceTag);
-    const soldThresholdScore = sales >= threshold ? 1 : 0;
-    const soldScore =
-      (salesScore * 0.65) +
-      (reviewScore * 0.15) +
-      (ratingScore * 0.15) +
-      (productQualityScore * 0.05);
-    const breakdown = {
-      ...baseBreakdown,
-      selectedSoldThreshold: threshold,
-      soldCount: sales,
-      soldThresholdScore,
-      formula: "salesScore*0.65 + reviewScore*0.15 + ratingScore*0.15 + productQualityScore*0.05"
-    };
-    return {
-      sourceSpecificScore: roundScore(soldScore),
-      scoreBreakdown: breakdown,
-      sortPrimary: sales,
-      sortSecondary: soldScore,
-      sortTertiary: reviewCount,
-      topCandidateLimit: 5,
-      score: buildSourceProductScore({
-        product,
-        sourceTag,
-        score: soldScore,
-        reason: `sold_threshold_score prioritizes products sold ${threshold}+`,
-        breakdown
-      })
-    };
-  }
-
   if (sourceTag === "all_products") {
     const allProductsScore =
       (productQualityScore * 0.35) +
@@ -6946,16 +6900,8 @@ function getRotatedShopeeCategories(categories: string[], seed = Math.random()) 
   return [...categories.slice(offset), ...categories.slice(0, offset)];
 }
 
-function getShopeeSoldThresholdForSource(sourceTag?: ShopeeSourceTag) {
-  return SHOPEE_SOLD_SOURCE_THRESHOLDS[sourceTag ?? "trending"] ?? 0;
-}
-
-function isShopeeSoldThresholdSource(sourceTag?: ShopeeSourceTag) {
-  return getShopeeSoldThresholdForSource(sourceTag) > 0;
-}
-
-function getEffectiveShopeeMinSoldCount(sourceTag?: ShopeeSourceTag, configuredMinSoldCount = 0) {
-  return Math.max(configuredMinSoldCount, getShopeeSoldThresholdForSource(sourceTag), Number(process.env.SHOPEE_MIN_SOLD_COUNT ?? "0") || 0);
+function getEffectiveShopeeMinSoldCount(configuredMinSoldCount = 0) {
+  return Math.max(configuredMinSoldCount, Number(process.env.SHOPEE_MIN_SOLD_COUNT ?? "0") || 0);
 }
 
 function getShopeeProductFilterRejectionReason(input: {
@@ -7486,7 +7432,7 @@ export async function selectShopeeProductsForPages(input: {
 }) {
   const provider = getShopeeProductProvider();
   const sourceTag = input.sourceTag ?? "trending";
-  const effectiveMinSoldCount = getEffectiveShopeeMinSoldCount(sourceTag, input.minSoldCount ?? 0);
+  const effectiveMinSoldCount = getEffectiveShopeeMinSoldCount(input.minSoldCount ?? 0);
   assertManualKeywordProvided({ sourceTag, keyword: input.keyword });
   const excludedProductIds = new Set((input.excludedProductIds ?? []).map((productId) => String(productId)).filter(Boolean));
   const recentProductKeys = await getRecentlyPostedProductKeys({ userId: input.userId, lookbackHours: SHOPEE_REPOST_COOLDOWN_HOURS });
@@ -7502,7 +7448,7 @@ export async function selectShopeeProductsForPages(input: {
   const discoveredByCategory: ShopeeProductRecord[][] = [];
   const discoveredCategoryHints = new Map<string, Set<string>>();
   const categoryFetchErrors: string[] = [];
-  if (sourceTag === "all_products" || isShopeeSoldThresholdSource(sourceTag)) {
+  if (sourceTag === "all_products") {
     const categoryProducts = await fetchShopeeAllProductsForSelectedCategories({
       userId: input.userId,
       selectedCategoryIds: discoveryCategories,

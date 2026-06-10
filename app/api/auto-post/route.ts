@@ -62,7 +62,7 @@ const schema = z.object({
   contentSource: z.enum(["shopee-affiliate", "google-drive"]).default("shopee-affiliate"),
   folderId: z.string().min(1).default("root"),
   folderName: z.string().min(1).default("My Drive"),
-  shopeeSourceTag: z.enum(["trending", "best_selling", "top_search", "best_roi", "manual", "all_products", "sold_500_plus", "sold_1000_plus", "sold_1500_plus", "sold_2000_plus"]).default("trending"),
+  shopeeSourceTag: z.enum(["trending", "best_selling", "top_search", "best_roi", "manual", "all_products"]).default("trending"),
   shopeeKeyword: z.string().default(""),
   shopeeCategory: z.string().default(DEFAULT_SHOPEE_CATEGORY),
   shopeeCategories: z.array(z.string()).default([]),
@@ -98,6 +98,9 @@ const DEFAULT_POSTING_WINDOW_START = "00:00";
 const DEFAULT_POSTING_WINDOW_END = "23:59";
 const LEGACY_POSTING_WINDOW_START = "06:00";
 const LEGACY_POSTING_WINDOW_END = "00:00";
+const LEGACY_SOLD_SOURCE_THRESHOLDS = Object.fromEntries(
+  [500, 1000, 1500, 2000].map((threshold) => [`sold_${threshold}_plus`, threshold])
+) as Record<string, number>;
 
 function shouldMigrateLegacyPostingWindow(config: { postingWindowStart?: string | null; postingWindowEnd?: string | null; postingWindowCustomized?: boolean | null }) {
   return (
@@ -173,6 +176,16 @@ export async function GET() {
       await AutoPostConfig.findOneAndUpdate({ userId }, { shopeeCategory: normalizedCategory, shopeeCategories: normalizedCategories });
       config.shopeeCategory = normalizedCategory;
       config.shopeeCategories = normalizedCategories;
+    }
+
+    const legacySoldThreshold = LEGACY_SOLD_SOURCE_THRESHOLDS[String((config as Record<string, unknown>).shopeeSourceTag ?? "")] ?? 0;
+    if (legacySoldThreshold > 0) {
+      await AutoPostConfig.findOneAndUpdate(
+        { userId },
+        { shopeeSourceTag: "best_selling", shopeeMinSoldCount: legacySoldThreshold }
+      );
+      (config as Record<string, unknown>).shopeeSourceTag = "best_selling";
+      (config as Record<string, unknown>).shopeeMinSoldCount = legacySoldThreshold;
     }
 
     if (config.lastError) {

@@ -8,11 +8,7 @@ export type ShopeeSourceTag =
   | "top_search"
   | "best_roi"
   | "manual"
-  | "all_products"
-  | "sold_500_plus"
-  | "sold_1000_plus"
-  | "sold_1500_plus"
-  | "sold_2000_plus";
+  | "all_products";
 export type ShopeeCaptionStyle = "soft_sell" | "urgency" | "problem_solution" | "review_style" | "deal_alert" | "lifestyle";
 
 export type ShopeeProductRecord = {

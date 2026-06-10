@@ -12,26 +12,17 @@ import {
 import { DEFAULT_SHOPEE_CATEGORY, normalizeShopeeCategories, normalizeShopeeCategory } from "@/lib/shopee-categories";
 
 const querySchema = z.object({
-  sourceTag: z.enum(["trending", "best_selling", "top_search", "best_roi", "manual", "all_products", "sold_500_plus", "sold_1000_plus", "sold_1500_plus", "sold_2000_plus"]).default("trending"),
+  sourceTag: z.enum(["trending", "best_selling", "top_search", "best_roi", "manual", "all_products"]).default("trending"),
   keyword: z.string().optional(),
   category: z.string().default(DEFAULT_SHOPEE_CATEGORY),
   categories: z.array(z.string()).default([]),
+  minSoldCount: z.number().min(0).default(0),
   limit: z.number().min(1).max(50).default(20)
 });
 
 function parseSourceTag(value: string | null): ShopeeSourceTag {
-  const allowed: ShopeeSourceTag[] = ["trending", "best_selling", "top_search", "best_roi", "manual", "all_products", "sold_500_plus", "sold_1000_plus", "sold_1500_plus", "sold_2000_plus"];
+  const allowed: ShopeeSourceTag[] = ["trending", "best_selling", "top_search", "best_roi", "manual", "all_products"];
   return allowed.includes(value as ShopeeSourceTag) ? (value as ShopeeSourceTag) : "trending";
-}
-
-function getSoldThreshold(sourceTag: ShopeeSourceTag) {
-  const thresholds: Partial<Record<ShopeeSourceTag, number>> = {
-    sold_500_plus: 500,
-    sold_1000_plus: 1000,
-    sold_1500_plus: 1500,
-    sold_2000_plus: 2000
-  };
-  return thresholds[sourceTag] ?? 0;
 }
 
 async function fetchProductsForCategories(input: {
@@ -40,6 +31,7 @@ async function fetchProductsForCategories(input: {
   sourceTag: ShopeeSourceTag;
   keyword?: string;
   categories: string[];
+  minSoldCount?: number;
   limit: number;
 }) {
   const categories = input.categories.length ? input.categories : [DEFAULT_SHOPEE_CATEGORY];
@@ -54,15 +46,16 @@ async function fetchProductsForCategories(input: {
       "internal_api"
     );
   }
-  const soldThreshold = getSoldThreshold(input.sourceTag);
-  if (input.sourceTag === "all_products" || soldThreshold > 0) {
+  if (input.sourceTag === "all_products") {
     const products = await fetchShopeeAllProductsForSelectedCategories({
       userId: input.userId,
       selectedCategoryIds: categories,
       limit: input.limit,
       randomSeed: `${categories.join(",")}:${Date.now()}`
     });
-    return soldThreshold > 0 ? products.filter((product) => (product.salesCount ?? 0) >= soldThreshold) : products;
+    return (input.minSoldCount ?? 0) > 0
+      ? products.filter((product) => (product.salesCount ?? 0) >= (input.minSoldCount ?? 0))
+      : products;
   }
 
   for (const category of categories) {
@@ -89,6 +82,7 @@ async function fetchProductsForCategories(input: {
   return products.filter((product) => {
     const key = String(product.productId || `${product.shopId}:${product.itemId}`);
     if (!key || seen.has(key)) return false;
+    if ((input.minSoldCount ?? 0) > 0 && (product.salesCount ?? 0) < (input.minSoldCount ?? 0)) return false;
     seen.add(key);
     return true;
   });
@@ -102,6 +96,7 @@ export async function GET(request: Request) {
     const keyword = url.searchParams.get("keyword") ?? undefined;
     const category = normalizeShopeeCategory(url.searchParams.get("category"));
     const categories = normalizeShopeeCategories(url.searchParams.getAll("categories").length ? url.searchParams.getAll("categories") : category);
+    const minSoldCount = Number(url.searchParams.get("minSoldCount") ?? "0") || 0;
     const limit = Number(url.searchParams.get("limit") ?? "20");
 
     const provider = getShopeeProductProvider();
@@ -123,6 +118,7 @@ export async function GET(request: Request) {
       sourceTag,
       keyword,
       categories,
+      minSoldCount,
       limit: Number.isFinite(limit) ? limit : 20
     });
     await upsertShopeeProducts(products);
@@ -180,6 +176,7 @@ export async function POST(request: Request) {
       sourceTag: payload.sourceTag ?? "trending",
       keyword: payload.keyword,
       categories: normalizeShopeeCategories((payload.categories ?? []).length ? payload.categories : payload.category),
+      minSoldCount: payload.minSoldCount ?? 0,
       limit: payload.limit ?? 20
     });
     await upsertShopeeProducts(products);

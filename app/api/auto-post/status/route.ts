@@ -370,6 +370,9 @@ const DEFAULT_POSTING_WINDOW_START = "00:00";
 const DEFAULT_POSTING_WINDOW_END = "23:59";
 const LEGACY_POSTING_WINDOW_START = "06:00";
 const LEGACY_POSTING_WINDOW_END = "00:00";
+const LEGACY_SOLD_SOURCE_THRESHOLDS = Object.fromEntries(
+  [500, 1000, 1500, 2000].map((threshold) => [`sold_${threshold}_plus`, threshold])
+) as Record<string, number>;
 
 function normalizePostingWindowForDisplay<T extends { postingWindowStart?: string | null; postingWindowEnd?: string | null; postingWindowCustomized?: boolean | null }>(config: T): T {
   if (
@@ -451,6 +454,11 @@ export async function GET() {
     );
     (effectiveConfig as Record<string, unknown>).shopeeCategory =
       ((effectiveConfig as Record<string, unknown>).shopeeCategories as string[])[0] ?? DEFAULT_SHOPEE_CATEGORY;
+    const legacySoldThreshold = LEGACY_SOLD_SOURCE_THRESHOLDS[String((effectiveConfig as Record<string, unknown>).shopeeSourceTag ?? "")] ?? 0;
+    if (legacySoldThreshold > 0) {
+      (effectiveConfig as Record<string, unknown>).shopeeSourceTag = "best_selling";
+      (effectiveConfig as Record<string, unknown>).shopeeMinSoldCount = legacySoldThreshold;
+    }
     const effectiveConfigDoc = effectiveConfig as AutoPostConfigStatusDoc & {
       targetPageIds?: string[];
       lastWorkflowRunId?: unknown;
