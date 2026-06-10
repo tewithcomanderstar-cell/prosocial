@@ -651,6 +651,22 @@ function testShopeeCaptionQualityAndSoldThresholdGuards() {
   console.log("PASS Shopee caption quality and sold threshold guards");
 }
 
+function testAutoPostStopsOnCaptionImageProductMismatch() {
+  const autoPostSource = readAutoPostServiceSource();
+  assert.ok(autoPostSource.includes("isCaptionImageProductMismatchError"));
+  assert.ok(autoPostSource.includes("code === \"caption_image_product_mismatch\""));
+  assert.ok(autoPostSource.includes("return \"job_failed\""));
+  assert.ok(autoPostSource.includes("caption_image_product_mismatch"));
+  assert.ok(autoPostSource.includes("WORKFLOW_STOPPED_CAPTION_IMAGE_PRODUCT_MISMATCH"));
+  assert.ok(autoPostSource.includes("autoPostStatus: \"failed\""));
+  assert.ok(autoPostSource.includes("jobStatus: \"failed\""));
+  assert.ok(autoPostSource.includes("lastStatus: \"failed\""));
+  assert.ok(autoPostSource.includes("if (isCaptionImageProductMismatchError(error)) return \"caption_image_product_mismatch\""));
+  assert.ok(autoPostSource.indexOf("if (isCaptionImageProductMismatchError(error)) return \"caption_image_product_mismatch\"") < autoPostSource.indexOf("message.includes(\"image\") || message.includes(\"reference\")"));
+  assert.ok(autoPostSource.indexOf("if (isCaptionImageProductMismatchError(error))") < autoPostSource.indexOf("message.includes(\"openai_image_timeout\")"));
+  console.log("PASS auto-post stops on caption/image product mismatch");
+}
+
 function testShopeeAllProductsAndCooldownGuards() {
   const source = readShopeeAffiliateServiceSource();
   const panelSource = readAutoPostPanelSource();
@@ -715,5 +731,6 @@ testShopeeCaptionHumanReadabilityGuards();
 testShopeeCaptionFallbackGenerationGuards();
 testShopeeProductIntelligenceLayerGuards();
 testShopeeCaptionQualityAndSoldThresholdGuards();
+testAutoPostStopsOnCaptionImageProductMismatch();
 testShopeeAllProductsAndCooldownGuards();
 testAutoPostProcessStepNoEligibleProductsReturnsDiagnostics();

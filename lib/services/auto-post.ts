@@ -755,6 +755,17 @@ function isShopeeShortLinkFailure(error: unknown) {
   );
 }
 
+function isCaptionImageProductMismatchError(error: unknown) {
+  const code = getAutoPostErrorCode(error);
+  const message = getAutoPostErrorMessage(error).toLowerCase();
+  return (
+    code === "caption_image_product_mismatch" ||
+    message.includes("caption_image_product_mismatch") ||
+    message.includes("caption_image_product_type_mismatch") ||
+    message.includes("caption_image_product_identity_mismatch")
+  );
+}
+
 function getRetryWithNextProductReason(error: unknown) {
   if (isShopeeShortLinkFailure(error)) {
     return {
@@ -767,6 +778,13 @@ function getRetryWithNextProductReason(error: unknown) {
   const code = getAutoPostErrorCode(error);
   const message = getAutoPostErrorMessage(error).toLowerCase();
   const storyboardCaptionReason = getStoryboardCaptionFailureReason(error);
+  if (isCaptionImageProductMismatchError(error)) {
+    return {
+      reason: "caption_image_product_mismatch",
+      step: "PRODUCT_STOPPED_CAPTION_IMAGE_PRODUCT_MISMATCH",
+      message: "Stopping workflow because caption and image product identity or type do not match"
+    };
+  }
   if (code === "caption_readability_failed") {
     return {
       reason: "caption_readability_failed",
@@ -834,6 +852,7 @@ function getShopeeAttemptFailureReason(error: unknown) {
   const code = getAutoPostErrorCode(error);
   const message = getAutoPostErrorMessage(error).toLowerCase();
   const storyboardCaptionReason = getStoryboardCaptionFailureReason(error);
+  if (isCaptionImageProductMismatchError(error)) return "caption_image_product_mismatch";
   if (storyboardCaptionReason) return storyboardCaptionReason;
   if (isShopeeShortLinkFailure(error)) return "missing_shortlink";
   if (code === "caption_readability_failed") return "caption_readability_failed";
@@ -875,6 +894,8 @@ function getShopeeAttemptFailureDiagnostics(error: unknown) {
     code === "caption_readability_failed" ||
     code === "storyboard_caption_validation_failed" ||
     code === "legacy_caption_disabled" ||
+    code === "caption_image_product_mismatch" ||
+    normalized.includes("caption_image_product_mismatch") ||
     normalized.includes("caption")
   ) {
     diagnostics.captionGenerationError = message || responseSummary || code;
@@ -904,6 +925,10 @@ function summarizeShopeeRejectReasons(
 export function classifyAutoPostError(error: unknown): AutoPostErrorClassification {
   if (isShopeeShortLinkFailure(error)) {
     return "retry_with_next_product";
+  }
+
+  if (isCaptionImageProductMismatchError(error)) {
+    return "job_failed";
   }
 
   if (
@@ -1748,6 +1773,36 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
           });
 
           break;
+        }
+
+        if (isCaptionImageProductMismatchError(error)) {
+          const stoppedMessage = `Workflow stopped: ${rejectReason}`;
+          await logShopeeStep({
+            config: input.config,
+            step: "WORKFLOW_STOPPED_CAPTION_IMAGE_PRODUCT_MISMATCH",
+            status: "failed",
+            message: stoppedMessage,
+            pageId: selected.pageId,
+            productId,
+            error,
+            metadata: {
+              attempt,
+              maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
+              productId,
+              productName: selected.product.productName,
+              category: selected.product.category ?? "",
+              reason: rejectReason,
+              classification,
+              ...failureDiagnostics,
+              workflowRunId: input.records.workflowRunId
+            }
+          });
+          await updateAutoPostState(input.config._id, {
+            autoPostStatus: "failed",
+            jobStatus: "failed",
+            lastStatus: "failed",
+            lastError: normalizeAutoPostError(error, stoppedMessage)
+          });
         }
 
         await logShopeeStep({
