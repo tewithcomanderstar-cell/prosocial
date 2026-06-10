@@ -457,6 +457,52 @@ function testShopeeCaptionFallbackGenerationGuards() {
   console.log("PASS Shopee caption fallback generation guards");
 }
 
+function testShopeeProductIntelligenceLayerGuards() {
+  const source = readShopeeAffiliateServiceSource();
+  const packageSource = sourceBetween(source, "export async function buildShopeePostPackage", "export async function recordShopeeQueueItem");
+  const intelligenceSource = sourceBetween(source, "export type ShopeeProductIntelligence", "function getShopeeStoryboardInputText");
+  const captionSource = sourceBetween(source, "function getShopeeCaptionPromptInput", "function createValidatedShopeeProductStoryboard");
+
+  assert.ok(source.includes("Product Intelligence"));
+  assert.ok(source.includes("PRODUCT_INTELLIGENCE_ANALYSIS_STARTED"));
+  assert.ok(source.includes("PRODUCT_INTELLIGENCE_ANALYSIS_COMPLETED"));
+  assert.ok(source.includes("PRODUCT_INTELLIGENCE_ANALYSIS_FAILED"));
+  assert.ok(source.includes("product_intelligence_failed"));
+  assert.ok(intelligenceSource.includes("productName"));
+  assert.ok(intelligenceSource.includes("brand"));
+  assert.ok(intelligenceSource.includes("category"));
+  assert.ok(intelligenceSource.includes("productType"));
+  assert.ok(intelligenceSource.includes("mainPurpose"));
+  assert.ok(intelligenceSource.includes("targetCustomer"));
+  assert.ok(intelligenceSource.includes("usageScenarios"));
+  assert.ok(intelligenceSource.includes("keyBenefits"));
+  assert.ok(intelligenceSource.includes("uniqueSellingPoints"));
+  assert.ok(intelligenceSource.includes("productFacts"));
+  assert.ok(intelligenceSource.includes("intelligence.confidence < 70"));
+  assert.ok(intelligenceSource.includes("missing_real_use_case"));
+  assert.ok(intelligenceSource.includes("missing_real_benefit"));
+  assert.ok(intelligenceSource.includes("missing_target_customer"));
+  assert.ok(intelligenceSource.includes("SHOPEE_FORBIDDEN_PRODUCT_INTELLIGENCE_PHRASE_PATTERN"));
+  for (const phrase of [
+    "ใช้ตามลักษณะสินค้าที่ระบุ",
+    "ใช้งานได้หลากหลาย",
+    "เหมาะสำหรับทุกเพศทุกวัย",
+    "ใช้ได้ตรงกับจุดประสงค์มากขึ้น",
+    "เลือกใช้ได้ตรงกับประเภทสินค้า"
+  ]) {
+    assert.ok(source.includes(phrase), `Missing forbidden Product Intelligence phrase guard: ${phrase}`);
+  }
+  assert.ok(captionSource.includes("productIntelligence"));
+  assert.ok(packageSource.includes("createShopeeProductIntelligenceWithTracing"));
+  assert.ok(packageSource.includes("applyShopeeProductIntelligence"));
+  assert.ok(packageSource.indexOf("createShopeeProductIntelligenceWithTracing") < packageSource.indexOf("generateShopeeCaption"));
+  assert.ok(packageSource.indexOf("generateShopeeCaption") < packageSource.indexOf("buildShopeeImagePromptSet"));
+  assert.ok(packageSource.includes("CAPTION_IMAGE_PRODUCT_MISMATCH"));
+  assert.ok(packageSource.includes("getShopeeCaptionImageProductMismatch"));
+  assert.ok(packageSource.includes("productIntelligence"));
+  console.log("PASS Shopee Product Intelligence layer guards");
+}
+
 function testAutoPostProcessStepNoEligibleProductsReturnsDiagnostics() {
   const source = readAutoPostProcessStepRouteSource();
   assert.ok(source.includes("shopee_no_eligible_products"));
@@ -483,4 +529,5 @@ testProductUnderstandingMainUseCaseCoverage();
 testShopeeVisionRescueUsesActualImageInput();
 testShopeeCaptionHumanReadabilityGuards();
 testShopeeCaptionFallbackGenerationGuards();
+testShopeeProductIntelligenceLayerGuards();
 testAutoPostProcessStepNoEligibleProductsReturnsDiagnostics();

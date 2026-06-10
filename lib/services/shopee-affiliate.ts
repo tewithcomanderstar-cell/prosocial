@@ -37,6 +37,23 @@ import { ShopeeProduct } from "@/models/ShopeeProduct";
 export type ShopeeSourceTag = "trending" | "best_selling" | "top_search" | "best_roi" | "manual";
 export type ShopeeCaptionStyle = "soft_sell" | "urgency" | "problem_solution" | "review_style" | "deal_alert" | "lifestyle";
 
+export type ShopeeProductIntelligence = {
+  productName: string;
+  brand: string;
+  category: string;
+  productType: string;
+  mainPurpose: string;
+  targetCustomer: string;
+  usageScenarios: string[];
+  keyBenefits: string[];
+  uniqueSellingPoints: string[];
+  productFacts: string[];
+  confidence: number;
+  source: "text" | "vision_rescue" | "merged";
+  imageCount: number;
+  visualEvidence: string[];
+};
+
 const SHOPEE_MAX_HASHTAGS = 5;
 const STORYBOARD_TIMEOUT_MS = Math.max(
   30_000,
@@ -110,6 +127,13 @@ export type ShopeeProductRecord = {
   stock?: number;
   productCreatedAt?: Date;
   sourceApiSignal?: boolean;
+  productFeatures?: unknown;
+  features?: unknown;
+  specifications?: unknown;
+  specs?: unknown;
+  attributes?: unknown;
+  variants?: unknown;
+  productIntelligence?: ShopeeProductIntelligence;
   sourceTag: ShopeeSourceTag;
   fetchedAt: Date;
 };
@@ -3482,6 +3506,310 @@ function assertValidShopeeProductUnderstanding(understanding: ShopeeProductUnder
   );
 }
 
+const SHOPEE_FORBIDDEN_PRODUCT_INTELLIGENCE_PHRASE_PATTERN =
+  /ใช้ตามลักษณะสินค้าที่ระบุ|ใช้งานได้หลากหลาย|เหมาะสำหรับทุกเพศทุกวัย|ใช้ได้ตรงกับจุดประสงค์มากขึ้น|เลือกใช้ได้ตรงกับประเภทสินค้า|เหมาะกับคนที่กำลังมองหาใช้งานจริง/iu;
+
+function getShopeeProductIntelligenceFromProduct(product: ShopeeProductRecord) {
+  const intelligence = (product as ShopeeProductRecord & { productIntelligence?: ShopeeProductIntelligence }).productIntelligence;
+  return intelligence && typeof intelligence === "object" ? intelligence : null;
+}
+
+function cleanShopeeProductIntelligenceLine(value: string, product: ShopeeProductRecord, fallback = "") {
+  const cleaned = compactProductText(
+    sanitizeShopeeCaptionMetadataFragments(
+      normalizeShopeeHumanReadableEntityText(value)
+        .replace(SHOPEE_FORBIDDEN_PRODUCT_INTELLIGENCE_PHRASE_PATTERN, "")
+    ),
+    110
+  );
+  return cleaned && !isBadShopeeFact(cleaned, product) ? cleaned : fallback;
+}
+
+function uniqueShopeeIntelligenceLines(values: string[], product: ShopeeProductRecord, max = 5) {
+  return Array.from(new Set(
+    values
+      .map((value) => cleanShopeeProductIntelligenceLine(value, product))
+      .filter((value): value is string => Boolean(value))
+  )).slice(0, max);
+}
+
+function buildShopeeProductIntelligence(input: {
+  product: ShopeeProductRecord;
+  understanding: ShopeeProductUnderstanding;
+}): ShopeeProductIntelligence {
+  const { product, understanding } = input;
+  const imageUrls = Array.from(new Set([
+    product.productImageUrl,
+    ...(product.productImageUrls ?? [])
+  ].map((url) => String(url ?? "").trim()).filter(Boolean)));
+  const facts = collectShopeeProductFacts(product);
+  const entityLike: ShopeeStoryboardEntityLike = {
+    productEntity: understanding.productEntity,
+    productType: understanding.productType,
+    whatItIs: understanding.whatItIs,
+    mainUseCase: understanding.mainUseCase,
+    captionAngle: understanding.captionAngle,
+    usageScene: understanding.realUsageScenario,
+    targetUser: understanding.targetAudience || understanding.targetUser,
+    keySellingPoint: understanding.keySellingPoint
+  };
+  const mainPurpose = cleanShopeeProductIntelligenceLine(understanding.mainUseCase, product, getShopeeEntityActionText(entityLike));
+  const targetCustomer = cleanShopeeProductIntelligenceLine(
+    understanding.targetAudience || understanding.targetUser,
+    product,
+    understanding.productType ? `คนที่ต้องการ${understanding.productEntity || understanding.productType}` : ""
+  );
+  const usageScenarios = uniqueShopeeIntelligenceLines([
+    understanding.realUsageScenario,
+    getShopeeEntityContextText(entityLike),
+    mainPurpose
+  ], product, 4);
+  const keyBenefits = uniqueShopeeIntelligenceLines([
+    understanding.keySellingPoint,
+    understanding.captionAngle,
+    ...facts
+  ], product, 5);
+  const uniqueSellingPoints = uniqueShopeeIntelligenceLines([
+    understanding.whatItIs,
+    product.discountPercent ? `มีส่วนลด ${product.discountPercent}% จากข้อมูลสินค้า` : "",
+    product.rating ? `คะแนนรีวิว ${product.rating}` : "",
+    ...facts
+  ], product, 5);
+  const productFacts = uniqueShopeeIntelligenceLines([
+    product.productDescription,
+    ...facts,
+    product.category ? `หมวดสินค้า ${product.category}` : "",
+    imageUrls.length ? `มีรูปสินค้า ${imageUrls.length} รูปสำหรับตรวจตัวสินค้า` : ""
+  ], product, 6);
+  const requiredPresent = [
+    mainPurpose,
+    targetCustomer,
+    usageScenarios[0],
+    keyBenefits[0]
+  ].filter(Boolean).length;
+  const genericPenalty = SHOPEE_FORBIDDEN_PRODUCT_INTELLIGENCE_PHRASE_PATTERN.test([
+    mainPurpose,
+    targetCustomer,
+    ...usageScenarios,
+    ...keyBenefits,
+    ...uniqueSellingPoints,
+    ...productFacts
+  ].join(" ")) ? 25 : 0;
+  const confidence = Math.max(0, Math.min(100, Math.round(
+    Math.max(understanding.confidence, 0) +
+    (facts.length ? 5 : 0) +
+    (imageUrls.length ? 5 : 0) +
+    (requiredPresent >= 4 ? 5 : -20) -
+    genericPenalty
+  )));
+  return {
+    productName: understanding.productEntity || understanding.cleanedTitle || product.productName,
+    brand: understanding.brand ?? "",
+    category: product.category || "",
+    productType: understanding.productType,
+    mainPurpose,
+    targetCustomer,
+    usageScenarios,
+    keyBenefits,
+    uniqueSellingPoints,
+    productFacts,
+    confidence,
+    source: understanding.source,
+    imageCount: imageUrls.length,
+    visualEvidence: understanding.visualEvidence ?? imageUrls.slice(0, 2)
+  };
+}
+
+function getShopeeProductIntelligenceFailureReasons(intelligence: ShopeeProductIntelligence) {
+  const failures: string[] = [];
+  if (intelligence.confidence < 70) failures.push("low_product_intelligence_confidence");
+  if (!intelligence.mainPurpose?.trim()) failures.push("missing_main_purpose");
+  if (!intelligence.targetCustomer?.trim()) failures.push("missing_target_customer");
+  if (!intelligence.usageScenarios.length) failures.push("missing_real_use_case");
+  if (!intelligence.keyBenefits.length) failures.push("missing_real_benefit");
+  if (SHOPEE_FORBIDDEN_PRODUCT_INTELLIGENCE_PHRASE_PATTERN.test([
+    intelligence.mainPurpose,
+    intelligence.targetCustomer,
+    ...intelligence.usageScenarios,
+    ...intelligence.keyBenefits,
+    ...intelligence.uniqueSellingPoints
+  ].join(" "))) {
+    failures.push("generic_product_intelligence_phrase");
+  }
+  return failures;
+}
+
+function assertValidShopeeProductIntelligence(product: ShopeeProductRecord, intelligence: ShopeeProductIntelligence) {
+  const failureReasons = getShopeeProductIntelligenceFailureReasons(intelligence);
+  if (!failureReasons.length) return;
+  const payload = {
+    productId: product.productId,
+    productName: product.productName,
+    productIntelligence: intelligence,
+    failureReasons
+  };
+  console.warn("[PRODUCT_INTELLIGENCE_FAILED]", payload);
+  throw new ShopeeProviderError(
+    `PRODUCT_INTELLIGENCE_FAILED for ${product.productId}: ${failureReasons.join(", ")}`,
+    422,
+    "product_intelligence_failed",
+    "internal_api",
+    JSON.stringify(payload)
+  );
+}
+
+function applyShopeeProductIntelligence(product: ShopeeProductRecord, intelligence: ShopeeProductIntelligence): ShopeeProductRecord {
+  const intelligenceDescription = [
+    product.productDescription,
+    `Product Intelligence: ${intelligence.productName}`,
+    `Product type: ${intelligence.productType}`,
+    `Main purpose: ${intelligence.mainPurpose}`,
+    `Target customer: ${intelligence.targetCustomer}`,
+    `Usage scenarios: ${intelligence.usageScenarios.join("; ")}`,
+    `Key benefits: ${intelligence.keyBenefits.join("; ")}`,
+    `Unique selling points: ${intelligence.uniqueSellingPoints.join("; ")}`,
+    `Product facts: ${intelligence.productFacts.join("; ")}`
+  ].filter(Boolean).join("\n");
+  return {
+    ...product,
+    productName: intelligence.productName || product.productName,
+    productDescription: compactProductText(intelligenceDescription, 1600),
+    category: [intelligence.category, intelligence.productType].filter(Boolean).join(" / ") || product.category,
+    productIntelligence: intelligence
+  };
+}
+
+async function createShopeeProductIntelligenceWithTracing(input: {
+  userId: string;
+  jobId?: string;
+  pageId?: string;
+  product: ShopeeProductRecord;
+}) {
+  const existing = getShopeeProductIntelligenceFromProduct(input.product);
+  if (existing) {
+    assertValidShopeeProductIntelligence(input.product, existing);
+    return existing;
+  }
+  await logShopeePackageStage({
+    userId: input.userId,
+    jobId: input.jobId,
+    pageId: input.pageId,
+    product: input.product,
+    step: "PRODUCT_INTELLIGENCE_ANALYSIS_STARTED",
+    status: "started",
+    message: "Analyzing Shopee product intelligence before caption and image prompts",
+    metadata: {
+      productId: input.product.productId,
+      productName: input.product.productName,
+      category: input.product.category,
+      imageCount: [input.product.productImageUrl, ...(input.product.productImageUrls ?? [])].filter(Boolean).length,
+      inputSources: ["title", "description", "specifications", "attributes", "category", "images"]
+    }
+  });
+  let understanding = extractShopeeProductUnderstanding(input.product);
+  const imageUrl = getFirstValidShopeeProductImageUrl(input.product);
+  const imageCount = [input.product.productImageUrl, ...(input.product.productImageUrls ?? [])].filter((url) => Boolean(url?.trim())).length;
+  if (understanding.confidence < 80 && imageUrl && imageCount > 0) {
+    try {
+      const visionUnderstanding = await analyzeShopeeProductImageUnderstanding({
+        imageUrl,
+        productTitle: input.product.productName,
+        productDescription: input.product.productDescription,
+        timeoutMs: VISION_RESCUE_TIMEOUT_MS
+      });
+      understanding = mergeShopeeVisionUnderstanding(input.product, understanding, visionUnderstanding);
+    } catch (error) {
+      await logShopeePackageStage({
+        userId: input.userId,
+        jobId: input.jobId,
+        pageId: input.pageId,
+        product: input.product,
+        step: "PRODUCT_INTELLIGENCE_VISION_FAILED",
+        status: "failed",
+        message: "Vision analysis failed during product intelligence; continuing with text understanding",
+        metadata: {
+          productId: input.product.productId,
+          imageUrl,
+          textConfidence: understanding.confidence
+        },
+        error
+      });
+    }
+  }
+  const intelligence = buildShopeeProductIntelligence({ product: input.product, understanding });
+  try {
+    assertValidShopeeProductIntelligence(input.product, intelligence);
+  } catch (error) {
+    await logShopeePackageStage({
+      userId: input.userId,
+      jobId: input.jobId,
+      pageId: input.pageId,
+      product: input.product,
+      step: "PRODUCT_INTELLIGENCE_ANALYSIS_FAILED",
+      status: "failed",
+      message: "Product intelligence confidence or required fields failed before caption",
+      metadata: {
+        productId: input.product.productId,
+        productIntelligence: intelligence,
+        failureReasons: getShopeeProductIntelligenceFailureReasons(intelligence)
+      },
+      error
+    });
+    throw error;
+  }
+  await logShopeePackageStage({
+    userId: input.userId,
+    jobId: input.jobId,
+    pageId: input.pageId,
+    product: input.product,
+    step: "PRODUCT_INTELLIGENCE_ANALYSIS_COMPLETED",
+    status: "success",
+    message: "Product intelligence is ready for caption and image prompts",
+    metadata: {
+      productId: input.product.productId,
+      productIntelligence: intelligence
+    }
+  });
+  return intelligence;
+}
+
+function getShopeeCaptionImageProductMismatch(input: {
+  caption: string;
+  imagePromptSet: ReturnType<typeof buildShopeeImagePromptSet>;
+  productIntelligence: ShopeeProductIntelligence;
+}) {
+  const captionText = normalizeShopeeEntityMentionText(input.caption);
+  const promptText = normalizeShopeeEntityMentionText([
+    input.imagePromptSet.productVisualAnalysis.keyVisualIdentity.join(" "),
+    input.imagePromptSet.productVisualAnalysis.keySellingPoints.join(" "),
+    input.imagePromptSet.prompts.map((item) => item.prompt).join(" ")
+  ].join(" "));
+  const intelligenceTokens = [
+    input.productIntelligence.productName,
+    input.productIntelligence.productType,
+    input.productIntelligence.mainPurpose,
+    ...input.productIntelligence.usageScenarios,
+    ...input.productIntelligence.keyBenefits
+  ]
+    .flatMap((value) => normalizeTextEncoding(value).split(/\s+|_|\/|,|และ|หรือ/u))
+    .map((token) => normalizeShopeeEntityMentionText(token))
+    .filter((token) => token.length >= 3 && !/^(?:สินค้า|ใช้งาน|สำหรับ|เหมาะกับ|จริง|product|type)$/iu.test(token));
+  const uniqueTokens = Array.from(new Set(intelligenceTokens)).slice(0, 12);
+  const captionMatched = uniqueTokens.some((token) => captionText.includes(token));
+  const promptMatched = uniqueTokens.some((token) => promptText.includes(token));
+  if (!captionMatched || !promptMatched) {
+    return {
+      reason: "caption_image_product_type_mismatch",
+      captionMatched,
+      promptMatched,
+      productType: input.productIntelligence.productType,
+      productName: input.productIntelligence.productName,
+      checkedTokens: uniqueTokens
+    };
+  }
+  return null;
+}
+
 function getShopeeStoryboardInputText(product: ShopeeProductRecord) {
   const record = product as ShopeeProductRecord & Record<string, unknown>;
   const metadata = ["productFeatures", "features", "specifications", "specs", "attributes", "variants"]
@@ -4472,6 +4800,7 @@ function buildShopeeStoryboardCtaLine(storyboard: ShopeeProductStoryboard) {
 type ShopeeCaptionPromptInput = {
   productName: string;
   productDescription: string;
+  productIntelligence?: ShopeeProductIntelligence;
   keySellingPoints: string[];
   affiliateLink: string;
   storyboardSummary: {
@@ -4499,8 +4828,11 @@ function getShopeeCaptionPromptInput(input: {
   affiliateLink: string;
 }): ShopeeCaptionPromptInput {
   const { product, storyboard, affiliateLink } = input;
+  const productIntelligence = getShopeeProductIntelligenceFromProduct(product) ?? undefined;
   const description = compactProductText(product.productDescription, 900);
   const keySellingPoints = [
+    ...(productIntelligence?.keyBenefits ?? []),
+    ...(productIntelligence?.uniqueSellingPoints ?? []),
     storyboard.keySellingPoint,
     storyboard.problemSolved,
     storyboard.dailyBenefit,
@@ -4510,8 +4842,9 @@ function getShopeeCaptionPromptInput(input: {
     .map((item) => compactProductText(humanizeShopeeStoryboardCaptionLine(item, storyboard), 120))
     .filter(Boolean);
   return {
-    productName: product.productName || storyboard.productEntity || storyboard.productSimpleName || "สินค้า Shopee",
+    productName: productIntelligence?.productName || product.productName || storyboard.productEntity || storyboard.productSimpleName || "สินค้า Shopee",
     productDescription: description,
+    productIntelligence,
     keySellingPoints: Array.from(new Set(keySellingPoints)).slice(0, 5),
     affiliateLink,
     storyboardSummary: {
@@ -4593,8 +4926,11 @@ function getShopeeCaptionGenerationDiagnostics(input: {
   };
 }
 
-function buildShopeeFallbackCaptionBullets(storyboard: ShopeeProductStoryboard) {
+function buildShopeeFallbackCaptionBullets(storyboard: ShopeeProductStoryboard, product?: ShopeeProductRecord) {
+  const productIntelligence = product ? getShopeeProductIntelligenceFromProduct(product) : null;
   const fallbackBullets = [
+    ...(productIntelligence?.keyBenefits ?? []),
+    ...(productIntelligence?.usageScenarios ?? []),
     storyboard.dailyBenefit,
     storyboard.realUsageScenario,
     storyboard.keySellingPoint,
@@ -4619,16 +4955,19 @@ function buildDeterministicShopeeFallbackCaption(input: {
   affiliateLink: string;
 }) {
   const { product, storyboard, affiliateLink } = input;
+  const productIntelligence = getShopeeProductIntelligenceFromProduct(product);
   const productLabel = getShopeeStoryboardProductLabel(storyboard);
-  const action = compactProductText(getShopeeEntityActionText(storyboard), 64);
-  const context = compactProductText(getShopeeEntityContextText(storyboard), 74);
+  const action = compactProductText(productIntelligence?.mainPurpose || getShopeeEntityActionText(storyboard), 64);
+  const context = compactProductText(productIntelligence?.usageScenarios[0] || getShopeeEntityContextText(storyboard), 74);
   const opening = `${getShopeeStoryboardEmoji(storyboard.productType)} เห็น${productLabel}แล้วนึกถึงตอนต้อง${action}`;
   const naturalIntro = [
-    `${productLabel}ตัวนี้เหมาะกับคนที่อยากได้ของที่ตรงกับการใช้จริง ไม่ต้องเดาจากหมวดกว้าง ๆ`,
-    context ? `ใช้กับ${context}ได้ค่อนข้างชัด เหมาะกับคนที่เลือกของจากสถานการณ์ใช้งานจริง` : "",
+    productIntelligence?.targetCustomer
+      ? `${productLabel}ตัวนี้เหมาะกับ${productIntelligence.targetCustomer}ที่ต้อง${action}`
+      : `${productLabel}ตัวนี้เหมาะกับคนที่ต้อง${action}`,
+    context ? `ใช้กับ${context}ได้ชัดเจนกว่าเลือกจากหมวดกว้าง ๆ` : "",
     compactProductText(formatShopeeStoryboardPriceLine(product, storyboard), 90)
   ].filter(Boolean);
-  const bullets = buildShopeeFallbackCaptionBullets(storyboard);
+  const bullets = buildShopeeFallbackCaptionBullets(storyboard, product);
   const caption = [
     opening,
     "",
@@ -5088,6 +5427,16 @@ function validateStoryboardAffiliateCaption(caption: string, storyboard: ShopeeP
       message: "Caption contains metadata-style wording instead of seller language",
       failedLine,
       expected: "caption uses natural seller phrases such as texture, use moment, benefit, and audience fit",
+      actual: failedLine
+    });
+  }
+  if (SHOPEE_FORBIDDEN_PRODUCT_INTELLIGENCE_PHRASE_PATTERN.test(normalized)) {
+    const failedLine = lines.find((line) => SHOPEE_FORBIDDEN_PRODUCT_INTELLIGENCE_PHRASE_PATTERN.test(line)) ?? "";
+    failedRules.push({
+      rule: "NO_GENERIC_PRODUCT_INTELLIGENCE_PHRASE",
+      message: "Caption contains generic product-intelligence fallback wording",
+      failedLine,
+      expected: "caption uses a real use case, benefit, and target customer from Product Intelligence",
       actual: failedLine
     });
   }
@@ -8677,9 +9026,6 @@ export async function buildShopeePostPackage(input: {
 
   const sourceImageUrls = (input.product.productImageUrls?.length ? input.product.productImageUrls : [input.product.productImageUrl])
     .filter((url): url is string => Boolean(url?.trim()));
-  const imagePromptSet = buildShopeeImagePromptSet(input.product, input.captionStyle ?? "soft_sell");
-  const imagePrompts = imagePromptSet.prompts.map((item) => item.prompt);
-  const imagePrompt = imagePrompts[0] ?? buildShopeeImagePrompt(input.product, input.captionStyle ?? "soft_sell");
 
   if (sourceImageUrls.length === 0) {
     const error = new ShopeeProviderError(
@@ -8700,7 +9046,7 @@ export async function buildShopeePostPackage(input: {
         productId: input.product.productId,
         reason: "missing_product_image",
         sourceImageCount: sourceImageUrls.length,
-        promptCount: imagePromptSet.prompts.length,
+        promptCount: 0,
         durationMs: Date.now() - contextStartedAt.getTime()
       },
       error
@@ -8708,27 +9054,17 @@ export async function buildShopeePostPackage(input: {
     throw error;
   }
 
-  await logShopeePackageStage({
+  const productIntelligence = await createShopeeProductIntelligenceWithTracing({
     userId: input.userId,
     jobId: input.jobId,
     pageId: input.pageId,
-    product: input.product,
-    step: "PRODUCT_CONTEXT_CREATE_COMPLETED",
-    status: "success",
-    message: "Shopee product context created before package generation",
-    metadata: {
-      productId: input.product.productId,
-      sourceImageCount: sourceImageUrls.length,
-      promptCount: imagePromptSet.prompts.length,
-      expectedImageCount: imagePromptSet.prompts.length,
-      imagePromptLength: imagePrompt.length,
-      durationMs: Date.now() - contextStartedAt.getTime()
-    }
+    product: input.product
   });
+  const productForPackage = applyShopeeProductIntelligence(input.product, productIntelligence);
 
   const linkResult = await createOrReuseAffiliateShortLink({
     userId: input.userId,
-    product: input.product,
+    product: productForPackage,
     trackingId: input.trackingId,
     pageId: input.pageId
   });
@@ -8744,17 +9080,70 @@ export async function buildShopeePostPackage(input: {
   }
   const caption = await generateShopeeCaption({
     userId: input.userId,
-    product: input.product,
+    product: productForPackage,
     affiliateLink: shortAffiliateLink,
     style: input.captionStyle,
     jobId: input.jobId
+  });
+  const imagePromptSet = buildShopeeImagePromptSet(productForPackage, input.captionStyle ?? "soft_sell");
+  const imagePrompts = imagePromptSet.prompts.map((item) => item.prompt);
+  const imagePrompt = imagePrompts[0] ?? buildShopeeImagePrompt(productForPackage, input.captionStyle ?? "soft_sell");
+  const captionImageMismatch = getShopeeCaptionImageProductMismatch({
+    caption,
+    imagePromptSet,
+    productIntelligence
+  });
+  if (captionImageMismatch) {
+    const error = new ShopeeProviderError(
+      `CAPTION_IMAGE_PRODUCT_MISMATCH for ${productForPackage.productId}: ${captionImageMismatch.reason}`,
+      422,
+      "caption_image_product_mismatch",
+      "internal_api",
+      JSON.stringify(captionImageMismatch)
+    );
+    await logShopeePackageStage({
+      userId: input.userId,
+      jobId: input.jobId,
+      pageId: input.pageId,
+      product: productForPackage,
+      step: "CAPTION_IMAGE_PRODUCT_MISMATCH",
+      status: "failed",
+      message: "Caption product type does not match image prompt product type",
+      metadata: {
+        ...captionImageMismatch,
+        productIntelligence,
+        captionPreview: caption.slice(0, 500),
+        imagePromptPreview: imagePrompt.slice(0, 500)
+      },
+      error
+    });
+    throw error;
+  }
+
+  await logShopeePackageStage({
+    userId: input.userId,
+    jobId: input.jobId,
+    pageId: input.pageId,
+    product: productForPackage,
+    step: "PRODUCT_CONTEXT_CREATE_COMPLETED",
+    status: "success",
+    message: "Shopee product context created before package generation",
+    metadata: {
+      productId: productForPackage.productId,
+      sourceImageCount: sourceImageUrls.length,
+      promptCount: imagePromptSet.prompts.length,
+      expectedImageCount: imagePromptSet.prompts.length,
+      imagePromptLength: imagePrompt.length,
+      productIntelligence,
+      durationMs: Date.now() - contextStartedAt.getTime()
+    }
   });
 
   await logShopeePackageStage({
     userId: input.userId,
     jobId: input.jobId,
     pageId: input.pageId,
-    product: input.product,
+    product: productForPackage,
     step: "UGC_IMAGES_STARTED",
     status: "started",
     message: "Generating Shopee UGC images",
@@ -8771,7 +9160,7 @@ export async function buildShopeePostPackage(input: {
     imageDocs = await generateShopeeUgcImageDocs({
       userId: input.userId,
       jobId: input.jobId,
-      product: input.product,
+      product: productForPackage,
       promptSet: imagePromptSet,
       sourceImageUrls
     });
@@ -8780,7 +9169,7 @@ export async function buildShopeePostPackage(input: {
       userId: input.userId,
       jobId: input.jobId,
       pageId: input.pageId,
-      product: input.product,
+      product: productForPackage,
       step: "UGC_IMAGES_FAILED",
       status: "failed",
       message: "Shopee UGC image generation failed",
@@ -8802,7 +9191,7 @@ export async function buildShopeePostPackage(input: {
     userId: input.userId,
     jobId: input.jobId,
     pageId: input.pageId,
-    product: input.product,
+    product: productForPackage,
     step: "UGC_IMAGES_CREATED",
     status: "success",
     message: "Shopee UGC images generated",
@@ -8818,7 +9207,7 @@ export async function buildShopeePostPackage(input: {
     userId: input.userId,
     jobId: input.jobId,
     pageId: input.pageId,
-    product: input.product,
+    product: productForPackage,
     step: "TEMPLATE_POST_CREATE_STARTED",
     status: "started",
     message: "Creating AI generated template post package",
@@ -8838,7 +9227,7 @@ export async function buildShopeePostPackage(input: {
       userId: input.userId,
       jobId: input.jobId,
       pageId: input.pageId,
-      product: input.product,
+      product: productForPackage,
       stage: "TEMPLATE_POST_CREATE",
       metadata: {
         collection: "AiGeneratedPost",
@@ -8848,10 +9237,10 @@ export async function buildShopeePostPackage(input: {
       },
       fn: () => AiGeneratedPost.create({
         userId: input.userId,
-        productId: input.product.productId,
+        productId: productForPackage.productId,
         caption,
         imagePrompt,
-        generatedImageUrl: imageDocs[0] ? `ai-image:${String(imageDocs[0]._id)}` : input.product.productImageUrl,
+        generatedImageUrl: imageDocs[0] ? `ai-image:${String(imageDocs[0]._id)}` : productForPackage.productImageUrl,
         affiliateLink: shortAffiliateLink,
         scheduledAt: input.scheduledAt,
         pageId: input.pageId,
@@ -8861,6 +9250,7 @@ export async function buildShopeePostPackage(input: {
           imageIds: imageDocs.map((imageDoc) => String(imageDoc._id)),
           generatedImageUrls: imageDocs.map((imageDoc) => `ai-image:${String(imageDoc._id)}`),
           imagePromptSet,
+          productIntelligence,
           source: "shopee-affiliate",
           affiliateUrl: linkResult.affiliateUrl,
           shortAffiliateLink,
@@ -8874,13 +9264,13 @@ export async function buildShopeePostPackage(input: {
       userId: input.userId,
       jobId: input.jobId,
       pageId: input.pageId,
-      product: input.product,
+      product: productForPackage,
       step: "TEMPLATE_POST_CREATE_FAILED",
       status: "failed",
       message: "AI generated template post package creation failed",
       metadata: {
         jobId: input.jobId,
-        productId: input.product.productId,
+        productId: productForPackage.productId,
         hasStoryboard: true,
         hasCaption: Boolean(caption),
         imageCount: imageDocs.length,
@@ -8898,7 +9288,7 @@ export async function buildShopeePostPackage(input: {
     userId: input.userId,
     jobId: input.jobId,
     pageId: input.pageId,
-    product: input.product,
+    product: productForPackage,
     step: "TEMPLATE_POST_CREATED",
     status: "success",
     message: "AI generated template post package created",
@@ -8917,7 +9307,7 @@ export async function buildShopeePostPackage(input: {
     userId: input.userId,
     jobId: input.jobId,
     pageId: input.pageId,
-    product: input.product,
+    product: productForPackage,
     step: "PACKAGE_IMAGE_COUNT_CHECK",
     status: "success",
     message: "Post package image count checked before package completion",
@@ -8940,7 +9330,7 @@ export async function buildShopeePostPackage(input: {
       userId: input.userId,
       jobId: input.jobId,
       pageId: input.pageId,
-      product: input.product,
+      product: productForPackage,
       step: "PACKAGE_IMAGE_COUNT_CHECK_FAILED",
       status: "failed",
       message: "Post package image count was incomplete before package completion",
@@ -8959,7 +9349,7 @@ export async function buildShopeePostPackage(input: {
   }
 
   return {
-    product: input.product,
+    product: productForPackage,
     caption,
     imagePrompt,
     imagePrompts,
