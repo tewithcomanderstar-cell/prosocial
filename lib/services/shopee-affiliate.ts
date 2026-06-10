@@ -8286,6 +8286,130 @@ export async function selectShopeeProductsForPages(input: {
     }
   }
 
+  if (!selected.length && categories.length > 1 && sourceTag !== "all_products") {
+    console.warn("MULTI_CATEGORY_PRODUCT_SELECTION_RESCUE_STARTED", {
+      source: sourceTag,
+      selectedCategories: categories,
+      reason: "strict_and_relaxed_selection_returned_zero_for_multi_category_source",
+      hardRequirements: ["has_image", "has_product_url_or_affiliate_url", "not_out_of_stock", "not_blocked_category"]
+    });
+    const rescueProducts = await fetchShopeeAllProductsForSelectedCategories({
+      userId: input.userId,
+      selectedCategoryIds: categories,
+      limit: limitPerCategory,
+      excludeProductIds: Array.from(excludedProductIds),
+      randomSeed: `${input.userId}:${input.jobId ?? ""}:multi-category-rescue:${Date.now()}`
+    });
+    const existingKeys = new Set(discovered.map((product) => getShopeeProductDedupeKey(product)));
+    const rescueUnique = dedupeShopeeProducts(rescueProducts)
+      .filter((product) => !existingKeys.has(getShopeeProductDedupeKey(product)));
+    if (rescueUnique.length) {
+      await upsertShopeeProducts(rescueUnique);
+    }
+    selectionDiagnostics.fetchedProducts += rescueProducts.length;
+    selectionDiagnostics.afterDedupe += rescueUnique.length;
+
+    for (const pageId of input.pageIds) {
+      const rescueCandidates: ShopeeSourceScoredCandidate[] = [];
+      for (const product of rescueUnique) {
+        const scoreResult = scoreShopeeProductForSource({
+          product,
+          sourceTag,
+          keyword: input.keyword,
+          categories: effectiveCategoryPriority
+        });
+        const hardRejection = getShopeeProductHardSelectionRejectionReason(product, input.blockedCategories);
+        if (hardRejection) {
+          recordProductSelectionRejection({
+            diagnostics: selectionDiagnostics,
+            product,
+            sourceTag,
+            scoreResult,
+            rejectReason: hardRejection
+          });
+          continue;
+        }
+        if (effectiveMinSoldCount > 0 && (product.salesCount ?? 0) < effectiveMinSoldCount) {
+          recordProductSelectionRejection({
+            diagnostics: selectionDiagnostics,
+            product,
+            sourceTag,
+            scoreResult,
+            rejectReason: "below_min_sold_count"
+          });
+          continue;
+        }
+        const canonicalProductKey = getShopeeCanonicalProductKey(product);
+        if (canonicalProductKey && recentProductKeys.keys.has(canonicalProductKey)) {
+          selectionDiagnostics.excludedRecent48h += 1;
+          recordProductSelectionRejection({
+            diagnostics: selectionDiagnostics,
+            product,
+            sourceTag,
+            scoreResult,
+            rejectReason: "duplicate_product_48h"
+          });
+          continue;
+        }
+        if (canonicalProductKey && reservedProductKeys.has(canonicalProductKey)) {
+          selectionDiagnostics.excludedReserved += 1;
+          recordProductSelectionRejection({
+            diagnostics: selectionDiagnostics,
+            product,
+            sourceTag,
+            scoreResult,
+            rejectReason: "reserved_product"
+          });
+          continue;
+        }
+        if (selectedProductIds.has(String(product.productId)) || selectedProductIdentities.has(getShopeeProductIdentity(product))) {
+          continue;
+        }
+        rescueCandidates.push({
+          product,
+          ...scoreResult,
+          score: {
+            ...scoreResult.score,
+            riskFlags: Array.from(new Set([...scoreResult.score.riskFlags, "multi_category_rescue_selection"]))
+          }
+        });
+      }
+
+      const ranked = sourceSpecificRankedSelection(rescueCandidates, sourceTag);
+      const best = pickRandomTopSourceCandidate(ranked);
+      for (const candidate of ranked) {
+        logShopeeSourceScoreBreakdown({
+          sourceTag,
+          pageId,
+          product: candidate.product,
+          scoreResult: candidate,
+          finalRank: candidate.finalRank ?? null,
+          selectionStatus: best?.product.productId === candidate.product.productId ? "selected" : "rejected",
+          rejectedReason: best?.product.productId === candidate.product.productId
+            ? "multi_category_rescue_selection"
+            : "multi_category_rescue_candidate_not_selected"
+        });
+      }
+      if (!best) continue;
+      selectedProductIds.add(String(best.product.productId));
+      selectedProductIdentities.add(getShopeeProductIdentity(best.product));
+      await reserveShopeeProductKey({
+        userId: input.userId,
+        product: best.product,
+        jobId: input.jobId
+      });
+      selected.push({ pageId, product: best.product, score: best.score });
+    }
+
+    console.warn("MULTI_CATEGORY_PRODUCT_SELECTION_RESCUE_COMPLETED", {
+      source: sourceTag,
+      selectedCategories: categories,
+      fetchedProducts: rescueProducts.length,
+      uniqueNewProducts: rescueUnique.length,
+      selectedProducts: selected.length
+    });
+  }
+
   selectionDiagnostics.finalEligibleProducts = selected.length;
   logProductSelectionDiagnostics(selectionDiagnostics);
 

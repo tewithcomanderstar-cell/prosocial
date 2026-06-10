@@ -718,6 +718,18 @@ function testShopeeAllProductsAndCooldownGuards() {
   console.log("PASS Shopee all_products cooldown and reservation guards");
 }
 
+function testShopeeMultiCategorySelectionRescueGuards() {
+  const source = readShopeeAffiliateServiceSource();
+  const selectionSource = sourceBetween(source, "export async function selectShopeeProductsForPages", "export function buildShopeeImagePrompt");
+  assert.ok(selectionSource.includes("MULTI_CATEGORY_PRODUCT_SELECTION_RESCUE_STARTED"));
+  assert.ok(selectionSource.includes("MULTI_CATEGORY_PRODUCT_SELECTION_RESCUE_COMPLETED"));
+  assert.ok(selectionSource.includes("categories.length > 1 && sourceTag !== \"all_products\""));
+  assert.ok(selectionSource.includes("fetchShopeeAllProductsForSelectedCategories"));
+  assert.ok(selectionSource.includes("multi_category_rescue_selection"));
+  assert.ok(selectionSource.indexOf("MULTI_CATEGORY_PRODUCT_SELECTION_RESCUE_STARTED") < selectionSource.indexOf("No eligible Shopee products found after strict and fallback product selection"));
+  console.log("PASS Shopee multi-category selection rescue guards");
+}
+
 function testAutoPostProcessStepNoEligibleProductsReturnsDiagnostics() {
   const source = readAutoPostProcessStepRouteSource();
   assert.ok(source.includes("shopee_no_eligible_products"));
@@ -749,4 +761,5 @@ testShopeeCaptionQualityAndSoldThresholdGuards();
 testAutoPostStopsOnCaptionImageProductMismatch();
 testStatusDoesNotDeriveImageFailedFromStaleStartOnly();
 testShopeeAllProductsAndCooldownGuards();
+testShopeeMultiCategorySelectionRescueGuards();
 testAutoPostProcessStepNoEligibleProductsReturnsDiagnostics();
