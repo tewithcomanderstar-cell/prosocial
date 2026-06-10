@@ -357,7 +357,7 @@ function testShopeeVisionRescueUsesActualImageInput() {
 
 function testShopeeCaptionHumanReadabilityGuards() {
   const source = readShopeeAffiliateServiceSource();
-  const validationSource = sourceBetween(source, "function getShopeeCaptionHumanReadabilityIssues", "function getStoryboardCaptionDebugPayload");
+  const validationSource = sourceBetween(source, "function getShopeeCaptionHumanReadabilityIssueDetails", "function getStoryboardCaptionDebugPayload");
   const repairSource = sourceBetween(source, "function repairStoryboardAffiliateCaption", "type StoryboardCaptionFailedRule");
   const autoPostSource = readAutoPostServiceSource();
   assert.ok(source.includes("CAPTION_HUMAN_READABILITY"));
@@ -398,11 +398,19 @@ function testShopeeCaptionFallbackGenerationGuards() {
   assert.ok(captionSource.includes("storyboardSummary"));
   assert.ok(captionSource.includes("promptLength"));
   assert.ok(captionSource.includes("rawResponseParseError"));
+  assert.ok(captionSource.includes("captionValidationRule"));
+  assert.ok(captionSource.includes("captionValidationReason"));
+  assert.ok(captionSource.includes("offendingText"));
+  assert.ok(captionSource.includes("sanitizeShopeeCaptionMetadataFragments"));
+  assert.ok(captionSource.includes("SHOPEE_CAPTION_METADATA_LINE_PATTERN"));
+  assert.ok(captionSource.includes("SHOPEE_CAPTION_JSON_METADATA_PATTERN"));
   assert.ok(captionSource.includes("buildDeterministicShopeeFallbackCaption"));
+  assert.ok(captionSource.includes("CAPTION_PRIMARY_FAILED"));
   assert.ok(captionSource.includes("CAPTION_GENERATION_ERROR_DETAIL"));
   assert.ok(captionSource.includes("CAPTION_FALLBACK_RAW_OUTPUT"));
   assert.ok(captionSource.includes("CAPTION_FALLBACK_USED"));
   assert.ok(captionSource.includes("CAPTION_FALLBACK_FAILED"));
+  assert.ok(captionSource.includes("throw fallbackError"));
   assert.ok(captionSource.includes("validateStoryboardAffiliateCaption(fallbackCaption"));
   assert.ok(captionSource.includes("formatShopeeStoryboardPriceLine(product, storyboard)"));
   assert.ok(captionSource.includes("formatShopeeShortLinkLine(affiliateLink)"));
@@ -414,8 +422,12 @@ function testShopeeCaptionFallbackGenerationGuards() {
   assert.equal(captionSource.includes("ใช้งานได้หลากหลาย"), false);
 
   assert.ok(generateSource.includes("CAPTION_FALLBACK_USED"));
+  assert.ok(generateSource.includes("CAPTION_PRIMARY_FAILED"));
   assert.ok(generateSource.includes("captionStatus: \"fallback_created\""));
   assert.ok(generateSource.includes("captionLastError"));
+  assert.ok(generateSource.includes("captionValidationRule"));
+  assert.ok(generateSource.includes("captionValidationReason"));
+  assert.ok(generateSource.includes("offendingText"));
   assert.ok(generateSource.includes("CAPTION_CREATED"));
   assert.ok(generateSource.includes("captionResult?.fallbackUsed ? \"deterministic_fallback\""));
   assert.ok(generateSource.includes("promptLength"));
@@ -426,10 +438,22 @@ function testShopeeCaptionFallbackGenerationGuards() {
   assert.ok(statusSource.includes("captionLastError"));
   assert.ok(statusSource.includes("captionProvider"));
   assert.ok(statusSource.includes("captionRetryCount"));
+  assert.ok(statusSource.includes("captionValidationRule"));
+  assert.ok(statusSource.includes("captionValidationReason"));
+  assert.ok(statusSource.includes("captionOffendingText"));
+  assert.ok(statusSource.includes("captionFallbackUsed"));
   assert.ok(panelSource.includes("captionLastError?: string | null"));
+  assert.ok(panelSource.includes("captionValidationRule?: string | null"));
+  assert.ok(panelSource.includes("captionValidationReason?: string | null"));
+  assert.ok(panelSource.includes("offendingText?: string | null"));
+  assert.ok(panelSource.includes("fallbackUsed?: boolean"));
   assert.ok(panelSource.includes("Caption provider"));
   assert.ok(panelSource.includes("Caption retry count"));
   assert.ok(panelSource.includes("Caption last error"));
+  assert.ok(panelSource.includes("Caption validation rule"));
+  assert.ok(panelSource.includes("Caption validation reason"));
+  assert.ok(panelSource.includes("Caption offending text"));
+  assert.ok(panelSource.includes("Caption fallback used"));
   console.log("PASS Shopee caption fallback generation guards");
 }
 

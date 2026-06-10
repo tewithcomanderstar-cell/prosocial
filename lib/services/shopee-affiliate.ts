@@ -4541,6 +4541,16 @@ function getShopeeCaptionRawResponseParseError(error: unknown) {
   }
 }
 
+function getShopeeCaptionErrorResponseSummary(error: unknown): Record<string, unknown> {
+  if (!(error instanceof ShopeeProviderError) || !error.responseSummary) return {};
+  try {
+    const parsed = JSON.parse(error.responseSummary);
+    return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
 function getShopeeCaptionGenerationDiagnostics(input: {
   error?: unknown;
   product: ShopeeProductRecord;
@@ -4550,10 +4560,22 @@ function getShopeeCaptionGenerationDiagnostics(input: {
   captionRetryCount?: number;
 }) {
   const { error, product, storyboard, promptInput } = input;
+  const errorSummary = getShopeeCaptionErrorResponseSummary(error);
   return {
     errorName: error instanceof Error ? error.name : error ? "NonError" : null,
     errorMessage: error instanceof Error ? error.message : error ? String(error) : null,
     errorCode: error instanceof ShopeeProviderError ? error.code : null,
+    captionValidationRule: typeof errorSummary.matchedRule === "string"
+      ? errorSummary.matchedRule
+      : Array.isArray(errorSummary.failedRules) && errorSummary.failedRules.length
+        ? String(errorSummary.failedRules[0])
+        : null,
+    captionValidationReason: typeof errorSummary.reason === "string"
+      ? errorSummary.reason
+      : Array.isArray(errorSummary.detectedIssues) && errorSummary.detectedIssues.length
+        ? String(errorSummary.detectedIssues[0])
+        : null,
+    offendingText: typeof errorSummary.offendingText === "string" ? errorSummary.offendingText : null,
     provider: getShopeeStoryboardProvider(),
     model: getContentModel(),
     promptLength: getShopeeCaptionPromptLength(promptInput),
@@ -4667,7 +4689,7 @@ function humanizeShopeeCaptionBeforeValidation(caption: string, affiliateLink: s
 }
 
 function repairStoryboardAffiliateCaption(caption: string, affiliateLink: string, storyboard?: ShopeeProductStoryboard) {
-  let normalized = normalizeShopeeCaptionLinkLine(normalizeTextEncoding(caption), affiliateLink)
+  let normalized = normalizeShopeeCaptionLinkLine(sanitizeShopeeCaptionMetadataFragments(caption), affiliateLink)
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
@@ -4717,7 +4739,11 @@ const SHOPEE_GENERIC_CAPTION_TEMPLATE_PATTERN =
 const SHOPEE_METADATA_CAPTION_PATTERN =
   /บริบทใช้งานจริงของ|จุดเด่นของ.+?ช่วยตอบโจทย์|usageContext|mainUseCase|productEntity|targetAudience|productType|realUsageScenario|dailyBenefit|keySellingPoint/iu;
 const SHOPEE_HUMAN_READABILITY_METADATA_PATTERN =
-  /รายละเอียดสินค้า|รายละเอียด[^\n]*|ข้อมูลสินค้า|บริบทใช้งาน|mainUseCase|targetAudience|productEntity|productType/iu;
+  /(?:^|\s)(?:productId|shopId|itemId|categoryId|metadata|usageContext|mainUseCase|targetAudience|productEntity|productType|realUsageScenario|dailyBenefit|keySellingPoint)\s*[:=]|\{[^{}]*(?:productId|shopId|itemId|categoryId|metadata|mainUseCase|productEntity|productType)\s*[:=]|```|^\s*(?:system|assistant|developer|debug)\s*:/iu;
+const SHOPEE_CAPTION_METADATA_LINE_PATTERN =
+  /^\s*(?:"?(?:productId|shopId|itemId|categoryId|metadata|usageContext|mainUseCase|targetAudience|productEntity|productType|realUsageScenario|dailyBenefit|keySellingPoint)"?\s*[:=]|(?:system|assistant|developer|debug)\s*:)/iu;
+const SHOPEE_CAPTION_JSON_METADATA_PATTERN =
+  /^\s*[{[][\s\S]*(?:productId|shopId|itemId|categoryId|metadata|mainUseCase|productEntity|productType)[\s\S]*[}\]]\s*[,;]?\s*$/iu;
 
 function normalizeShopeeEntityMentionText(value?: string) {
   return normalizeTextEncoding(value ?? "")
@@ -4774,22 +4800,40 @@ function countShopeeEntityMentions(caption: string, productEntity: string) {
   return text.split(entity).length - 1;
 }
 
-function getShopeeCaptionHumanReadabilityIssues(caption: string, storyboard: ShopeeProductStoryboard) {
-  const issues: string[] = [];
+type ShopeeCaptionHumanReadabilityIssue = {
+  reason: string;
+  matchedRule: string;
+  offendingText: string;
+};
+
+function uniqueShopeeCaptionReadabilityIssues(issues: ShopeeCaptionHumanReadabilityIssue[]) {
+  const seen = new Set<string>();
+  return issues.filter((issue) => {
+    const key = `${issue.reason}:${issue.offendingText}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function getShopeeCaptionHumanReadabilityIssueDetails(caption: string, storyboard: ShopeeProductStoryboard) {
+  const issues: ShopeeCaptionHumanReadabilityIssue[] = [];
   const normalized = normalizeTextEncoding(caption);
   const cleanedEntity = normalizeShopeeHumanReadableEntityText(storyboard.productEntity || storyboard.productSimpleName);
   const lines = normalized.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
 
-  if (/\([^)]*$/u.test(normalized)) issues.push("broken_parenthesis");
-  if (/\[[^\]]*$/u.test(normalized)) issues.push("broken_square_bracket");
-  if (/\{[^}]*$/u.test(normalized)) issues.push("broken_curly_bracket");
-  if (/[([{&/-]\s*$/u.test(cleanedEntity) || /(?:\.{3}|…)\s*$/u.test(cleanedEntity)) issues.push("product_entity_dangling_suffix");
+  if (/\([^)]*$/u.test(normalized)) issues.push({ reason: "broken_parenthesis", matchedRule: "broken_parenthesis", offendingText: lines.find((line) => /\([^)]*$/u.test(line)) ?? normalized.slice(-120) });
+  if (/\[[^\]]*$/u.test(normalized)) issues.push({ reason: "broken_square_bracket", matchedRule: "broken_square_bracket", offendingText: lines.find((line) => /\[[^\]]*$/u.test(line)) ?? normalized.slice(-120) });
+  if (/\{[^}]*$/u.test(normalized)) issues.push({ reason: "broken_curly_bracket", matchedRule: "broken_curly_bracket", offendingText: lines.find((line) => /\{[^}]*$/u.test(line)) ?? normalized.slice(-120) });
+  if (/[([{&/-]\s*$/u.test(cleanedEntity) || /(?:\.{3}|…)\s*$/u.test(cleanedEntity)) {
+    issues.push({ reason: "product_entity_dangling_suffix", matchedRule: "product_entity_dangling_suffix", offendingText: cleanedEntity });
+  }
 
   const entityMentionCount = countShopeeEntityMentions(normalized, cleanedEntity);
-  if (entityMentionCount > 2) issues.push("repeated_product_entity");
+  if (entityMentionCount > 2) issues.push({ reason: "repeated_product_entity", matchedRule: "repeated_product_entity", offendingText: cleanedEntity });
 
   const metadataLine = lines.find((line) => SHOPEE_HUMAN_READABILITY_METADATA_PATTERN.test(line));
-  if (metadataLine) issues.push("metadata_fragment");
+  if (metadataLine) issues.push({ reason: "metadata_fragment", matchedRule: "metadata_fragment", offendingText: metadataLine });
 
   const shortLine = lines.find((line) => {
     const comparable = normalizeTextEncoding(line)
@@ -4797,7 +4841,7 @@ function getShopeeCaptionHumanReadabilityIssues(caption: string, storyboard: Sho
       .trim();
     return comparable.length > 0 && comparable.length < 5;
   });
-  if (shortLine) issues.push("too_short_line");
+  if (shortLine) issues.push({ reason: "too_short_line", matchedRule: "too_short_line", offendingText: shortLine });
 
   const unfinishedLine = lines.find((line) =>
     /\([^)]*$/u.test(line) ||
@@ -4806,9 +4850,31 @@ function getShopeeCaptionHumanReadabilityIssues(caption: string, storyboard: Sho
     /[([{&/-]\s*$/u.test(line) ||
     /(?:\.{3}|…)\s*$/u.test(line)
   );
-  if (unfinishedLine) issues.push("unfinished_text");
+  if (unfinishedLine) issues.push({ reason: "unfinished_text", matchedRule: "unfinished_text", offendingText: unfinishedLine });
 
-  return [...new Set(issues)];
+  return uniqueShopeeCaptionReadabilityIssues(issues);
+}
+
+function getShopeeCaptionHumanReadabilityIssues(caption: string, storyboard: ShopeeProductStoryboard) {
+  return Array.from(new Set(getShopeeCaptionHumanReadabilityIssueDetails(caption, storyboard).map((issue) => issue.reason)));
+}
+
+function sanitizeShopeeCaptionMetadataFragments(caption: string) {
+  const withoutCodeFences = normalizeTextEncoding(caption)
+    .replace(/```[\s\S]*?```/gu, "")
+    .replace(/`{3,}/gu, "");
+  return withoutCodeFences
+    .split(/\r?\n/)
+    .filter((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return true;
+      if (SHOPEE_CAPTION_METADATA_LINE_PATTERN.test(trimmed)) return false;
+      if (SHOPEE_CAPTION_JSON_METADATA_PATTERN.test(trimmed)) return false;
+      return true;
+    })
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function getStoryboardCaptionDebugPayload(input: {
@@ -4866,12 +4932,26 @@ function createCaptionReadabilityValidationError(input: {
   storyboard: ShopeeProductStoryboard;
   caption: string;
   detectedIssues: string[];
+  issueDetails: ShopeeCaptionHumanReadabilityIssue[];
 }) {
+  const primaryIssue = input.issueDetails[0] ?? {
+    reason: input.detectedIssues[0] ?? "readability_failed",
+    matchedRule: input.detectedIssues[0] ?? "readability_failed",
+    offendingText: ""
+  };
   const detail = {
     productId: input.product.productId,
+    productName: input.product.productName,
     productEntity: input.storyboard.productEntity,
+    reason: primaryIssue.reason,
+    matchedRule: primaryIssue.matchedRule,
+    offendingText: primaryIssue.offendingText,
     captionPreview: input.caption.slice(0, 500),
-    detectedIssues: input.detectedIssues
+    captionLength: input.caption.length,
+    provider: getShopeeStoryboardProvider(),
+    model: getContentModel(),
+    detectedIssues: input.detectedIssues,
+    issueDetails: input.issueDetails
   };
   console.warn("[CAPTION_READABILITY_FAILED]", detail);
   return new ShopeeProviderError(
@@ -4935,13 +5015,15 @@ function validateStoryboardAffiliateCaption(caption: string, storyboard: ShopeeP
     caption: normalized
   }));
 
-  const readabilityIssues = getShopeeCaptionHumanReadabilityIssues(normalized, storyboard);
+  const readabilityIssueDetails = getShopeeCaptionHumanReadabilityIssueDetails(normalized, storyboard);
+  const readabilityIssues = Array.from(new Set(readabilityIssueDetails.map((issue) => issue.reason)));
   if (readabilityIssues.length) {
     throw createCaptionReadabilityValidationError({
       product,
       storyboard,
       caption: normalized,
-      detectedIssues: readabilityIssues
+      detectedIssues: readabilityIssues,
+      issueDetails: readabilityIssueDetails
     });
   }
 
@@ -5170,6 +5252,15 @@ function buildShopeeStoryboardCaptionResult(input: {
       affiliateLink,
       promptInput
     });
+    console.warn("[CAPTION_PRIMARY_FAILED]", {
+      error: diagnostics.errorMessage,
+      errorCode: diagnostics.errorCode,
+      captionValidationRule: diagnostics.captionValidationRule,
+      captionValidationReason: diagnostics.captionValidationReason,
+      offendingText: diagnostics.offendingText,
+      productId: product.productId,
+      productName: product.productName
+    });
     console.warn("[CAPTION_GENERATION_ERROR_DETAIL]", diagnostics);
     const fallbackCaption = buildDeterministicShopeeFallbackCaption({ product, storyboard, affiliateLink });
     console.info("[CAPTION_FALLBACK_RAW_OUTPUT]", {
@@ -5200,14 +5291,20 @@ function buildShopeeStoryboardCaptionResult(input: {
         diagnostics
       };
     } catch (fallbackError) {
-      console.warn("[CAPTION_FALLBACK_FAILED]", getShopeeCaptionGenerationDiagnostics({
+      const fallbackDiagnostics = getShopeeCaptionGenerationDiagnostics({
         error: fallbackError,
         product,
         storyboard,
         affiliateLink,
         promptInput
-      }));
-      throw error;
+      });
+      console.warn("[CAPTION_FALLBACK_FAILED]", {
+        ...fallbackDiagnostics,
+        productId: product.productId,
+        productName: product.productName,
+        error: fallbackDiagnostics.errorMessage
+      });
+      throw fallbackError;
     }
   }
   console.info("[CAPTION_POST_PROCESS]", {
@@ -7348,6 +7445,30 @@ export async function generateShopeeCaption(input: {
         userId: input.userId,
         jobId: input.jobId,
         product: productForStoryboard,
+        step: "CAPTION_PRIMARY_FAILED",
+        status: "failed",
+        message: "Primary caption validation failed; fallback caption will be used",
+        metadata: {
+          error: captionResult.diagnostics.errorMessage,
+          errorName: captionResult.diagnostics.errorName,
+          errorCode: captionResult.diagnostics.errorCode,
+          captionValidationRule: captionResult.diagnostics.captionValidationRule,
+          captionValidationReason: captionResult.diagnostics.captionValidationReason,
+          offendingText: captionResult.diagnostics.offendingText,
+          provider: captionResult.diagnostics.provider,
+          model: captionResult.diagnostics.model,
+          promptLength: captionResult.diagnostics.promptLength,
+          productId: product.productId,
+          productName: product.productName,
+          storyboardId: captionResult.diagnostics.storyboardId,
+          storyboardStatus: captionResult.diagnostics.storyboardStatus,
+          rawResponseParseError: captionResult.diagnostics.rawResponseParseError
+        }
+      });
+      await logShopeePackageStage({
+        userId: input.userId,
+        jobId: input.jobId,
+        product: productForStoryboard,
         step: "CAPTION_FALLBACK_USED",
         status: "success",
         message: "Fallback caption created after primary caption generation failed",
@@ -7361,6 +7482,9 @@ export async function generateShopeeCaption(input: {
           errorName: captionResult.diagnostics.errorName,
           errorMessage: captionResult.diagnostics.errorMessage,
           errorCode: captionResult.diagnostics.errorCode,
+          captionValidationRule: captionResult.diagnostics.captionValidationRule,
+          captionValidationReason: captionResult.diagnostics.captionValidationReason,
+          offendingText: captionResult.diagnostics.offendingText,
           promptLength: captionResult.diagnostics.promptLength,
           productId: product.productId,
           productName: product.productName,
@@ -7397,7 +7521,13 @@ export async function generateShopeeCaption(input: {
         metadata: {
           productId: product.productId,
           productEntity: storyboard.productEntity,
+          reason: typeof detail.reason === "string" ? detail.reason : "caption_readability_failed",
+          matchedRule: typeof detail.matchedRule === "string" ? detail.matchedRule : "CAPTION_HUMAN_READABILITY",
+          offendingText: typeof detail.offendingText === "string" ? detail.offendingText : "",
           captionPreview: String(detail.captionPreview ?? "").slice(0, 500),
+          captionLength: typeof detail.captionLength === "number" ? detail.captionLength : 0,
+          provider: getShopeeStoryboardProvider(),
+          model: getContentModel(),
           detectedIssues: Array.isArray(detail.detectedIssues) ? detail.detectedIssues : []
         },
         error

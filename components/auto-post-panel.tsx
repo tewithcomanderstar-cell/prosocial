@@ -85,6 +85,10 @@ type ControlPanelStatus = {
   captionLastError?: string | null;
   captionProvider?: string | null;
   captionRetryCount?: number | null;
+  captionValidationRule?: string | null;
+  captionValidationReason?: string | null;
+  offendingText?: string | null;
+  fallbackUsed?: boolean;
   imageStatus?: string | null;
   blobStatus?: string | null;
   imageStartedAt?: string | null;
@@ -1406,6 +1410,10 @@ export function AutoPostPanel() {
           <div className="auto-post-metric-card"><span className="muted">Caption provider</span><strong>{controlPanel?.captionProvider ? sanitizeText(controlPanel.captionProvider) : "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Caption retry count</span><strong>{controlPanel?.captionRetryCount ?? "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Caption last error</span><strong>{controlPanel?.captionLastError ? sanitizeText(controlPanel.captionLastError) : "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Caption validation rule</span><strong>{controlPanel?.captionValidationRule ? sanitizeText(controlPanel.captionValidationRule) : "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Caption validation reason</span><strong>{controlPanel?.captionValidationReason ? sanitizeText(controlPanel.captionValidationReason) : "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Caption offending text</span><strong>{controlPanel?.offendingText ? sanitizeText(controlPanel.offendingText) : "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Caption fallback used</span><strong>{controlPanel?.fallbackUsed ? "yes" : "no"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Image status</span><strong>{controlPanel?.imageStatus ?? "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Image started at</span><strong>{formatDateTime(controlPanel?.imageStartedAt ?? undefined)}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Image duration</span><strong>{formatDurationMs(controlPanel?.imageDurationMs)}</strong></div>

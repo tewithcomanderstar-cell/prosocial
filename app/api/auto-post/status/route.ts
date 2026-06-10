@@ -638,6 +638,7 @@ export async function GET() {
     const latestCaptionLog = getLatestStageLog(runStageLogs, [
       "CAPTION_CREATED",
       "CAPTION_FALLBACK_USED",
+      "CAPTION_PRIMARY_FAILED",
       "CAPTION_FAILED",
       "CAPTION_VALIDATION_FAILED_DETAIL",
       "CAPTION_STARTED"
@@ -645,7 +646,12 @@ export async function GET() {
     const latestCaptionFallbackLog = getLatestStageLog(runStageLogs, ["CAPTION_FALLBACK_USED"]);
     const latestCaptionMetadata = (latestCaptionLog?.metadata ?? {}) as Record<string, unknown>;
     const latestCaptionFallbackMetadata = (latestCaptionFallbackLog?.metadata ?? {}) as Record<string, unknown>;
-    const latestCaptionFailureLog = getLatestStageLog(runStageLogs, ["CAPTION_FAILED", "CAPTION_VALIDATION_FAILED_DETAIL"]);
+    const latestCaptionFailureLog = getLatestStageLog(runStageLogs, [
+      "CAPTION_FAILED",
+      "CAPTION_VALIDATION_FAILED_DETAIL",
+      "CAPTION_READABILITY_FAILED",
+      "CAPTION_PRIMARY_FAILED"
+    ]);
     const latestCaptionFailureMetadata = (latestCaptionFailureLog?.metadata ?? {}) as Record<string, unknown>;
     if (
       captionStatus === "created" &&
@@ -685,6 +691,38 @@ export async function GET() {
           : typeof latestCaptionFailureMetadata.captionRetryCount === "number"
             ? latestCaptionFailureMetadata.captionRetryCount
             : null;
+    const captionValidationRule =
+      typeof latestCaptionMetadata.captionValidationRule === "string"
+        ? String(latestCaptionMetadata.captionValidationRule)
+        : typeof latestCaptionFallbackMetadata.captionValidationRule === "string"
+          ? String(latestCaptionFallbackMetadata.captionValidationRule)
+          : typeof latestCaptionFailureMetadata.captionValidationRule === "string"
+            ? String(latestCaptionFailureMetadata.captionValidationRule)
+            : typeof latestCaptionFailureMetadata.matchedRule === "string"
+              ? String(latestCaptionFailureMetadata.matchedRule)
+              : null;
+    const captionValidationReason =
+      typeof latestCaptionMetadata.captionValidationReason === "string"
+        ? String(latestCaptionMetadata.captionValidationReason)
+        : typeof latestCaptionFallbackMetadata.captionValidationReason === "string"
+          ? String(latestCaptionFallbackMetadata.captionValidationReason)
+          : typeof latestCaptionFailureMetadata.captionValidationReason === "string"
+            ? String(latestCaptionFailureMetadata.captionValidationReason)
+            : typeof latestCaptionFailureMetadata.reason === "string"
+              ? String(latestCaptionFailureMetadata.reason)
+              : null;
+    const captionOffendingText =
+      typeof latestCaptionMetadata.offendingText === "string"
+        ? String(latestCaptionMetadata.offendingText)
+        : typeof latestCaptionFallbackMetadata.offendingText === "string"
+          ? String(latestCaptionFallbackMetadata.offendingText)
+          : typeof latestCaptionFailureMetadata.offendingText === "string"
+            ? String(latestCaptionFailureMetadata.offendingText)
+            : null;
+    const captionFallbackUsed =
+      Boolean(latestCaptionFallbackLog) ||
+      latestCaptionMetadata.captionStatus === "fallback_created" ||
+      captionStatus === "fallback_created";
     const latestImageRequestLog = getLatestStageLog(runStageLogs, [
       "OPENAI_IMAGE_REQUEST_END",
       "OPENAI_IMAGE_REQUEST_FAILED",
@@ -1072,6 +1110,10 @@ export async function GET() {
       captionLastError: captionLastError ? sanitizeLegacyMessage(captionLastError) : null,
       captionProvider: captionProvider ? sanitizeLegacyMessage(captionProvider) : null,
       captionRetryCount: captionRetryCount !== null && Number.isFinite(captionRetryCount) ? captionRetryCount : null,
+      captionValidationRule: captionValidationRule ? sanitizeLegacyMessage(captionValidationRule) : null,
+      captionValidationReason: captionValidationReason ? sanitizeLegacyMessage(captionValidationReason) : null,
+      offendingText: captionOffendingText ? sanitizeLegacyMessage(captionOffendingText) : null,
+      fallbackUsed: captionFallbackUsed,
       imageStatus,
       blobStatus,
       imageStartedAt:
