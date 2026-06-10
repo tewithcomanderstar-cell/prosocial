@@ -12,7 +12,7 @@ import {
 import { DEFAULT_SHOPEE_CATEGORY, normalizeShopeeCategories, normalizeShopeeCategory } from "@/lib/shopee-categories";
 
 const querySchema = z.object({
-  sourceTag: z.enum(["trending", "best_selling", "top_search", "best_roi", "manual", "all_products"]).default("trending"),
+  sourceTag: z.enum(["trending", "best_selling", "top_search", "best_roi", "manual", "all_products", "sold_500_plus", "sold_1000_plus", "sold_1500_plus", "sold_2000_plus"]).default("trending"),
   keyword: z.string().optional(),
   category: z.string().default(DEFAULT_SHOPEE_CATEGORY),
   categories: z.array(z.string()).default([]),
@@ -20,8 +20,18 @@ const querySchema = z.object({
 });
 
 function parseSourceTag(value: string | null): ShopeeSourceTag {
-  const allowed: ShopeeSourceTag[] = ["trending", "best_selling", "top_search", "best_roi", "manual", "all_products"];
+  const allowed: ShopeeSourceTag[] = ["trending", "best_selling", "top_search", "best_roi", "manual", "all_products", "sold_500_plus", "sold_1000_plus", "sold_1500_plus", "sold_2000_plus"];
   return allowed.includes(value as ShopeeSourceTag) ? (value as ShopeeSourceTag) : "trending";
+}
+
+function getSoldThreshold(sourceTag: ShopeeSourceTag) {
+  const thresholds: Partial<Record<ShopeeSourceTag, number>> = {
+    sold_500_plus: 500,
+    sold_1000_plus: 1000,
+    sold_1500_plus: 1500,
+    sold_2000_plus: 2000
+  };
+  return thresholds[sourceTag] ?? 0;
 }
 
 async function fetchProductsForCategories(input: {
@@ -44,13 +54,15 @@ async function fetchProductsForCategories(input: {
       "internal_api"
     );
   }
-  if (input.sourceTag === "all_products") {
-    return fetchShopeeAllProductsForSelectedCategories({
+  const soldThreshold = getSoldThreshold(input.sourceTag);
+  if (input.sourceTag === "all_products" || soldThreshold > 0) {
+    const products = await fetchShopeeAllProductsForSelectedCategories({
       userId: input.userId,
       selectedCategoryIds: categories,
       limit: input.limit,
       randomSeed: `${categories.join(",")}:${Date.now()}`
     });
+    return soldThreshold > 0 ? products.filter((product) => (product.salesCount ?? 0) >= soldThreshold) : products;
   }
 
   for (const category of categories) {

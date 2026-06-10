@@ -19,7 +19,7 @@ type LeanAutoPostConfig = {
   targetPageIds: string[];
   intervalMinutes: number;
   contentSource?: "shopee-affiliate" | "google-drive";
-  shopeeSourceTag?: "trending" | "best_selling" | "top_search" | "best_roi" | "manual" | "all_products";
+  shopeeSourceTag?: "trending" | "best_selling" | "top_search" | "best_roi" | "manual" | "all_products" | "sold_500_plus" | "sold_1000_plus" | "sold_1500_plus" | "sold_2000_plus";
   shopeeKeyword?: string;
   shopeeCategory?: string;
   shopeeCategories?: string[];

@@ -35,10 +35,26 @@ import { ProductPostHistory } from "@/models/ProductPostHistory";
 import { ShopeeProductReservation } from "@/models/ShopeeProductReservation";
 import { ShopeeProduct } from "@/models/ShopeeProduct";
 
-export type ShopeeSourceTag = "trending" | "best_selling" | "top_search" | "best_roi" | "manual" | "all_products";
+export type ShopeeSourceTag =
+  | "trending"
+  | "best_selling"
+  | "top_search"
+  | "best_roi"
+  | "manual"
+  | "all_products"
+  | "sold_500_plus"
+  | "sold_1000_plus"
+  | "sold_1500_plus"
+  | "sold_2000_plus";
 export type ShopeeCaptionStyle = "soft_sell" | "urgency" | "problem_solution" | "review_style" | "deal_alert" | "lifestyle";
 
 export type ShopeeProductIntelligence = {
+  productId: string;
+  itemId: string;
+  shopId: string;
+  canonicalProductKey: string;
+  productNameThai: string;
+  productNameOriginal: string;
   productName: string;
   brand: string;
   category: string;
@@ -49,6 +65,11 @@ export type ShopeeProductIntelligence = {
   keyBenefits: string[];
   uniqueSellingPoints: string[];
   productFacts: string[];
+  imageProductSummary: string;
+  price: number;
+  soldCount: number;
+  shopName: string;
+  confidenceScore: number;
   confidence: number;
   source: "text" | "vision_rescue" | "merged";
   imageCount: number;
@@ -70,6 +91,12 @@ const OPENAI_IMAGE_MAX_ATTEMPTS = 2;
 const VISION_RESCUE_TIMEOUT_MS = 30_000;
 const SHOPEE_REPOST_COOLDOWN_HOURS = Math.max(1, Number(process.env.SHOPEE_REPOST_COOLDOWN_HOURS ?? "48"));
 const SHOPEE_PRODUCT_RESERVATION_TTL_MS = 30 * 60 * 1000;
+const SHOPEE_SOLD_SOURCE_THRESHOLDS: Partial<Record<ShopeeSourceTag, number>> = {
+  sold_500_plus: 500,
+  sold_1000_plus: 1000,
+  sold_1500_plus: 1500,
+  sold_2000_plus: 2000
+};
 const AUTO_POST_SLOW_STAGE_WARNING_MS = 30_000;
 const SHOPEE_ACTION_LOG_TIMEOUT_MS = Math.max(
   500,
@@ -598,6 +625,10 @@ function getShopeeAffiliateListType(sourceTag?: ShopeeSourceTag) {
       return 3;
     case "manual":
     case "all_products":
+    case "sold_500_plus":
+    case "sold_1000_plus":
+    case "sold_1500_plus":
+    case "sold_2000_plus":
       return 0;
     case "trending":
     default:
@@ -1035,7 +1066,9 @@ function mapExternalProduct(sourceTag: ShopeeSourceTag, options: { sourceApiSign
       productUrl: String(item.product_url ?? item.url ?? item.productUrl ?? item.productLink ?? ""),
       affiliateUrl: item.affiliate_url || item.offerLink ? String(item.affiliate_url ?? item.offerLink) : undefined,
       category: String(item.category ?? item.categoryName ?? "General"),
-      salesCount: item.sales_count === undefined && item.sales === undefined ? undefined : Number(item.sales_count ?? item.sales),
+      salesCount: item.sales_count === undefined && item.sales === undefined && item.sold_count === undefined && item.sold === undefined && item.historical_sold === undefined
+        ? undefined
+        : Number(item.sales_count ?? item.sales ?? item.sold_count ?? item.sold ?? item.historical_sold),
       reviewCount: item.review_count === undefined ? undefined : Number(item.review_count),
       shopName: item.shop_name === undefined && item.shopName === undefined ? undefined : String(item.shop_name ?? item.shopName),
       rating: item.rating === undefined && item.ratingStar === undefined ? undefined : Number(item.rating ?? item.ratingStar),
@@ -1722,8 +1755,32 @@ function assertRecognizedShopeeProductInsight(product: ShopeeProductRecord) {
 }
 
 export function getShopeeCaptionProductName(productName?: string) {
+  const slugThaiName = getShopeeNaturalThaiProductNameFromSlug(productName);
+  if (slugThaiName) return slugThaiName;
   const cleaned = cleanShopeeProductTitleForContent(productName);
+  const cleanedSlugThaiName = getShopeeNaturalThaiProductNameFromSlug(cleaned);
+  if (cleanedSlugThaiName) return cleanedSlugThaiName;
   return getShopeeShortReviewProductName(cleaned || productName || TH.defaultProductName);
+}
+
+function getShopeeNaturalThaiProductNameFromSlug(value?: string) {
+  const normalized = normalizeTextEncoding(value ?? "").trim().toLowerCase();
+  const compact = normalized.replace(/[\s-]+/g, "_").replace(/^#+|#+$/g, "");
+  const slugMap: Record<string, string> = {
+    waterproof_tablecloth: "ผ้าปูโต๊ะกันน้ำ",
+    tablecloth: "ผ้าปูโต๊ะ",
+    scented_candle: "เทียนหอม",
+    aroma_candle: "เทียนหอม",
+    candle: "เทียนหอม",
+    travel_pillow: "หมอนรองคอเดินทาง",
+    sport_shirt: "เสื้อกีฬา",
+    drinkware: "แก้วน้ำ",
+    thermal_cup: "แก้วเก็บอุณหภูมิ",
+    water_filter: "เครื่องกรองน้ำ",
+    skincare: "สกินแคร์",
+    beauty_tool: "อุปกรณ์ความงาม"
+  };
+  return slugMap[compact] ?? "";
 }
 
 const SHOPEE_PRODUCT_ENTITY_HINT_PATTERN =
@@ -3511,7 +3568,7 @@ function assertValidShopeeProductUnderstanding(understanding: ShopeeProductUnder
 }
 
 const SHOPEE_FORBIDDEN_PRODUCT_INTELLIGENCE_PHRASE_PATTERN =
-  /ใช้ตามลักษณะสินค้าที่ระบุ|ใช้งานได้หลากหลาย|เหมาะสำหรับทุกเพศทุกวัย|ใช้ได้ตรงกับจุดประสงค์มากขึ้น|เลือกใช้ได้ตรงกับประเภทสินค้า|เหมาะกับคนที่กำลังมองหาใช้งานจริง/iu;
+  /ใช้ตามลักษณะสินค้าที่ระบุ|ดูรายละเอียดให้ตรงกับการใช้งานที่ต้องการ|ใช้งานได้หลากหลาย|เหมาะสำหรับทุกเพศทุกวัย|ใช้ได้ตรงกับจุดประสงค์มากขึ้น|เลือกใช้ได้ตรงกับประเภทสินค้า|เหมาะกับคนที่กำลังมองหา\s*ใช้งานจริง|สินค้าคุณภาพดี|คุ้มค่า\s*คุ้มราคา/iu;
 
 function getShopeeProductIntelligenceFromProduct(product: ShopeeProductRecord) {
   const intelligence = (product as ShopeeProductRecord & { productIntelligence?: ShopeeProductIntelligence }).productIntelligence;
@@ -3606,8 +3663,23 @@ function buildShopeeProductIntelligence(input: {
     (requiredPresent >= 4 ? 5 : -20) -
     genericPenalty
   )));
+  const productNameOriginal = product.productName || understanding.rawTitle || understanding.cleanedTitle;
+  const productNameThai = getShopeeCaptionProductName(
+    understanding.productEntity || understanding.cleanedTitle || productNameOriginal
+  );
+  const imageProductSummary = uniqueShopeeIntelligenceLines([
+    understanding.visualEvidence?.join(" ") ?? "",
+    getShopeeProductImageSourceText(product),
+    imageUrls.length ? `${productNameThai} จากรูปสินค้า ${imageUrls.length} รูป` : ""
+  ], product, 3).join(" | ");
   return {
-    productName: understanding.productEntity || understanding.cleanedTitle || product.productName,
+    productId: product.productId,
+    itemId: product.itemId,
+    shopId: product.shopId,
+    canonicalProductKey: getShopeeCanonicalProductKey(product),
+    productNameThai,
+    productNameOriginal,
+    productName: productNameThai,
     brand: understanding.brand ?? "",
     category: product.category || "",
     productType: understanding.productType,
@@ -3617,6 +3689,11 @@ function buildShopeeProductIntelligence(input: {
     keyBenefits,
     uniqueSellingPoints,
     productFacts,
+    imageProductSummary,
+    price: getEffectiveProductPrice(product),
+    soldCount: toFiniteNumber(product.salesCount),
+    shopName: product.shopName ?? "",
+    confidenceScore: confidence,
     confidence,
     source: understanding.source,
     imageCount: imageUrls.length,
@@ -3646,17 +3723,21 @@ function getShopeeProductIntelligenceFailureReasons(intelligence: ShopeeProductI
 function assertValidShopeeProductIntelligence(product: ShopeeProductRecord, intelligence: ShopeeProductIntelligence) {
   const failureReasons = getShopeeProductIntelligenceFailureReasons(intelligence);
   if (!failureReasons.length) return;
+  const lowConfidence = failureReasons.includes("low_product_intelligence_confidence");
   const payload = {
     productId: product.productId,
     productName: product.productName,
     productIntelligence: intelligence,
     failureReasons
   };
+  if (lowConfidence) {
+    console.warn("[PRODUCT_UNDERSTANDING_LOW_CONFIDENCE]", payload);
+  }
   console.warn("[PRODUCT_INTELLIGENCE_FAILED]", payload);
   throw new ShopeeProviderError(
-    `PRODUCT_INTELLIGENCE_FAILED for ${product.productId}: ${failureReasons.join(", ")}`,
+    `${lowConfidence ? "PRODUCT_UNDERSTANDING_LOW_CONFIDENCE" : "PRODUCT_INTELLIGENCE_FAILED"} for ${product.productId}: ${failureReasons.join(", ")}`,
     422,
-    "product_intelligence_failed",
+    lowConfidence ? "product_understanding_low_confidence" : "product_intelligence_failed",
     "internal_api",
     JSON.stringify(payload)
   );
@@ -3665,7 +3746,9 @@ function assertValidShopeeProductIntelligence(product: ShopeeProductRecord, inte
 function applyShopeeProductIntelligence(product: ShopeeProductRecord, intelligence: ShopeeProductIntelligence): ShopeeProductRecord {
   const intelligenceDescription = [
     product.productDescription,
-    `Product Intelligence: ${intelligence.productName}`,
+    `Product Intelligence: ${intelligence.productNameThai || intelligence.productName}`,
+    `Original product name: ${intelligence.productNameOriginal}`,
+    `Canonical product key: ${intelligence.canonicalProductKey}`,
     `Product type: ${intelligence.productType}`,
     `Main purpose: ${intelligence.mainPurpose}`,
     `Target customer: ${intelligence.targetCustomer}`,
@@ -3676,7 +3759,7 @@ function applyShopeeProductIntelligence(product: ShopeeProductRecord, intelligen
   ].filter(Boolean).join("\n");
   return {
     ...product,
-    productName: intelligence.productName || product.productName,
+    productName: intelligence.productNameThai || intelligence.productName || product.productName,
     productDescription: compactProductText(intelligenceDescription, 1600),
     category: [intelligence.category, intelligence.productType].filter(Boolean).join(" / ") || product.category,
     productIntelligence: intelligence
@@ -3789,6 +3872,7 @@ function getShopeeCaptionImageProductMismatch(input: {
     input.imagePromptSet.prompts.map((item) => item.prompt).join(" ")
   ].join(" "));
   const intelligenceTokens = [
+    input.productIntelligence.productNameThai,
     input.productIntelligence.productName,
     input.productIntelligence.productType,
     input.productIntelligence.mainPurpose,
@@ -4960,30 +5044,51 @@ function buildDeterministicShopeeFallbackCaption(input: {
 }) {
   const { product, storyboard, affiliateLink } = input;
   const productIntelligence = getShopeeProductIntelligenceFromProduct(product);
-  const productLabel = getShopeeStoryboardProductLabel(storyboard);
-  const action = compactProductText(productIntelligence?.mainPurpose || getShopeeEntityActionText(storyboard), 64);
-  const context = compactProductText(productIntelligence?.usageScenarios[0] || getShopeeEntityContextText(storyboard), 74);
-  const opening = `${getShopeeStoryboardEmoji(storyboard.productType)} เห็น${productLabel}แล้วนึกถึงตอนต้อง${action}`;
-  const naturalIntro = [
-    productIntelligence?.targetCustomer
-      ? `${productLabel}ตัวนี้เหมาะกับ${productIntelligence.targetCustomer}ที่ต้อง${action}`
-      : `${productLabel}ตัวนี้เหมาะกับคนที่ต้อง${action}`,
-    context ? `ใช้กับ${context}ได้ชัดเจนกว่าเลือกจากหมวดกว้าง ๆ` : "",
-    compactProductText(formatShopeeStoryboardPriceLine(product, storyboard), 90)
-  ].filter(Boolean);
-  const bullets = buildShopeeFallbackCaptionBullets(storyboard, product);
+  const productLabel = compactProductText(
+    productIntelligence?.productNameThai ||
+    productIntelligence?.productName ||
+    getShopeeStoryboardProductLabel(storyboard),
+    72
+  );
+  const action = compactProductText(productIntelligence?.mainPurpose || getShopeeEntityActionText(storyboard), 82);
+  const context = compactProductText(productIntelligence?.usageScenarios[0] || getShopeeEntityContextText(storyboard), 90);
+  const targetCustomer = compactProductText(productIntelligence?.targetCustomer || storyboard.targetUser || "คนที่มีโจทย์ใช้งานแบบนี้", 92);
+  const benefitPool = dedupeCaptionBenefitLines([
+    ...(productIntelligence?.keyBenefits ?? []),
+    ...(productIntelligence?.uniqueSellingPoints ?? []),
+    storyboard.dailyBenefit,
+    storyboard.keySellingPoint,
+    storyboard.problemSolved,
+    action,
+    context
+  ])
+    .map((line) => compactProductText(humanizeShopeeStoryboardCaptionLine(line, storyboard), 82).replace(/[.!。?？]+$/u, ""))
+    .filter(Boolean);
+  const [benefit1, benefit2, benefit3, benefit4] = [
+    benefitPool[0] || action || `${productLabel}ช่วยตอบโจทย์การใช้งานนี้ได้ตรงขึ้น`,
+    benefitPool[1] || storyboard.dailyBenefit || `เลือกใช้กับ${context || "สถานการณ์จริง"}ได้`,
+    context || benefitPool[2] || storyboard.realUsageScenario || `เหมาะกับการใช้${action}`,
+    benefitPool[3] || storyboard.purchaseReason || `ช่วยให้ดูแล${productLabel}หรือพื้นที่ใช้งานได้ง่ายขึ้น`
+  ];
+  const priceLine = formatShopeeStoryboardPriceLine(product, storyboard).replace(/^💰\s*/u, "");
   const caption = [
-    opening,
+    productLabel,
     "",
-    naturalIntro.join(" "),
+    `${action}${context ? ` ใน${context}` : ""} ✅`,
     "",
-    ...bullets,
+    `✅ ${benefit1}`,
+    `✨ ${benefit2}`,
+    `👍 ${benefit3}`,
+    `📌 ${benefit4}`,
     "",
-    `เหมาะกับคนที่กำลังมองหา${productLabel} ใช้งานจริงครับ`,
+    `เหมาะกับ${targetCustomer}`,
     "",
-    buildShopeeStoryboardCtaLine(storyboard),
+    `💰 ${priceLine}`,
+    "🛒 ดูรายละเอียดได้ที่ลิงก์ด้านล่าง",
     "",
-    formatShopeeShortLinkLine(affiliateLink)
+    formatShopeeShortLinkLine(affiliateLink),
+    "",
+    getShopeeStoryboardHashtags(product, storyboard).join(" ")
   ].join("\n").replace(/\n{3,}/g, "\n\n").trim();
   return normalizeShopeeCaptionLinkLine(caption, affiliateLink);
 }
@@ -5087,6 +5192,8 @@ const SHOPEE_CAPTION_METADATA_LINE_PATTERN =
   /^\s*(?:"?(?:productId|shopId|itemId|categoryId|metadata|usageContext|mainUseCase|targetAudience|productEntity|productType|realUsageScenario|dailyBenefit|keySellingPoint)"?\s*[:=]|(?:system|assistant|developer|debug)\s*:)/iu;
 const SHOPEE_CAPTION_JSON_METADATA_PATTERN =
   /^\s*[{[][\s\S]*(?:productId|shopId|itemId|categoryId|metadata|mainUseCase|productEntity|productType)[\s\S]*[}\]]\s*[,;]?\s*$/iu;
+const SHOPEE_FORBIDDEN_CAPTION_SOURCE_LANGUAGE_PATTERN =
+  /จากรูปสินค้า|จากภาพสินค้า|จากชื่อสินค้า|จากข้อมูลสินค้า|จากข้อมูลที่ระบุ|เห็นได้จากภาพ|ใช้งานได้จากชื่อสินค้า|เหมาะสำหรับจากชื่อสินค้า|จากรายละเอียดสินค้า|จากสเปกสินค้า|ตามข้อมูลสินค้า|ตามภาพสินค้า|ตามข้อมูล|ตามภาพ/iu;
 
 function normalizeShopeeEntityMentionText(value?: string) {
   return normalizeTextEncoding(value ?? "")
@@ -5344,7 +5451,10 @@ function validateStoryboardAffiliateCaption(caption: string, storyboard: ShopeeP
   const normalized = repairStoryboardAffiliateCaption(caption, affiliateLink, storyboard);
   const failedRules: StoryboardCaptionFailedRule[] = [];
   const lines = normalized.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const forbidden = /จากรูปสินค้า|จากภาพสินค้า|จากชื่อสินค้า|จากข้อมูลสินค้า|จากข้อมูลที่ระบุ|เห็นได้จากภาพ|ใช้งานได้จากชื่อสินค้า|เหมาะสำหรับจากชื่อสินค้า|จากรายละเอียดสินค้า|จากสเปกสินค้า|ตามข้อมูลสินค้า|ตามภาพสินค้า|ตามข้อมูล|ตามภาพ/iu;
+  const forbidden = new RegExp(
+    `${SHOPEE_FORBIDDEN_CAPTION_SOURCE_LANGUAGE_PATTERN.source}|${SHOPEE_FORBIDDEN_PRODUCT_INTELLIGENCE_PHRASE_PATTERN.source}`,
+    "iu"
+  );
   const waterFilterGenericForbidden = /ของใช้ในบ้านหรือมุมใช้งาน|มุมใช้งานยังไม่ลงตัว|หยิบใช้เครื่องกรองน้ำ|ช่วงใช้งานในชีวิตประจำวัน|ช่วยให้บ้านดูใช้งานง่าย|ช่วยให้หยิบใช้เครื่องกรองน้ำ/iu;
   if (!storyboardValidationDisabledRulesLogged) {
     console.info("[STORYBOARD_VALIDATION_RULES_DISABLED]", DISABLED_STORYBOARD_PRESENTATION_VALIDATION_RULES);
@@ -5535,17 +5645,26 @@ function buildShopeeStoryboardCaptionResult(input: {
 }): ShopeeStoryboardCaptionResult {
   const { product, storyboard, affiliateLink } = input;
   const promptInput = getShopeeCaptionPromptInput({ product, storyboard, affiliateLink });
+  const productIntelligence = getShopeeProductIntelligenceFromProduct(product);
   const captionInputJson = {
     jobId: input.jobId ?? "",
     productId: product.productId,
+    canonicalProductKey: getShopeeCanonicalProductKey(product),
     productName: product.productName,
+    productNameThai: productIntelligence?.productNameThai ?? product.productName,
+    productType: productIntelligence?.productType ?? storyboard.productType,
+    mainPurpose: productIntelligence?.mainPurpose ?? storyboard.mainUseCase,
+    targetCustomer: productIntelligence?.targetCustomer ?? storyboard.targetUser,
+    usageScenarios: productIntelligence?.usageScenarios ?? [storyboard.realUsageScenario].filter(Boolean),
+    keyBenefitsFromIntelligence: productIntelligence?.keyBenefits ?? [],
+    price: productIntelligence?.price ?? getEffectiveProductPrice(product),
     productDescription: promptInput.productDescription,
     keySellingPoints: promptInput.keySellingPoints,
     affiliateLink,
     promptLength: getShopeeCaptionPromptLength(promptInput),
     storyboardSummary: promptInput.storyboardSummary,
     productEntity: storyboard.productEntity,
-    productType: storyboard.productType,
+    storyboardProductType: storyboard.productType,
     mainUseCase: storyboard.mainUseCase,
     targetAudience: storyboard.targetUser,
     problemSolved: storyboard.problemSolved,
@@ -6471,6 +6590,38 @@ export function scoreShopeeProductForSource(input: ShopeeSourceScoreInput): Shop
     };
   }
 
+  if (isShopeeSoldThresholdSource(sourceTag)) {
+    const threshold = getShopeeSoldThresholdForSource(sourceTag);
+    const soldThresholdScore = sales >= threshold ? 1 : 0;
+    const soldScore =
+      (salesScore * 0.65) +
+      (reviewScore * 0.15) +
+      (ratingScore * 0.15) +
+      (productQualityScore * 0.05);
+    const breakdown = {
+      ...baseBreakdown,
+      selectedSoldThreshold: threshold,
+      soldCount: sales,
+      soldThresholdScore,
+      formula: "salesScore*0.65 + reviewScore*0.15 + ratingScore*0.15 + productQualityScore*0.05"
+    };
+    return {
+      sourceSpecificScore: roundScore(soldScore),
+      scoreBreakdown: breakdown,
+      sortPrimary: sales,
+      sortSecondary: soldScore,
+      sortTertiary: reviewCount,
+      topCandidateLimit: 5,
+      score: buildSourceProductScore({
+        product,
+        sourceTag,
+        score: soldScore,
+        reason: `sold_threshold_score prioritizes products sold ${threshold}+`,
+        breakdown
+      })
+    };
+  }
+
   if (sourceTag === "all_products") {
     const allProductsScore =
       (productQualityScore * 0.35) +
@@ -6795,6 +6946,18 @@ function getRotatedShopeeCategories(categories: string[], seed = Math.random()) 
   return [...categories.slice(offset), ...categories.slice(0, offset)];
 }
 
+function getShopeeSoldThresholdForSource(sourceTag?: ShopeeSourceTag) {
+  return SHOPEE_SOLD_SOURCE_THRESHOLDS[sourceTag ?? "trending"] ?? 0;
+}
+
+function isShopeeSoldThresholdSource(sourceTag?: ShopeeSourceTag) {
+  return getShopeeSoldThresholdForSource(sourceTag) > 0;
+}
+
+function getEffectiveShopeeMinSoldCount(sourceTag?: ShopeeSourceTag, configuredMinSoldCount = 0) {
+  return Math.max(configuredMinSoldCount, getShopeeSoldThresholdForSource(sourceTag), Number(process.env.SHOPEE_MIN_SOLD_COUNT ?? "0") || 0);
+}
+
 function getShopeeProductFilterRejectionReason(input: {
   product: ShopeeProductRecord;
   excludedProductIds: Set<string>;
@@ -6808,6 +6971,7 @@ function getShopeeProductFilterRejectionReason(input: {
   maxPrice?: number;
   minRating?: number;
   minSales?: number;
+  minSoldCount?: number;
   minDiscountPercent?: number;
 }) {
   const productId = String(input.product.productId);
@@ -6816,9 +6980,6 @@ function getShopeeProductFilterRejectionReason(input: {
   const effectivePrice = getEffectiveProductPrice(input.product);
   if (input.selectedProductIds.has(productId) || input.selectedProductIdentities.has(identity)) return "already_selected_in_request";
   if (input.excludedProductIds.has(productId)) return "excluded_product_id";
-  if (canonicalProductKey && input.reservedProductKeys?.has(canonicalProductKey)) return "reserved_product";
-  if (canonicalProductKey && input.recentProductKeys?.has(canonicalProductKey)) return "duplicate_product_48h";
-  if (input.dailyLocks.productIds.has(productId) || input.dailyLocks.identities.has(identity)) return "already_posted_today";
   if (!input.product.productImageUrl && !input.product.productImageUrls?.length) return "missing_image";
   if (!input.product.productUrl && !input.product.affiliateUrl) return "missing_product_url";
   if (input.product.stock !== undefined && input.product.stock !== null && toFiniteNumber(input.product.stock) <= 0) return "out_of_stock";
@@ -6827,7 +6988,11 @@ function getShopeeProductFilterRejectionReason(input: {
   if ((input.maxPrice ?? 0) > 0 && effectivePrice > (input.maxPrice ?? 0)) return "above_max_price";
   if ((input.minRating ?? 0) > 0 && (input.product.rating ?? 0) < (input.minRating ?? 0)) return "below_min_rating";
   if ((input.minSales ?? 0) > 0 && (input.product.salesCount ?? 0) < (input.minSales ?? 0)) return "below_min_sales";
+  if ((input.minSoldCount ?? 0) > 0 && (input.product.salesCount ?? 0) < (input.minSoldCount ?? 0)) return "below_min_sold_count";
   if ((input.minDiscountPercent ?? 0) > 0 && (input.product.discountPercent ?? 0) < (input.minDiscountPercent ?? 0)) return "below_min_discount";
+  if (canonicalProductKey && input.recentProductKeys?.has(canonicalProductKey)) return "duplicate_product_48h";
+  if (canonicalProductKey && input.reservedProductKeys?.has(canonicalProductKey)) return "reserved_product";
+  if (input.dailyLocks.productIds.has(productId) || input.dailyLocks.identities.has(identity)) return "already_posted_today";
   return null;
 }
 
@@ -6872,6 +7037,7 @@ const PRODUCT_SELECTION_REJECTION_REASONS = [
   "above_max_price",
   "below_min_rating",
   "below_min_sales",
+  "below_min_sold_count",
   "below_min_discount",
   "already_posted_today",
   "duplicate_product_48h",
@@ -6894,6 +7060,7 @@ type ProductSelectionDiagnostics = {
   afterMaxPriceFilter: number;
   afterMinRatingFilter: number;
   afterMinSalesFilter: number;
+  afterMinSoldCountFilter: number;
   afterMinDiscountFilter: number;
   afterAlreadyPostedTodayFilter: number;
   afterRecentlyPostedFilter: number;
@@ -6906,6 +7073,10 @@ type ProductSelectionDiagnostics = {
   fallbackUsed: boolean;
   excludedRecent48h: number;
   excludedReserved: number;
+  selectedSoldThreshold: number;
+  productsAboveSoldThreshold: number;
+  rejectedBelowSoldCount: number;
+  sampleRejectedBelowSoldCount: Array<Record<string, unknown>>;
 };
 
 function createProductSelectionDiagnostics(input: {
@@ -6915,6 +7086,7 @@ function createProductSelectionDiagnostics(input: {
   fetchedProducts: number;
   afterDedupe: number;
   products: ShopeeProductRecord[];
+  selectedSoldThreshold?: number;
 }): ProductSelectionDiagnostics {
   const rejectCounts = Object.fromEntries(PRODUCT_SELECTION_REJECTION_REASONS.map((reason) => [reason, 0])) as Record<string, number>;
   const productsWithSearchVolume = input.products.filter((product) => toFiniteNumber(product.searchVolume) > 0).length;
@@ -6935,6 +7107,7 @@ function createProductSelectionDiagnostics(input: {
     afterMaxPriceFilter: 0,
     afterMinRatingFilter: 0,
     afterMinSalesFilter: 0,
+    afterMinSoldCountFilter: 0,
     afterMinDiscountFilter: 0,
     afterAlreadyPostedTodayFilter: 0,
     afterRecentlyPostedFilter: 0,
@@ -6946,6 +7119,12 @@ function createProductSelectionDiagnostics(input: {
     fallbackUsed: false,
     excludedRecent48h: 0,
     excludedReserved: 0,
+    selectedSoldThreshold: input.selectedSoldThreshold ?? 0,
+    productsAboveSoldThreshold: input.selectedSoldThreshold
+      ? input.products.filter((product) => (product.salesCount ?? 0) >= (input.selectedSoldThreshold ?? 0)).length
+      : input.afterDedupe,
+    rejectedBelowSoldCount: 0,
+    sampleRejectedBelowSoldCount: [],
     sourceDataQuality: {
       source: input.source,
       productsWithSearchVolume,
@@ -6969,6 +7148,7 @@ function recordProductSelectionStaticFunnel(input: {
   maxPrice?: number;
   minRating?: number;
   minSales?: number;
+  minSoldCount?: number;
   minDiscountPercent?: number;
 }) {
   const productId = String(input.product.productId);
@@ -6990,6 +7170,8 @@ function recordProductSelectionStaticFunnel(input: {
   input.diagnostics.afterMinRatingFilter += 1;
   if ((input.minSales ?? 0) > 0 && (input.product.salesCount ?? 0) < (input.minSales ?? 0)) return;
   input.diagnostics.afterMinSalesFilter += 1;
+  if ((input.minSoldCount ?? 0) > 0 && (input.product.salesCount ?? 0) < (input.minSoldCount ?? 0)) return;
+  input.diagnostics.afterMinSoldCountFilter += 1;
   if ((input.minDiscountPercent ?? 0) > 0 && (input.product.discountPercent ?? 0) < (input.minDiscountPercent ?? 0)) return;
   input.diagnostics.afterMinDiscountFilter += 1;
   if (input.diagnostics.rejectCounts.excluded_product_id !== undefined) {
@@ -7019,6 +7201,25 @@ function recordProductSelectionRejection(input: {
       commissionRate: input.product.commissionRate ?? 0,
       sourceScore: input.scoreResult.sourceSpecificScore,
       rejectReason: input.rejectReason
+    });
+  }
+  if (input.rejectReason === "below_min_sold_count") {
+    input.diagnostics.rejectedBelowSoldCount += 1;
+    if (input.diagnostics.sampleRejectedBelowSoldCount.length < 20) {
+      input.diagnostics.sampleRejectedBelowSoldCount.push({
+        productId: input.product.productId,
+        title: input.product.productName,
+        soldCount: input.product.salesCount ?? 0,
+        selectedSoldThreshold: input.diagnostics.selectedSoldThreshold,
+        source: input.sourceTag
+      });
+    }
+    console.info("PRODUCT_REJECTED_BELOW_MIN_SOLD", {
+      source: input.sourceTag,
+      productId: input.product.productId,
+      productName: input.product.productName,
+      soldCount: input.product.salesCount ?? 0,
+      selectedSoldThreshold: input.diagnostics.selectedSoldThreshold
     });
   }
   if (input.rejectReason === "below_min_source_score" && input.diagnostics.lowScoreBreakdowns.length < 50) {
@@ -7057,12 +7258,16 @@ function logProductSelectionDiagnostics(diagnostics: ProductSelectionDiagnostics
     afterMaxPriceFilter: diagnostics.afterMaxPriceFilter,
     afterMinRatingFilter: diagnostics.afterMinRatingFilter,
     afterMinSalesFilter: diagnostics.afterMinSalesFilter,
+    afterMinSoldCountFilter: diagnostics.afterMinSoldCountFilter,
     afterMinDiscountFilter: diagnostics.afterMinDiscountFilter,
     afterAlreadyPostedTodayFilter: diagnostics.afterAlreadyPostedTodayFilter,
     afterRecentlyPostedFilter: diagnostics.afterRecentlyPostedFilter,
     afterSourceScoreFilter: diagnostics.afterSourceScoreFilter,
     excludedRecent48h: diagnostics.excludedRecent48h,
     excludedReserved: diagnostics.excludedReserved,
+    selectedSoldThreshold: diagnostics.selectedSoldThreshold,
+    productsAboveSoldThreshold: diagnostics.productsAboveSoldThreshold,
+    rejectedBelowSoldCount: diagnostics.rejectedBelowSoldCount,
     finalEligibleProducts: diagnostics.finalEligibleProducts
   });
   console.info("PRODUCT_REJECTION_SUMMARY", {
@@ -7072,6 +7277,14 @@ function logProductSelectionDiagnostics(diagnostics: ProductSelectionDiagnostics
   console.info("TOP_REJECTED_PRODUCTS", diagnostics.topRejectedProducts);
   console.info("SOURCE_SCORE_BREAKDOWN", diagnostics.lowScoreBreakdowns);
   console.info("SOURCE_DATA_QUALITY", diagnostics.sourceDataQuality);
+  console.info("SOLD_COUNT_FILTER_APPLIED", {
+    source: diagnostics.source,
+    selectedSoldThreshold: diagnostics.selectedSoldThreshold,
+    fetchedProducts: diagnostics.fetchedProducts,
+    productsAboveSoldThreshold: diagnostics.productsAboveSoldThreshold,
+    rejectedBelowSoldCount: diagnostics.rejectedBelowSoldCount,
+    sampleRejectedBelowSoldCount: diagnostics.sampleRejectedBelowSoldCount
+  });
   const sortedRejects = Object.entries(diagnostics.rejectCounts).sort((left, right) => right[1] - left[1]);
   const [primaryFailureReason = "none", primaryFailureCount = 0] = sortedRejects[0] ?? [];
   const totalRejected = Object.values(diagnostics.rejectCounts).reduce((sum, count) => sum + count, 0);
@@ -7085,6 +7298,7 @@ function logProductSelectionDiagnostics(diagnostics: ProductSelectionDiagnostics
     above_max_price: "Configured maximum price is lower than most fetched products.",
     below_min_rating: "Configured minimum rating is higher than most fetched products.",
     below_min_sales: "Configured minimum sales is higher than most fetched products.",
+    below_min_sold_count: "Selected SOLD threshold is higher than most fetched Shopee product sold counts.",
     below_min_discount: "Configured minimum discount is higher than most fetched products.",
     already_posted_today: "Daily duplicate protection is eliminating the fetched product pool.",
     duplicate_product_48h: "48-hour repost cooldown is eliminating recently published Shopee products.",
@@ -7126,12 +7340,19 @@ function getProductSelectionDiagnosticsPayload(diagnostics: ProductSelectionDiag
     sampleRejectedProducts: diagnostics.topRejectedProducts,
     appliedFilters: {
       hardRequirements: ["has_image", "has_product_url_or_affiliate_url", "not_out_of_stock", "not_blocked_category"],
+      selectedSoldThreshold: diagnostics.selectedSoldThreshold,
       strictFiltersApplied: !diagnostics.fallbackUsed,
       fallbackUsed: diagnostics.fallbackUsed
     },
     primaryFailureReason,
     percentage,
-    sourceDataQuality: diagnostics.sourceDataQuality
+    sourceDataQuality: diagnostics.sourceDataQuality,
+    soldCountDiagnostics: {
+      selectedSoldThreshold: diagnostics.selectedSoldThreshold,
+      productsAboveSoldThreshold: diagnostics.productsAboveSoldThreshold,
+      rejectedBelowSoldCount: diagnostics.rejectedBelowSoldCount,
+      sampleRejectedBelowSoldCount: diagnostics.sampleRejectedBelowSoldCount
+    }
   };
 }
 
@@ -7258,12 +7479,14 @@ export async function selectShopeeProductsForPages(input: {
   maxPrice?: number;
   minRating?: number;
   minSales?: number;
+  minSoldCount?: number;
   minDiscountPercent?: number;
   excludedProductIds?: string[];
   jobId?: string;
 }) {
   const provider = getShopeeProductProvider();
   const sourceTag = input.sourceTag ?? "trending";
+  const effectiveMinSoldCount = getEffectiveShopeeMinSoldCount(sourceTag, input.minSoldCount ?? 0);
   assertManualKeywordProvided({ sourceTag, keyword: input.keyword });
   const excludedProductIds = new Set((input.excludedProductIds ?? []).map((productId) => String(productId)).filter(Boolean));
   const recentProductKeys = await getRecentlyPostedProductKeys({ userId: input.userId, lookbackHours: SHOPEE_REPOST_COOLDOWN_HOURS });
@@ -7279,7 +7502,7 @@ export async function selectShopeeProductsForPages(input: {
   const discoveredByCategory: ShopeeProductRecord[][] = [];
   const discoveredCategoryHints = new Map<string, Set<string>>();
   const categoryFetchErrors: string[] = [];
-  if (sourceTag === "all_products") {
+  if (sourceTag === "all_products" || isShopeeSoldThresholdSource(sourceTag)) {
     const categoryProducts = await fetchShopeeAllProductsForSelectedCategories({
       userId: input.userId,
       selectedCategoryIds: discoveryCategories,
@@ -7326,8 +7549,18 @@ export async function selectShopeeProductsForPages(input: {
     keyword: input.keyword,
     fetchedProducts: discoveredByCategory.flat().length,
     afterDedupe: discovered.length,
-    products: discovered
+    products: discovered,
+    selectedSoldThreshold: effectiveMinSoldCount
   });
+  if (effectiveMinSoldCount > 0) {
+    console.info("SOLD_COUNT_FILTER_APPLIED", {
+      source: sourceTag,
+      selectedSoldThreshold: effectiveMinSoldCount,
+      fetchedProducts: selectionDiagnostics.fetchedProducts,
+      productsAboveSoldThreshold: selectionDiagnostics.productsAboveSoldThreshold,
+      rejectedBelowSoldCount: Math.max(0, selectionDiagnostics.afterDedupe - selectionDiagnostics.productsAboveSoldThreshold)
+    });
+  }
 
   const selected: Array<{ pageId: string; product: ShopeeProductRecord; score: ProductScore }> = [];
   const selectedProductIds = new Set<string>();
@@ -7357,6 +7590,7 @@ export async function selectShopeeProductsForPages(input: {
         maxPrice: input.maxPrice,
         minRating: input.minRating,
         minSales: input.minSales,
+        minSoldCount: effectiveMinSoldCount,
         minDiscountPercent: input.minDiscountPercent
       });
       const staticRejection = getShopeeProductFilterRejectionReason({
@@ -7372,6 +7606,7 @@ export async function selectShopeeProductsForPages(input: {
         maxPrice: input.maxPrice,
         minRating: input.minRating,
         minSales: input.minSales,
+        minSoldCount: effectiveMinSoldCount,
         minDiscountPercent: input.minDiscountPercent
       });
       if (staticRejection) {
@@ -7403,6 +7638,15 @@ export async function selectShopeeProductsForPages(input: {
           rejectReason: staticRejection
         });
         continue;
+      }
+      if (effectiveMinSoldCount > 0) {
+        console.info("PRODUCT_ACCEPTED_SOLD_THRESHOLD", {
+          source: sourceTag,
+          productId: product.productId,
+          productName: product.productName,
+          soldCount: product.salesCount ?? 0,
+          selectedSoldThreshold: effectiveMinSoldCount
+        });
       }
       const recentlyPosted = await wasProductRecentlyPosted(input.userId, pageId, product.productId);
       if (recentlyPosted) {
@@ -7532,6 +7776,16 @@ export async function selectShopeeProductsForPages(input: {
           });
           continue;
         }
+        if (effectiveMinSoldCount > 0 && (product.salesCount ?? 0) < effectiveMinSoldCount) {
+          recordProductSelectionRejection({
+            diagnostics: selectionDiagnostics,
+            product,
+            sourceTag,
+            scoreResult,
+            rejectReason: "below_min_sold_count"
+          });
+          continue;
+        }
         const canonicalProductKey = getShopeeCanonicalProductKey(product);
         if (canonicalProductKey && recentProductKeys.keys.has(canonicalProductKey)) {
           selectionDiagnostics.excludedRecent48h += 1;
@@ -7628,6 +7882,7 @@ export async function generateShopeeCaption(input: {
   jobId?: string;
 }) {
   const { product } = input;
+  const existingProductIntelligence = getShopeeProductIntelligenceFromProduct(product);
   const titleInfo = getShopeeCleanedProductTitleInfo(product.productName);
   let productUnderstanding = extractShopeeProductUnderstanding(product);
   const imageCount = [product.productImageUrl, ...(product.productImageUrls ?? [])].filter((url) => Boolean(url?.trim())).length;
@@ -7980,7 +8235,12 @@ export async function generateShopeeCaption(input: {
 
   const productForStoryboard: ShopeeProductRecord = {
     ...product,
-    productName: productUnderstanding.cleanedTitle || titleInfo.cleanedTitle || product.productName
+    productName: existingProductIntelligence?.productNameThai ||
+      existingProductIntelligence?.productName ||
+      productUnderstanding.productEntity ||
+      productUnderstanding.cleanedTitle ||
+      titleInfo.cleanedTitle ||
+      product.productName
   };
 
   const storyboardStartedAt = new Date();
@@ -9392,6 +9652,57 @@ export async function buildShopeePostPackage(input: {
   const imagePromptSet = buildShopeeImagePromptSet(productForPackage, input.captionStyle ?? "soft_sell");
   const imagePrompts = imagePromptSet.prompts.map((item) => item.prompt);
   const imagePrompt = imagePrompts[0] ?? buildShopeeImagePrompt(productForPackage, input.captionStyle ?? "soft_sell");
+  const captionProductId = productIntelligence.productId || productForPackage.productId;
+  const imageProductId = productForPackage.productId;
+  const captionCanonicalProductKey = productIntelligence.canonicalProductKey || getShopeeCanonicalProductKey(productForPackage);
+  const imageCanonicalProductKey = getShopeeCanonicalProductKey(productForPackage);
+  if (captionProductId !== imageProductId || captionCanonicalProductKey !== imageCanonicalProductKey) {
+    const identityMismatch = {
+      reason: "caption_image_product_identity_mismatch",
+      captionProductId,
+      imageProductId,
+      captionCanonicalProductKey,
+      imageCanonicalProductKey,
+      productNameThai: productIntelligence.productNameThai,
+      productType: productIntelligence.productType
+    };
+    const error = new ShopeeProviderError(
+      `CAPTION_IMAGE_PRODUCT_MISMATCH for ${productForPackage.productId}: product identity mismatch`,
+      422,
+      "caption_image_product_mismatch",
+      "internal_api",
+      JSON.stringify(identityMismatch)
+    );
+    await logShopeePackageStage({
+      userId: input.userId,
+      jobId: input.jobId,
+      pageId: input.pageId,
+      product: productForPackage,
+      step: "CAPTION_IMAGE_PRODUCT_MISMATCH",
+      status: "failed",
+      message: "Caption product identity does not match image product identity",
+      metadata: identityMismatch,
+      error
+    });
+    throw error;
+  }
+  await logShopeePackageStage({
+    userId: input.userId,
+    jobId: input.jobId,
+    pageId: input.pageId,
+    product: productForPackage,
+    step: "CAPTION_IMAGE_PRODUCT_MATCHED",
+    status: "success",
+    message: "Caption product identity matches image product identity",
+    metadata: {
+      captionProductId,
+      imageProductId,
+      captionCanonicalProductKey,
+      imageCanonicalProductKey,
+      productNameThai: productIntelligence.productNameThai,
+      productType: productIntelligence.productType
+    }
+  });
   const captionImageMismatch = getShopeeCaptionImageProductMismatch({
     caption,
     imagePromptSet,

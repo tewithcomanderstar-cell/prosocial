@@ -422,6 +422,7 @@ export async function GET() {
       shopeeTrackingId: "",
       shopeeBlockedCategories: [],
       shopeeCategoryPriority: [],
+      shopeeMinSoldCount: 0,
       targetPageIds: [],
       intervalMinutes: 60,
       captionStrategy: "hybrid",

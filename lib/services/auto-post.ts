@@ -47,6 +47,7 @@ type LeanAutoPostConfig = {
   shopeeMaxPrice?: number;
   shopeeMinRating?: number;
   shopeeMinSales?: number;
+  shopeeMinSoldCount?: number;
   shopeeMinDiscountPercent?: number;
   approvalMode?: boolean;
   targetPageIds: string[];
@@ -782,6 +783,8 @@ function getRetryWithNextProductReason(error: unknown) {
   }
   if (
     code === "product_understanding_failed" ||
+    code === "product_understanding_low_confidence" ||
+    code === "product_intelligence_failed" ||
     code === "storyboard_generation_failed" ||
     code === "legacy_caption_disabled" ||
     message.includes("product_understanding_failed") ||
@@ -789,11 +792,13 @@ function getRetryWithNextProductReason(error: unknown) {
     message.includes("legacy shopee caption")
   ) {
     return {
-      reason: code === "product_understanding_failed" ? "product_understanding_failed" : code === "legacy_caption_disabled" ? "legacy_caption_path_called" : "storyboard_generation_failed",
-      step: code === "product_understanding_failed" ? "PRODUCT_SKIPPED_PRODUCT_UNDERSTANDING_FAILED" : code === "legacy_caption_disabled" ? "PRODUCT_SKIPPED_LEGACY_CAPTION_PATH" : "PRODUCT_SKIPPED_STORYBOARD_FAILED",
+      reason: code === "product_understanding_low_confidence" ? "product_understanding_low_confidence" : code === "product_understanding_failed" || code === "product_intelligence_failed" ? "product_understanding_failed" : code === "legacy_caption_disabled" ? "legacy_caption_path_called" : "storyboard_generation_failed",
+      step: code === "product_understanding_low_confidence" ? "PRODUCT_SKIPPED_PRODUCT_UNDERSTANDING_LOW_CONFIDENCE" : code === "product_understanding_failed" || code === "product_intelligence_failed" ? "PRODUCT_SKIPPED_PRODUCT_UNDERSTANDING_FAILED" : code === "legacy_caption_disabled" ? "PRODUCT_SKIPPED_LEGACY_CAPTION_PATH" : "PRODUCT_SKIPPED_STORYBOARD_FAILED",
       message: code === "legacy_caption_disabled"
         ? "Skipping product because a deprecated caption path was called"
-        : code === "product_understanding_failed"
+        : code === "product_understanding_low_confidence"
+          ? "Skipping product because Product Intelligence confidence is below threshold"
+        : code === "product_understanding_failed" || code === "product_intelligence_failed"
           ? "Skipping product because product understanding validation failed"
         : "Skipping product because Product Storyboard could not be generated"
     };
@@ -832,6 +837,8 @@ function getShopeeAttemptFailureReason(error: unknown) {
   if (storyboardCaptionReason) return storyboardCaptionReason;
   if (isShopeeShortLinkFailure(error)) return "missing_shortlink";
   if (code === "caption_readability_failed") return "caption_readability_failed";
+  if (code === "product_understanding_low_confidence") return "product_understanding_low_confidence";
+  if (code === "product_intelligence_failed") return "product_intelligence_failed";
   if (code === "product_understanding_failed" || message.includes("product_understanding_failed")) return "product_understanding_failed";
   if (code === "storyboard_generation_failed" || message.includes("product_storyboard_failed")) return "storyboard_generation_failed";
   if (code === "legacy_caption_disabled" || message.includes("legacy shopee caption")) return "legacy_caption_path_called";
@@ -861,7 +868,7 @@ function getShopeeAttemptFailureDiagnostics(error: unknown) {
     databaseSaveError: null as string | null
   };
   const normalized = `${code} ${message}`.toLowerCase();
-  if (code === "product_understanding_failed" || normalized.includes("product_understanding")) {
+  if (code === "product_understanding_failed" || code === "product_understanding_low_confidence" || code === "product_intelligence_failed" || normalized.includes("product_understanding") || normalized.includes("product_intelligence")) {
     diagnostics.productUnderstandingError = message || responseSummary || code;
   }
   if (
@@ -899,7 +906,12 @@ export function classifyAutoPostError(error: unknown): AutoPostErrorClassificati
     return "retry_with_next_product";
   }
 
-  if (getAutoPostErrorCode(error) === "storyboard_caption_validation_failed" || getAutoPostErrorCode(error) === "caption_readability_failed") {
+  if (
+    getAutoPostErrorCode(error) === "storyboard_caption_validation_failed" ||
+    getAutoPostErrorCode(error) === "caption_readability_failed" ||
+    getAutoPostErrorCode(error) === "product_understanding_low_confidence" ||
+    getAutoPostErrorCode(error) === "product_intelligence_failed"
+  ) {
     return "retry_with_next_product";
   }
 
@@ -1269,6 +1281,7 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
             maxPrice: input.config.shopeeMaxPrice ?? 0,
             minRating: input.config.shopeeMinRating ?? 0,
             minSales: input.config.shopeeMinSales ?? 0,
+            minSoldCount: input.config.shopeeMinSoldCount ?? 0,
             minDiscountPercent: input.config.shopeeMinDiscountPercent ?? 0,
             excludedProductIds: Array.from(skippedProductIds),
             jobId: input.records.workflowRunId
@@ -2170,6 +2183,7 @@ async function queueShopeeAutoPostsForConfig(
     maxPrice: config.shopeeMaxPrice ?? 0,
     minRating: config.shopeeMinRating ?? 0,
     minSales: config.shopeeMinSales ?? 0,
+    minSoldCount: config.shopeeMinSoldCount ?? 0,
     minDiscountPercent: config.shopeeMinDiscountPercent ?? 0,
     jobId: records.workflowRunId
   });

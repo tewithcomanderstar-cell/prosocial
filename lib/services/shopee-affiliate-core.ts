@@ -2,7 +2,17 @@
 import { buildUgcShopeeImagePromptSet } from "./ugc-image-prompt.ts";
 import { getShopeeCategoryLabel, isShopeeCategoryMatch } from "../shopee-categories.ts";
 
-export type ShopeeSourceTag = "trending" | "best_selling" | "top_search" | "best_roi" | "manual" | "all_products";
+export type ShopeeSourceTag =
+  | "trending"
+  | "best_selling"
+  | "top_search"
+  | "best_roi"
+  | "manual"
+  | "all_products"
+  | "sold_500_plus"
+  | "sold_1000_plus"
+  | "sold_1500_plus"
+  | "sold_2000_plus";
 export type ShopeeCaptionStyle = "soft_sell" | "urgency" | "problem_solution" | "review_style" | "deal_alert" | "lifestyle";
 
 export type ShopeeProductRecord = {
@@ -253,7 +263,9 @@ export function mapExternalProduct(sourceTag: ShopeeSourceTag) {
       productUrl: String(item.product_url ?? item.url ?? item.productUrl ?? ""),
       affiliateUrl: item.affiliate_url ? String(item.affiliate_url) : undefined,
       category: String(item.category ?? "General"),
-      salesCount: item.sales_count === undefined ? undefined : Number(item.sales_count),
+      salesCount: item.sales_count === undefined && item.sales === undefined && item.sold_count === undefined && item.sold === undefined && item.historical_sold === undefined
+        ? undefined
+        : Number(item.sales_count ?? item.sales ?? item.sold_count ?? item.sold ?? item.historical_sold),
       rating: item.rating === undefined ? undefined : Number(item.rating),
       commissionRate: item.commission_rate === undefined ? undefined : Number(item.commission_rate),
       sourceTag,

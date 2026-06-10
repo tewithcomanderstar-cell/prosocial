@@ -16,7 +16,7 @@ type AutoPostConfig = {
   contentSource: "shopee-affiliate" | "google-drive";
   folderId: string;
   folderName: string;
-  shopeeSourceTag: "trending" | "best_selling" | "top_search" | "best_roi" | "manual" | "all_products";
+  shopeeSourceTag: "trending" | "best_selling" | "top_search" | "best_roi" | "manual" | "all_products" | "sold_500_plus" | "sold_1000_plus" | "sold_1500_plus" | "sold_2000_plus";
   shopeeKeyword: string;
   shopeeCategory: string;
   shopeeCategories: string[];
@@ -28,6 +28,7 @@ type AutoPostConfig = {
   shopeeMaxPrice: number;
   shopeeMinRating: number;
   shopeeMinSales: number;
+  shopeeMinSoldCount: number;
   shopeeMinDiscountPercent: number;
   approvalMode: boolean;
   targetPageIds: string[];
@@ -239,6 +240,7 @@ const defaults: AutoPostConfig = {
   shopeeMaxPrice: 0,
   shopeeMinRating: 0,
   shopeeMinSales: 0,
+  shopeeMinSoldCount: 0,
   shopeeMinDiscountPercent: 0,
   approvalMode: false,
   targetPageIds: [],
@@ -261,7 +263,18 @@ const SHOPEE_SOURCE_HELPER_TEXT: Record<AutoPostConfig["shopeeSourceTag"], strin
   top_search: "คัดสินค้าที่มี demand สูงจาก keyword/search signal ถ้ามีข้อมูลจาก Shopee",
   best_roi: "คัดสินค้าที่คาดว่าทำรายได้ Affiliate ดี จากค่าคอม ราคา ยอดขาย และเรตติ้ง",
   manual: "ค้นสินค้าตาม keyword ที่กำหนดเอง",
-  all_products: "สุ่มสินค้าจากทุกหมวด Shopee ที่เลือก พร้อมกันสินค้าซ้ำในช่วง 48 ชั่วโมง"
+  all_products: "สุ่มสินค้าจากทุกหมวด Shopee ที่เลือก พร้อมกันสินค้าซ้ำในช่วง 48 ชั่วโมง",
+  sold_500_plus: "คัดเฉพาะสินค้าที่มียอดขาย 500+",
+  sold_1000_plus: "คัดเฉพาะสินค้าที่มียอดขาย 1,000+",
+  sold_1500_plus: "คัดเฉพาะสินค้าที่มียอดขาย 1,500+",
+  sold_2000_plus: "คัดเฉพาะสินค้าที่มียอดขาย 2,000+"
+};
+
+const SHOPEE_SOURCE_MIN_SOLD_COUNT: Partial<Record<AutoPostConfig["shopeeSourceTag"], number>> = {
+  sold_500_plus: 500,
+  sold_1000_plus: 1000,
+  sold_1500_plus: 1500,
+  sold_2000_plus: 2000
 };
 
 function getConfigShopeeCategories(config?: Partial<AutoPostConfig> | null) {
@@ -1023,18 +1036,26 @@ export function AutoPostPanel() {
                 updateConfig((current) => ({
                   ...current,
                   contentSource: "shopee-affiliate",
-                  shopeeSourceTag: event.target.value as AutoPostConfig["shopeeSourceTag"]
+                  shopeeSourceTag: event.target.value as AutoPostConfig["shopeeSourceTag"],
+                  shopeeMinSoldCount: SHOPEE_SOURCE_MIN_SOLD_COUNT[event.target.value as AutoPostConfig["shopeeSourceTag"]] ?? 0
                 }))
               }
             >
               <option value="trending">Trending products</option>
               <option value="best_selling">Best-selling products</option>
+              <option value="sold_500_plus">SOLD 500+</option>
+              <option value="sold_1000_plus">SOLD 1000+</option>
+              <option value="sold_1500_plus">SOLD 1500+</option>
+              <option value="sold_2000_plus">SOLD 2000+</option>
               <option value="top_search">Top searched products</option>
               <option value="best_roi">Best ROI products</option>
               <option value="manual">Manual keyword search</option>
               <option value="all_products">All Products / สินค้าทั้งหมดในหมวดที่เลือก</option>
             </select>
             <span className="muted">{SHOPEE_SOURCE_HELPER_TEXT[config.shopeeSourceTag]}</span>
+            {config.shopeeMinSoldCount > 0 ? (
+              <span className="muted">Sold threshold: {config.shopeeMinSoldCount.toLocaleString()}+</span>
+            ) : null}
             {config.shopeeSourceTag === "all_products" ? (
               <span className="muted">Selected categories: {getConfigShopeeCategories(config).length}</span>
             ) : null}

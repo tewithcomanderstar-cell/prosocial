@@ -490,6 +490,9 @@ function testShopeeProductIntelligenceLayerGuards() {
   assert.ok(source.includes("PRODUCT_INTELLIGENCE_ANALYSIS_FAILED"));
   assert.ok(source.includes("product_intelligence_failed"));
   assert.ok(intelligenceSource.includes("productName"));
+  assert.ok(intelligenceSource.includes("productNameThai"));
+  assert.ok(intelligenceSource.includes("productNameOriginal"));
+  assert.ok(intelligenceSource.includes("canonicalProductKey"));
   assert.ok(intelligenceSource.includes("brand"));
   assert.ok(intelligenceSource.includes("category"));
   assert.ok(intelligenceSource.includes("productType"));
@@ -499,7 +502,14 @@ function testShopeeProductIntelligenceLayerGuards() {
   assert.ok(intelligenceSource.includes("keyBenefits"));
   assert.ok(intelligenceSource.includes("uniqueSellingPoints"));
   assert.ok(intelligenceSource.includes("productFacts"));
+  assert.ok(intelligenceSource.includes("imageProductSummary"));
+  assert.ok(intelligenceSource.includes("confidenceScore"));
   assert.ok(intelligenceSource.includes("intelligence.confidence < 70"));
+  assert.ok(source.includes("PRODUCT_UNDERSTANDING_LOW_CONFIDENCE"));
+  assert.ok(source.includes("product_understanding_low_confidence"));
+  assert.ok(source.includes("getShopeeNaturalThaiProductNameFromSlug"));
+  assert.ok(source.includes("waterproof_tablecloth"));
+  assert.ok(source.includes("scented_candle"));
   assert.ok(intelligenceSource.includes("missing_real_use_case"));
   assert.ok(intelligenceSource.includes("missing_real_benefit"));
   assert.ok(intelligenceSource.includes("missing_target_customer"));
@@ -519,9 +529,57 @@ function testShopeeProductIntelligenceLayerGuards() {
   assert.ok(packageSource.indexOf("createShopeeProductIntelligenceWithTracing") < packageSource.indexOf("generateShopeeCaption"));
   assert.ok(packageSource.indexOf("generateShopeeCaption") < packageSource.indexOf("buildShopeeImagePromptSet"));
   assert.ok(packageSource.includes("CAPTION_IMAGE_PRODUCT_MISMATCH"));
+  assert.ok(packageSource.includes("CAPTION_IMAGE_PRODUCT_MATCHED"));
+  assert.ok(packageSource.includes("captionProductId"));
+  assert.ok(packageSource.includes("imageProductId"));
+  assert.ok(packageSource.includes("captionCanonicalProductKey"));
+  assert.ok(packageSource.includes("imageCanonicalProductKey"));
   assert.ok(packageSource.includes("getShopeeCaptionImageProductMismatch"));
   assert.ok(packageSource.includes("productIntelligence"));
   console.log("PASS Shopee Product Intelligence layer guards");
+}
+
+function testShopeeCaptionQualityAndSoldThresholdGuards() {
+  const source = readShopeeAffiliateServiceSource();
+  const panelSource = readAutoPostPanelSource();
+  const routeSource = readAutoPostRouteSource();
+  const autoPostSource = readAutoPostServiceSource();
+  const fallbackSource = sourceBetween(source, "function buildDeterministicShopeeFallbackCaption", "function getShopeeCaptionHumanReadableLines");
+
+  assert.ok(source.includes("SHOPEE_FORBIDDEN_PRODUCT_INTELLIGENCE_PHRASE_PATTERN"));
+  assert.ok(source.includes("ดูรายละเอียดให้ตรงกับการใช้งานที่ต้องการ"));
+  assert.ok(source.includes("เหมาะกับคนที่กำลังมองหา\\s*ใช้งานจริง"));
+  assert.equal(fallbackSource.includes("เหมาะกับคนที่กำลังมองหา"), false);
+  assert.ok(fallbackSource.includes("productNameThai"));
+  assert.ok(fallbackSource.includes("mainPurpose"));
+  assert.ok(fallbackSource.includes("targetCustomer"));
+  assert.ok(fallbackSource.includes("usageScenarios"));
+  assert.ok(fallbackSource.includes("keyBenefits"));
+
+  for (const sourceTag of ["sold_500_plus", "sold_1000_plus", "sold_1500_plus", "sold_2000_plus"]) {
+    assert.ok(source.includes(sourceTag), `Missing Shopee source tag ${sourceTag}`);
+    assert.ok(panelSource.includes(sourceTag), `Missing UI source tag ${sourceTag}`);
+    assert.ok(routeSource.includes(sourceTag), `Missing API source tag ${sourceTag}`);
+  }
+  for (const threshold of ["500", "1000", "1500", "2000"]) {
+    assert.ok(source.includes(threshold), `Missing sold threshold ${threshold}`);
+  }
+  assert.ok(source.includes("below_min_sold_count"));
+  assert.ok(source.includes("SOLD_COUNT_FILTER_APPLIED"));
+  assert.ok(source.includes("PRODUCT_REJECTED_BELOW_MIN_SOLD"));
+  assert.ok(source.includes("PRODUCT_ACCEPTED_SOLD_THRESHOLD"));
+  assert.ok(source.includes("selectedSoldThreshold"));
+  assert.ok(source.includes("productsAboveSoldThreshold"));
+  assert.ok(source.includes("rejectedBelowSoldCount"));
+  assert.ok(source.indexOf("below_min_sold_count") < source.indexOf("duplicate_product_48h"));
+  assert.ok(panelSource.includes("SOLD 500+"));
+  assert.ok(panelSource.includes("SOLD 1000+"));
+  assert.ok(panelSource.includes("SOLD 1500+"));
+  assert.ok(panelSource.includes("SOLD 2000+"));
+  assert.ok(panelSource.includes("shopeeMinSoldCount"));
+  assert.ok(autoPostSource.includes("shopeeMinSoldCount"));
+  assert.ok(autoPostSource.includes("product_understanding_low_confidence"));
+  console.log("PASS Shopee caption quality and sold threshold guards");
 }
 
 function testShopeeAllProductsAndCooldownGuards() {
@@ -587,5 +645,6 @@ testShopeeVisionRescueUsesActualImageInput();
 testShopeeCaptionHumanReadabilityGuards();
 testShopeeCaptionFallbackGenerationGuards();
 testShopeeProductIntelligenceLayerGuards();
+testShopeeCaptionQualityAndSoldThresholdGuards();
 testShopeeAllProductsAndCooldownGuards();
 testAutoPostProcessStepNoEligibleProductsReturnsDiagnostics();

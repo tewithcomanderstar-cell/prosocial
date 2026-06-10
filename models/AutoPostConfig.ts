@@ -14,7 +14,7 @@ const autoPostConfigSchema = new Schema(
     folderName: { type: String, default: "My Drive" },
     shopeeSourceTag: {
       type: String,
-      enum: ["trending", "best_selling", "top_search", "best_roi", "manual", "all_products"],
+      enum: ["trending", "best_selling", "top_search", "best_roi", "manual", "all_products", "sold_500_plus", "sold_1000_plus", "sold_1500_plus", "sold_2000_plus"],
       default: "trending",
       index: true
     },
@@ -33,6 +33,7 @@ const autoPostConfigSchema = new Schema(
     shopeeMaxPrice: { type: Number, default: 0 },
     shopeeMinRating: { type: Number, default: 0 },
     shopeeMinSales: { type: Number, default: 0 },
+    shopeeMinSoldCount: { type: Number, default: 0 },
     shopeeMinDiscountPercent: { type: Number, default: 0 },
     approvalMode: { type: Boolean, default: false, index: true },
     targetPageIds: { type: [String], default: [] },
