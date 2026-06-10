@@ -3,6 +3,7 @@ import { jsonError, jsonOk, normalizeRouteError, parseBody, requireAuth } from "
 import {
   getShopeeEnvStatus,
   getShopeeProductProvider,
+  fetchShopeeAllProductsForSelectedCategories,
   scoreShopeeProductForSource,
   ShopeeProviderError,
   upsertShopeeProducts,
@@ -11,7 +12,7 @@ import {
 import { DEFAULT_SHOPEE_CATEGORY, normalizeShopeeCategories, normalizeShopeeCategory } from "@/lib/shopee-categories";
 
 const querySchema = z.object({
-  sourceTag: z.enum(["trending", "best_selling", "top_search", "best_roi", "manual"]).default("trending"),
+  sourceTag: z.enum(["trending", "best_selling", "top_search", "best_roi", "manual", "all_products"]).default("trending"),
   keyword: z.string().optional(),
   category: z.string().default(DEFAULT_SHOPEE_CATEGORY),
   categories: z.array(z.string()).default([]),
@@ -19,11 +20,12 @@ const querySchema = z.object({
 });
 
 function parseSourceTag(value: string | null): ShopeeSourceTag {
-  const allowed: ShopeeSourceTag[] = ["trending", "best_selling", "top_search", "best_roi", "manual"];
+  const allowed: ShopeeSourceTag[] = ["trending", "best_selling", "top_search", "best_roi", "manual", "all_products"];
   return allowed.includes(value as ShopeeSourceTag) ? (value as ShopeeSourceTag) : "trending";
 }
 
 async function fetchProductsForCategories(input: {
+  userId: string;
   provider: ReturnType<typeof getShopeeProductProvider>;
   sourceTag: ShopeeSourceTag;
   keyword?: string;
@@ -41,6 +43,14 @@ async function fetchProductsForCategories(input: {
       "manual_keyword_required",
       "internal_api"
     );
+  }
+  if (input.sourceTag === "all_products") {
+    return fetchShopeeAllProductsForSelectedCategories({
+      userId: input.userId,
+      selectedCategoryIds: categories,
+      limit: input.limit,
+      randomSeed: `${categories.join(",")}:${Date.now()}`
+    });
   }
 
   for (const category of categories) {
@@ -97,6 +107,7 @@ export async function GET(request: Request) {
     });
     const products = await fetchProductsForCategories({
       provider,
+      userId,
       sourceTag,
       keyword,
       categories,
@@ -153,6 +164,7 @@ export async function POST(request: Request) {
     });
     const products = await fetchProductsForCategories({
       provider,
+      userId,
       sourceTag: payload.sourceTag ?? "trending",
       keyword: payload.keyword,
       categories: normalizeShopeeCategories((payload.categories ?? []).length ? payload.categories : payload.category),

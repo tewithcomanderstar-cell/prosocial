@@ -28,7 +28,7 @@ const shopeeProductSchema = new Schema(
     sourceApiSignal: { type: Boolean, default: false },
     sourceTag: {
       type: String,
-      enum: ["trending", "best_selling", "top_search", "best_roi", "manual"],
+      enum: ["trending", "best_selling", "top_search", "best_roi", "manual", "all_products"],
       default: "trending",
       index: true
     },

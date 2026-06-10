@@ -32,9 +32,10 @@ import { AiGeneratedPost } from "@/models/AiGeneratedPost";
 import { AutomationLog } from "@/models/AutomationLog";
 import { FacebookPostQueue } from "@/models/FacebookPostQueue";
 import { ProductPostHistory } from "@/models/ProductPostHistory";
+import { ShopeeProductReservation } from "@/models/ShopeeProductReservation";
 import { ShopeeProduct } from "@/models/ShopeeProduct";
 
-export type ShopeeSourceTag = "trending" | "best_selling" | "top_search" | "best_roi" | "manual";
+export type ShopeeSourceTag = "trending" | "best_selling" | "top_search" | "best_roi" | "manual" | "all_products";
 export type ShopeeCaptionStyle = "soft_sell" | "urgency" | "problem_solution" | "review_style" | "deal_alert" | "lifestyle";
 
 export type ShopeeProductIntelligence = {
@@ -67,6 +68,8 @@ const OPENAI_IMAGE_REQUEST_TIMEOUT_MS = Math.min(
 );
 const OPENAI_IMAGE_MAX_ATTEMPTS = 2;
 const VISION_RESCUE_TIMEOUT_MS = 30_000;
+const SHOPEE_REPOST_COOLDOWN_HOURS = Math.max(1, Number(process.env.SHOPEE_REPOST_COOLDOWN_HOURS ?? "48"));
+const SHOPEE_PRODUCT_RESERVATION_TTL_MS = 30 * 60 * 1000;
 const AUTO_POST_SLOW_STAGE_WARNING_MS = 30_000;
 const SHOPEE_ACTION_LOG_TIMEOUT_MS = Math.max(
   500,
@@ -594,6 +597,7 @@ function getShopeeAffiliateListType(sourceTag?: ShopeeSourceTag) {
     case "best_roi":
       return 3;
     case "manual":
+    case "all_products":
       return 0;
     case "trending":
     default:
@@ -6467,6 +6471,35 @@ export function scoreShopeeProductForSource(input: ShopeeSourceScoreInput): Shop
     };
   }
 
+  if (sourceTag === "all_products") {
+    const allProductsScore =
+      (productQualityScore * 0.35) +
+      (ratingScore * 0.2) +
+      (salesScore * 0.2) +
+      (discountScore * 0.15) +
+      (reviewScore * 0.1);
+    const breakdown = {
+      ...baseBreakdown,
+      formula: "productQualityScore*0.35 + ratingScore*0.20 + salesScore*0.20 + discountScore*0.15 + reviewScore*0.10",
+      sourceMode: "all_products_random_category_pool"
+    };
+    return {
+      sourceSpecificScore: roundScore(allProductsScore),
+      scoreBreakdown: breakdown,
+      sortPrimary: allProductsScore,
+      sortSecondary: Math.random(),
+      sortTertiary: sales,
+      topCandidateLimit: 10,
+      score: buildSourceProductScore({
+        product,
+        sourceTag,
+        score: allProductsScore,
+        reason: "all_products_score uses broad category pool quality signals",
+        breakdown
+      })
+    };
+  }
+
   const velocityValue = Math.max(0, toFiniteNumber(product.salesVelocity || product.recentSales));
   const velocityScore = velocityValue > 0 ? normalizeCountScore(velocityValue, 5000) : undefined;
   const salesMomentumScore = velocityScore ?? salesScore;
@@ -6610,6 +6643,102 @@ function getShopeeProductIdentity(product: Pick<ShopeeProductRecord, "productId"
   return String(product.productId ?? "").trim();
 }
 
+export function getShopeeCanonicalProductKey(product: Partial<ShopeeProductRecord>) {
+  const shopId = String(product.shopId ?? "").trim();
+  const itemId = String(product.itemId ?? "").trim();
+  if (shopId && itemId) return `${shopId}:${itemId}`;
+  const productId = String(product.productId ?? "").trim();
+  if (productId) return productId;
+  const productUrl = normalizeTextEncoding(String(product.productUrl ?? "")).trim().toLowerCase();
+  const urlId = productUrl.match(/(?:product\/|i\.)(\d+)[^\d]+(\d+)/i);
+  if (urlId) return `${urlId[1]}:${urlId[2]}`;
+  const nameKey = normalizeShopeeEntityMentionText(`${product.productName ?? ""} ${(product as { shopName?: string }).shopName ?? ""}`);
+  return nameKey ? crypto.createHash("sha1").update(nameKey).digest("hex") : "";
+}
+
+async function getRecentlyPostedProductKeys(input: { userId: string; lookbackHours?: number }) {
+  const lookbackHours = input.lookbackHours ?? SHOPEE_REPOST_COOLDOWN_HOURS;
+  const since = new Date(Date.now() - lookbackHours * 60 * 60 * 1000);
+  const histories = (await ProductPostHistory.find({
+    userId: input.userId,
+    postedAt: { $gte: since },
+    status: { $in: ["queued", "published"] }
+  })
+    .select("canonicalProductKey productId shopId itemId productUrl productName")
+    .lean()) as Array<Partial<ShopeeProductRecord> & { canonicalProductKey?: string }>;
+  const keys = new Set<string>();
+  for (const history of histories) {
+    const key = String(history.canonicalProductKey ?? "").trim() || getShopeeCanonicalProductKey(history);
+    if (key) keys.add(key);
+  }
+  return { keys, since, lookbackHours };
+}
+
+async function getActiveReservedProductKeys(input: { userId: string }) {
+  const now = new Date();
+  await ShopeeProductReservation.deleteMany({ userId: input.userId, expiresAt: { $lte: now } });
+  const reservations = (await ShopeeProductReservation.find({
+    userId: input.userId,
+    expiresAt: { $gt: now }
+  }).select("canonicalProductKey").lean()) as Array<{ canonicalProductKey?: string }>;
+  return new Set(reservations.map((reservation) => String(reservation.canonicalProductKey ?? "").trim()).filter(Boolean));
+}
+
+export async function reserveShopeeProductKey(input: {
+  userId: string;
+  product: ShopeeProductRecord;
+  jobId?: string;
+  templatePostId?: string;
+}) {
+  const canonicalProductKey = getShopeeCanonicalProductKey(input.product);
+  if (!canonicalProductKey) return null;
+  const reservedAt = new Date();
+  const expiresAt = new Date(reservedAt.getTime() + SHOPEE_PRODUCT_RESERVATION_TTL_MS);
+  const reservation = await ShopeeProductReservation.findOneAndUpdate(
+    { userId: input.userId, canonicalProductKey },
+    {
+      userId: input.userId,
+      canonicalProductKey,
+      jobId: input.jobId ?? "",
+      templatePostId: input.templatePostId ?? "",
+      reservedAt,
+      expiresAt
+    },
+    { upsert: true, new: true }
+  );
+  console.info("PRODUCT_RESERVED", {
+    userId: input.userId,
+    canonicalProductKey,
+    productId: input.product.productId,
+    itemId: input.product.itemId,
+    shopId: input.product.shopId,
+    jobId: input.jobId ?? "",
+    templatePostId: input.templatePostId ?? "",
+    expiresAt: expiresAt.toISOString()
+  });
+  return reservation;
+}
+
+export async function releaseShopeeProductReservation(input: {
+  userId: string;
+  product?: ShopeeProductRecord;
+  canonicalProductKey?: string;
+  jobId?: string;
+}) {
+  const canonicalProductKey = input.canonicalProductKey || (input.product ? getShopeeCanonicalProductKey(input.product) : "");
+  const query: Record<string, unknown> = { userId: input.userId };
+  if (canonicalProductKey) query.canonicalProductKey = canonicalProductKey;
+  if (!canonicalProductKey && input.jobId) query.jobId = input.jobId;
+  if (!canonicalProductKey && !input.jobId) return;
+  await ShopeeProductReservation.deleteMany(query);
+  console.info("PRODUCT_RESERVATION_RELEASED", {
+    userId: input.userId,
+    canonicalProductKey,
+    jobId: input.jobId ?? "",
+    productId: input.product?.productId ?? ""
+  });
+}
+
 async function getShopeeProductLocksForDate(userId: string, postedDate = getBangkokPostedDate()) {
   const histories = (await ProductPostHistory.find({
     userId,
@@ -6670,6 +6799,8 @@ function getShopeeProductFilterRejectionReason(input: {
   product: ShopeeProductRecord;
   excludedProductIds: Set<string>;
   dailyLocks: { productIds: Set<string>; identities: Set<string> };
+  recentProductKeys?: Set<string>;
+  reservedProductKeys?: Set<string>;
   selectedProductIds: Set<string>;
   selectedProductIdentities: Set<string>;
   blockedCategories?: string[];
@@ -6681,9 +6812,12 @@ function getShopeeProductFilterRejectionReason(input: {
 }) {
   const productId = String(input.product.productId);
   const identity = getShopeeProductIdentity(input.product);
+  const canonicalProductKey = getShopeeCanonicalProductKey(input.product);
   const effectivePrice = getEffectiveProductPrice(input.product);
   if (input.selectedProductIds.has(productId) || input.selectedProductIdentities.has(identity)) return "already_selected_in_request";
   if (input.excludedProductIds.has(productId)) return "excluded_product_id";
+  if (canonicalProductKey && input.reservedProductKeys?.has(canonicalProductKey)) return "reserved_product";
+  if (canonicalProductKey && input.recentProductKeys?.has(canonicalProductKey)) return "duplicate_product_48h";
   if (input.dailyLocks.productIds.has(productId) || input.dailyLocks.identities.has(identity)) return "already_posted_today";
   if (!input.product.productImageUrl && !input.product.productImageUrls?.length) return "missing_image";
   if (!input.product.productUrl && !input.product.affiliateUrl) return "missing_product_url";
@@ -6740,6 +6874,8 @@ const PRODUCT_SELECTION_REJECTION_REASONS = [
   "below_min_sales",
   "below_min_discount",
   "already_posted_today",
+  "duplicate_product_48h",
+  "reserved_product",
   "recently_posted",
   "below_min_source_score"
 ] as const;
@@ -6768,6 +6904,8 @@ type ProductSelectionDiagnostics = {
   lowScoreBreakdowns: Array<Record<string, unknown>>;
   sourceDataQuality: Record<string, unknown>;
   fallbackUsed: boolean;
+  excludedRecent48h: number;
+  excludedReserved: number;
 };
 
 function createProductSelectionDiagnostics(input: {
@@ -6806,6 +6944,8 @@ function createProductSelectionDiagnostics(input: {
     topRejectedProducts: [],
     lowScoreBreakdowns: [],
     fallbackUsed: false,
+    excludedRecent48h: 0,
+    excludedReserved: 0,
     sourceDataQuality: {
       source: input.source,
       productsWithSearchVolume,
@@ -6921,6 +7061,8 @@ function logProductSelectionDiagnostics(diagnostics: ProductSelectionDiagnostics
     afterAlreadyPostedTodayFilter: diagnostics.afterAlreadyPostedTodayFilter,
     afterRecentlyPostedFilter: diagnostics.afterRecentlyPostedFilter,
     afterSourceScoreFilter: diagnostics.afterSourceScoreFilter,
+    excludedRecent48h: diagnostics.excludedRecent48h,
+    excludedReserved: diagnostics.excludedReserved,
     finalEligibleProducts: diagnostics.finalEligibleProducts
   });
   console.info("PRODUCT_REJECTION_SUMMARY", {
@@ -6945,6 +7087,8 @@ function logProductSelectionDiagnostics(diagnostics: ProductSelectionDiagnostics
     below_min_sales: "Configured minimum sales is higher than most fetched products.",
     below_min_discount: "Configured minimum discount is higher than most fetched products.",
     already_posted_today: "Daily duplicate protection is eliminating the fetched product pool.",
+    duplicate_product_48h: "48-hour repost cooldown is eliminating recently published Shopee products.",
+    reserved_product: "Active product reservations are preventing parallel jobs from reusing the same Shopee product.",
     recently_posted: "Recent-post duplicate protection is eliminating products for the selected page.",
     below_min_source_score: "Source-specific score relies on signals that are weak or missing from Shopee API responses."
   };
@@ -6954,6 +7098,19 @@ function logProductSelectionDiagnostics(diagnostics: ProductSelectionDiagnostics
     primaryFailureReason,
     percentage,
     recommendation: recommendations[primaryFailureReason] ?? "Inspect PRODUCT_REJECTION_SUMMARY and TOP_REJECTED_PRODUCTS for the dominant rejection reason."
+  });
+  console.info("RECENT_PRODUCT_EXCLUSION_APPLIED", {
+    source: diagnostics.source,
+    selectedCategoryCount: diagnostics.selectedCategories.length,
+    categoriesTried: diagnostics.selectedCategories,
+    fetchedProducts: diagnostics.fetchedProducts,
+    uniqueProducts: diagnostics.afterDedupe,
+    excludedRecent48h: diagnostics.excludedRecent48h,
+    excludedReserved: diagnostics.excludedReserved,
+    eligibleProducts: diagnostics.finalEligibleProducts,
+    sampleExcludedProducts: diagnostics.topRejectedProducts.filter((item) =>
+      item.rejectReason === "duplicate_product_48h" || item.rejectReason === "reserved_product"
+    ).slice(0, 10)
   });
 }
 
@@ -6993,6 +7150,101 @@ function getShopeeProductHardSelectionRejectionReason(product: ShopeeProductReco
   return null;
 }
 
+function seededShopeeRandom(seed?: string) {
+  let hash = 2166136261;
+  const text = seed || `${Date.now()}:${Math.random()}`;
+  for (const char of text) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return () => {
+    hash += 0x6D2B79F5;
+    let value = hash;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function shuffleWithShopeeSeed<T>(items: T[], seed?: string) {
+  const random = seededShopeeRandom(seed);
+  const output = [...items];
+  for (let index = output.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(random() * (index + 1));
+    [output[index], output[swapIndex]] = [output[swapIndex], output[index]];
+  }
+  return output;
+}
+
+export async function fetchShopeeAllProductsForSelectedCategories(input: {
+  userId: string;
+  selectedCategoryIds: string[];
+  limit: number;
+  excludeProductIds?: string[];
+  randomSeed?: string;
+}) {
+  const provider = getShopeeProductProvider();
+  const selectedCategoryIds = normalizeShopeeCategories(input.selectedCategoryIds).length
+    ? normalizeShopeeCategories(input.selectedCategoryIds)
+    : [DEFAULT_SHOPEE_CATEGORY];
+  const shuffledCategories = shuffleWithShopeeSeed(selectedCategoryIds, input.randomSeed);
+  const sortModes = shuffleWithShopeeSeed(["sales", "latest", "popular", "price", "relevance"], `${input.randomSeed ?? ""}:sort`);
+  const excludeProductIds = new Set((input.excludeProductIds ?? []).map(String));
+  const fetchedByCategory: ShopeeProductRecord[][] = [];
+  let categoriesTried = 0;
+
+  console.info("SHOPEE_ALL_PRODUCTS_FETCH_STARTED", {
+    source: "all_products",
+    userId: input.userId,
+    selectedCategoryCount: selectedCategoryIds.length,
+    categories: shuffledCategories,
+    limit: input.limit,
+    randomSeed: input.randomSeed ?? ""
+  });
+
+  for (const category of shuffledCategories) {
+    const sortMode = sortModes[categoriesTried % sortModes.length] ?? "relevance";
+    const randomPage = 1 + Math.floor(seededShopeeRandom(`${input.randomSeed ?? ""}:${category}`)() * 5);
+    categoriesTried += 1;
+    const categoryProducts = await provider.fetchProducts({
+      sourceTag: "all_products",
+      keyword: sortMode === "relevance" ? undefined : sortMode,
+      category,
+      limit: Math.max(input.limit * 3, 30)
+    });
+    const normalized = categoryProducts
+      .filter((product) => !excludeProductIds.has(String(product.productId)))
+      .map((product) => ({
+        ...product,
+        category: product.category || category,
+        sourceTag: "all_products" as ShopeeSourceTag,
+        fetchedAt: product.fetchedAt ?? new Date()
+      }));
+    fetchedByCategory.push(normalized);
+    console.info("SHOPEE_ALL_PRODUCTS_CATEGORY_FETCHED", {
+      source: "all_products",
+      category,
+      sortMode,
+      randomPage,
+      fetchedProducts: categoryProducts.length,
+      normalizedProducts: normalized.length
+    });
+  }
+
+  const merged = fetchedByCategory.flat();
+  const unique = dedupeShopeeProducts(merged);
+  const randomized = shuffleWithShopeeSeed(unique, `${input.randomSeed ?? ""}:products`);
+  console.info("SHOPEE_ALL_PRODUCTS_FETCH_COMPLETED", {
+    source: "all_products",
+    selectedCategoryCount: selectedCategoryIds.length,
+    categoriesTried,
+    fetchedProducts: merged.length,
+    uniqueProducts: unique.length,
+    eligibleProducts: randomized.length
+  });
+  return randomized;
+}
+
 export async function selectShopeeProductsForPages(input: {
   userId: string;
   pageIds: string[];
@@ -7008,11 +7260,14 @@ export async function selectShopeeProductsForPages(input: {
   minSales?: number;
   minDiscountPercent?: number;
   excludedProductIds?: string[];
+  jobId?: string;
 }) {
   const provider = getShopeeProductProvider();
   const sourceTag = input.sourceTag ?? "trending";
   assertManualKeywordProvided({ sourceTag, keyword: input.keyword });
   const excludedProductIds = new Set((input.excludedProductIds ?? []).map((productId) => String(productId)).filter(Boolean));
+  const recentProductKeys = await getRecentlyPostedProductKeys({ userId: input.userId, lookbackHours: SHOPEE_REPOST_COOLDOWN_HOURS });
+  const reservedProductKeys = await getActiveReservedProductKeys({ userId: input.userId });
   const dailyLocks = process.env.AUTO_POST_NO_DUPLICATE_SAME_DAY === "false"
     ? { productIds: new Set<string>(), identities: new Set<string>(), postedDate: getBangkokPostedDate() }
     : await getShopeeProductLocksForDate(input.userId);
@@ -7024,23 +7279,40 @@ export async function selectShopeeProductsForPages(input: {
   const discoveredByCategory: ShopeeProductRecord[][] = [];
   const discoveredCategoryHints = new Map<string, Set<string>>();
   const categoryFetchErrors: string[] = [];
-  for (const category of discoveryCategories) {
-    try {
-      const categoryProducts = await provider.fetchProducts({
-        sourceTag,
-        keyword: input.keyword,
-        category,
-        limit: limitPerCategory
-      });
-      discoveredByCategory.push(categoryProducts);
-      for (const product of categoryProducts) {
-        const key = getShopeeProductDedupeKey(product);
-        const hints = discoveredCategoryHints.get(key) ?? new Set<string>();
-        hints.add(category);
-        discoveredCategoryHints.set(key, hints);
+  if (sourceTag === "all_products") {
+    const categoryProducts = await fetchShopeeAllProductsForSelectedCategories({
+      userId: input.userId,
+      selectedCategoryIds: discoveryCategories,
+      limit: limitPerCategory,
+      excludeProductIds: Array.from(excludedProductIds),
+      randomSeed: `${input.userId}:${input.jobId ?? ""}:${Date.now()}`
+    });
+    discoveredByCategory.push(categoryProducts);
+    for (const product of categoryProducts) {
+      const key = getShopeeProductDedupeKey(product);
+      const hints = discoveredCategoryHints.get(key) ?? new Set<string>();
+      hints.add(product.category || DEFAULT_SHOPEE_CATEGORY);
+      discoveredCategoryHints.set(key, hints);
+    }
+  } else {
+    for (const category of discoveryCategories) {
+      try {
+        const categoryProducts = await provider.fetchProducts({
+          sourceTag,
+          keyword: input.keyword,
+          category,
+          limit: limitPerCategory
+        });
+        discoveredByCategory.push(categoryProducts);
+        for (const product of categoryProducts) {
+          const key = getShopeeProductDedupeKey(product);
+          const hints = discoveredCategoryHints.get(key) ?? new Set<string>();
+          hints.add(category);
+          discoveredCategoryHints.set(key, hints);
+        }
+      } catch (error) {
+        categoryFetchErrors.push(`${category}: ${error instanceof Error ? error.message : String(error)}`);
       }
-    } catch (error) {
-      categoryFetchErrors.push(`${category}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
   if (!discoveredByCategory.length && categoryFetchErrors.length) {
@@ -7091,6 +7363,8 @@ export async function selectShopeeProductsForPages(input: {
         product,
         excludedProductIds,
         dailyLocks,
+        recentProductKeys: recentProductKeys.keys,
+        reservedProductKeys,
         selectedProductIds,
         selectedProductIdentities,
         blockedCategories: input.blockedCategories,
@@ -7101,6 +7375,17 @@ export async function selectShopeeProductsForPages(input: {
         minDiscountPercent: input.minDiscountPercent
       });
       if (staticRejection) {
+        if (staticRejection === "duplicate_product_48h") {
+          selectionDiagnostics.excludedRecent48h += 1;
+          console.info("DUPLICATE_PRODUCT_SKIPPED_48H", {
+            source: sourceTag,
+            productId: product.productId,
+            canonicalProductKey: getShopeeCanonicalProductKey(product),
+            lookbackHours: recentProductKeys.lookbackHours,
+            since: recentProductKeys.since.toISOString()
+          });
+        }
+        if (staticRejection === "reserved_product") selectionDiagnostics.excludedReserved += 1;
         logShopeeSourceScoreBreakdown({
           sourceTag,
           pageId,
@@ -7207,6 +7492,11 @@ export async function selectShopeeProductsForPages(input: {
 
     selectedProductIds.add(String(best.product.productId));
     selectedProductIdentities.add(getShopeeProductIdentity(best.product));
+    await reserveShopeeProductKey({
+      userId: input.userId,
+      product: best.product,
+      jobId: input.jobId
+    });
     selected.push({ pageId, product: best.product, score: best.score });
   }
 
@@ -7240,6 +7530,15 @@ export async function selectShopeeProductsForPages(input: {
             selectionStatus: "rejected",
             rejectedReason: `fallback_${hardRejection}`
           });
+          continue;
+        }
+        const canonicalProductKey = getShopeeCanonicalProductKey(product);
+        if (canonicalProductKey && recentProductKeys.keys.has(canonicalProductKey)) {
+          selectionDiagnostics.excludedRecent48h += 1;
+          continue;
+        }
+        if (canonicalProductKey && reservedProductKeys.has(canonicalProductKey)) {
+          selectionDiagnostics.excludedReserved += 1;
           continue;
         }
         if (selectedProductIds.has(String(product.productId)) || selectedProductIdentities.has(getShopeeProductIdentity(product))) {
@@ -7286,6 +7585,11 @@ export async function selectShopeeProductsForPages(input: {
       if (!best) continue;
       selectedProductIds.add(String(best.product.productId));
       selectedProductIdentities.add(getShopeeProductIdentity(best.product));
+      await reserveShopeeProductKey({
+        userId: input.userId,
+        product: best.product,
+        jobId: input.jobId
+      });
       selected.push({ pageId, product: best.product, score: best.score });
     }
   }
@@ -9385,25 +9689,6 @@ export async function recordShopeeQueueItem(input: {
     scheduledAt: input.scheduledAt,
     status: input.status ?? "queued",
     aiGeneratedPostId: input.aiGeneratedPostId
-  });
-
-  await ProductPostHistory.create({
-    userId: input.userId,
-    pageId: input.pageId,
-    productId: input.product.productId,
-    shopId: input.product.shopId ?? "",
-    itemId: input.product.itemId ?? "",
-    productName: input.product.productName ?? "",
-    category: input.product.category ?? "",
-    productSource: input.product.sourceTag ?? "shopee-affiliate",
-    postId: input.postId,
-    affiliateLink: input.affiliateLink,
-    shortLink: input.affiliateLink,
-    postedDate: getBangkokPostedDate(input.scheduledAt),
-    jobId: input.jobId ?? "",
-    pageIds: [input.pageId],
-    postedAt: input.scheduledAt,
-    status: "queued"
   });
 
   await AffiliatePerformance.findOneAndUpdate(

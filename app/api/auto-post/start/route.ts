@@ -19,7 +19,7 @@ type LeanAutoPostConfig = {
   targetPageIds: string[];
   intervalMinutes: number;
   contentSource?: "shopee-affiliate" | "google-drive";
-  shopeeSourceTag?: "trending" | "best_selling" | "top_search" | "best_roi" | "manual";
+  shopeeSourceTag?: "trending" | "best_selling" | "top_search" | "best_roi" | "manual" | "all_products";
   shopeeKeyword?: string;
   shopeeCategory?: string;
   shopeeCategories?: string[];
@@ -89,6 +89,9 @@ export async function POST(request: Request) {
 
     if (config.shopeeSourceTag === "manual" && !config.shopeeKeyword?.trim()) {
       return jsonError("Manual keyword search requires a keyword", 400, "manual_keyword_required");
+    }
+    if (config.shopeeSourceTag === "all_products" && !normalizeShopeeCategories(config.shopeeCategories?.length ? config.shopeeCategories : config.shopeeCategory).length) {
+      return jsonError("All Products source requires at least one selected Shopee category", 400, "all_products_category_required");
     }
 
     if (config.targetPageIds.length > 100) {

@@ -7,9 +7,12 @@ const productPostHistorySchema = new Schema(
     productId: { type: String, required: true, index: true },
     shopId: { type: String, default: "", index: true },
     itemId: { type: String, default: "", index: true },
+    productUrl: { type: String, default: "" },
+    canonicalProductKey: { type: String, default: "", index: true },
     productName: { type: String, default: "" },
     category: { type: String, default: "", index: true },
     productSource: { type: String, default: "shopee-affiliate", index: true },
+    templatePostId: { type: String, default: "", index: true },
     postedDate: { type: String, default: "", index: true },
     jobId: { type: String, default: "", index: true },
     pageIds: { type: [String], default: [] },
@@ -31,5 +34,6 @@ const productPostHistorySchema = new Schema(
 productPostHistorySchema.index({ userId: 1, pageId: 1, productId: 1, postedAt: -1 });
 productPostHistorySchema.index({ userId: 1, productId: 1, postedDate: 1, source: 1 });
 productPostHistorySchema.index({ userId: 1, shopId: 1, itemId: 1, postedDate: 1, source: 1 });
+productPostHistorySchema.index({ userId: 1, canonicalProductKey: 1, postedAt: -1 });
 
 export const ProductPostHistory = models.ProductPostHistory || model("ProductPostHistory", productPostHistorySchema);

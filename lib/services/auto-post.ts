@@ -11,6 +11,7 @@ import {
   getShopeeCaptionProductName,
   logShopeeAutomationEvent,
   recordShopeeQueueItem,
+  releaseShopeeProductReservation,
   selectShopeeProductsForPages,
   ShopeeCaptionStyle,
   ShopeeSourceTag
@@ -1269,7 +1270,8 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
             minRating: input.config.shopeeMinRating ?? 0,
             minSales: input.config.shopeeMinSales ?? 0,
             minDiscountPercent: input.config.shopeeMinDiscountPercent ?? 0,
-            excludedProductIds: Array.from(skippedProductIds)
+            excludedProductIds: Array.from(skippedProductIds),
+            jobId: input.records.workflowRunId
           });
 
     const selected = selectedProducts[0];
@@ -1512,6 +1514,12 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
         if (classification === "retry_same_product" && sameProductAttempt < AUTO_POST_SAME_PRODUCT_RETRIES) {
           continue;
         }
+
+        await releaseShopeeProductReservation({
+          userId: input.config.userId,
+          product: selected.product,
+          jobId: input.records.workflowRunId
+        });
 
         if (classification === "retry_with_next_product") {
           const skipInfo = getRetryWithNextProductReason(error);
@@ -2162,7 +2170,8 @@ async function queueShopeeAutoPostsForConfig(
     maxPrice: config.shopeeMaxPrice ?? 0,
     minRating: config.shopeeMinRating ?? 0,
     minSales: config.shopeeMinSales ?? 0,
-      minDiscountPercent: config.shopeeMinDiscountPercent ?? 0
+    minDiscountPercent: config.shopeeMinDiscountPercent ?? 0,
+    jobId: records.workflowRunId
   });
   const selectedProductsBeforeModeGuard = selectedProducts.length;
   await logShopeeStep({

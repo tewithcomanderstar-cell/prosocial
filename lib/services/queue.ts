@@ -32,7 +32,12 @@ import { checkRateLimits } from "@/lib/services/rate-limit";
 import { logExternalResponseFailure, traceExternalRequest } from "@/lib/services/request-debug";
 import { getUserSettings, randomDelayMs } from "@/lib/services/settings";
 import { countShopeeProductNameOccurrences } from "@/lib/services/shopee-affiliate-core";
-import { isShopeeShortLink, normalizeShopeeCaptionLinkLine } from "@/lib/services/shopee-affiliate";
+import {
+  getShopeeCanonicalProductKey,
+  isShopeeShortLink,
+  normalizeShopeeCaptionLinkLine,
+  releaseShopeeProductReservation
+} from "@/lib/services/shopee-affiliate";
 import { normalizeTextEncoding, validateTextEncoding } from "@/lib/services/text-encoding";
 import { computeNextRunAt, randomItem } from "@/lib/utils";
 
@@ -426,6 +431,64 @@ async function updateShopeeQueueStatus(
       postedAt: new Date()
     }
   );
+
+  const products = await ShopeeProduct.find({ productId: { $in: productIds } }).lean();
+  const productById = new Map(products.map((product: any) => [String(product.productId), product]));
+  if (status === "published") {
+    for (const productId of productIds) {
+      const product = productById.get(productId) ?? { productId };
+      const canonicalProductKey = getShopeeCanonicalProductKey(product);
+      await ProductPostHistory.findOneAndUpdate(
+        {
+          userId: job.userId,
+          pageId: job.targetPageId,
+          productId,
+          postId: job.postId,
+          status: "published"
+        },
+        {
+          userId: job.userId,
+          pageId: job.targetPageId,
+          productId,
+          shopId: String(product.shopId ?? ""),
+          itemId: String(product.itemId ?? ""),
+          productUrl: String(product.productUrl ?? ""),
+          canonicalProductKey,
+          productName: String(product.productName ?? ""),
+          category: String(product.category ?? ""),
+          productSource: String(product.sourceTag ?? "shopee-affiliate"),
+          postId: job.postId,
+          templatePostId: String(job.payload?.aiGeneratedPostId ?? ""),
+          affiliateLink: String(job.payload?.affiliateLink ?? ""),
+          shortLink: String(job.payload?.affiliateLink ?? ""),
+          postedDate: new Date().toISOString().slice(0, 10),
+          jobId: String(job.payload?.workflowRunId ?? job._id ?? ""),
+          pageIds: [String(job.targetPageId ?? "")],
+          postedAt: new Date(),
+          status: "published",
+          source: "shopee-affiliate"
+        },
+        { upsert: true, new: true }
+      );
+      console.info("POSTED_PRODUCT_HISTORY_SAVED", {
+        userId: job.userId,
+        productId,
+        canonicalProductKey,
+        pageId: job.targetPageId,
+        postId: job.postId,
+        jobId: job.payload?.workflowRunId ?? ""
+      });
+    }
+  }
+
+  await Promise.all(productIds.map((productId) => {
+    const product = productById.get(productId) ?? { productId };
+    return releaseShopeeProductReservation({
+      userId: String(job.userId),
+      canonicalProductKey: getShopeeCanonicalProductKey(product),
+      jobId: String(job.payload?.workflowRunId ?? job._id ?? "")
+    });
+  }));
 
   await Promise.all(
     productIds.map((productId) =>

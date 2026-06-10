@@ -2,7 +2,7 @@
 import { buildUgcShopeeImagePromptSet } from "./ugc-image-prompt.ts";
 import { getShopeeCategoryLabel, isShopeeCategoryMatch } from "../shopee-categories.ts";
 
-export type ShopeeSourceTag = "trending" | "best_selling" | "top_search" | "best_roi" | "manual";
+export type ShopeeSourceTag = "trending" | "best_selling" | "top_search" | "best_roi" | "manual" | "all_products";
 export type ShopeeCaptionStyle = "soft_sell" | "urgency" | "problem_solution" | "review_style" | "deal_alert" | "lifestyle";
 
 export type ShopeeProductRecord = {

@@ -62,7 +62,7 @@ const schema = z.object({
   contentSource: z.enum(["shopee-affiliate", "google-drive"]).default("shopee-affiliate"),
   folderId: z.string().min(1).default("root"),
   folderName: z.string().min(1).default("My Drive"),
-  shopeeSourceTag: z.enum(["trending", "best_selling", "top_search", "best_roi", "manual"]).default("trending"),
+  shopeeSourceTag: z.enum(["trending", "best_selling", "top_search", "best_roi", "manual", "all_products"]).default("trending"),
   shopeeKeyword: z.string().default(""),
   shopeeCategory: z.string().default(DEFAULT_SHOPEE_CATEGORY),
   shopeeCategories: z.array(z.string()).default([]),
@@ -220,6 +220,9 @@ export async function POST(request: Request) {
 
     if (payload.shopeeSourceTag === "manual" && !shopeeKeyword) {
       return jsonError("Manual keyword search requires a keyword", 400, "manual_keyword_required");
+    }
+    if (payload.shopeeSourceTag === "all_products" && !shopeeCategories.length) {
+      return jsonError("All Products source requires at least one selected Shopee category", 400, "all_products_category_required");
     }
 
     const nextRunAt = payload.enabled

@@ -62,6 +62,14 @@ function readAutoPostPanelSource() {
   return readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../../components/auto-post-panel.tsx"), "utf8");
 }
 
+function readQueueServiceSource() {
+  return readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "queue.ts"), "utf8");
+}
+
+function readAutoPostRouteSource() {
+  return readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../../app/api/auto-post/route.ts"), "utf8");
+}
+
 function sourceBetween(source: string, start: string, end: string) {
   const startIndex = source.indexOf(start);
   const endIndex = source.indexOf(end, startIndex + start.length);
@@ -252,6 +260,19 @@ function testShopeeSourceSpecificSelectionGuards() {
   assert.ok(source.includes("getShopeeProductHardSelectionRejectionReason"));
   assert.ok(source.includes("fallback_relaxed_selection"));
   assert.ok(source.includes("PRODUCT_SELECTION_ROOT_CAUSE"));
+  assert.ok(source.includes("all_products"));
+  assert.ok(source.includes("fetchShopeeAllProductsForSelectedCategories"));
+  assert.ok(source.includes("SHOPEE_ALL_PRODUCTS_FETCH_STARTED"));
+  assert.ok(source.includes("SHOPEE_ALL_PRODUCTS_CATEGORY_FETCHED"));
+  assert.ok(source.includes("SHOPEE_ALL_PRODUCTS_FETCH_COMPLETED"));
+  assert.ok(source.includes("getRecentlyPostedProductKeys"));
+  assert.ok(source.includes("SHOPEE_REPOST_COOLDOWN_HOURS"));
+  assert.ok(source.includes("duplicate_product_48h"));
+  assert.ok(source.includes("reserved_product"));
+  assert.ok(source.includes("PRODUCT_RESERVED"));
+  assert.ok(source.includes("PRODUCT_RESERVATION_RELEASED"));
+  assert.ok(source.includes("DUPLICATE_PRODUCT_SKIPPED_48H"));
+  assert.ok(source.includes("RECENT_PRODUCT_EXCLUSION_APPLIED"));
   assert.equal(source.includes("function weightedRandomProduct"), false);
   console.log("PASS Shopee source-specific selection guards");
 }
@@ -503,6 +524,42 @@ function testShopeeProductIntelligenceLayerGuards() {
   console.log("PASS Shopee Product Intelligence layer guards");
 }
 
+function testShopeeAllProductsAndCooldownGuards() {
+  const source = readShopeeAffiliateServiceSource();
+  const panelSource = readAutoPostPanelSource();
+  const routeSource = readAutoPostRouteSource();
+  const queueSource = readQueueServiceSource();
+  const packageSource = sourceBetween(source, "export async function recordShopeeQueueItem", "export async function logShopeeAutomationEvent");
+  assert.ok(source.includes("all_products"));
+  assert.ok(source.includes("fetchShopeeAllProductsForSelectedCategories"));
+  assert.ok(source.includes("selectedCategoryIds"));
+  assert.ok(source.includes("shuffleWithShopeeSeed"));
+  assert.ok(source.includes("sortModes"));
+  assert.ok(source.includes("dedupeShopeeProducts"));
+  assert.ok(source.includes("getShopeeCanonicalProductKey"));
+  assert.ok(source.includes("getRecentlyPostedProductKeys"));
+  assert.ok(source.includes("lookbackHours"));
+  assert.ok(source.includes("SHOPEE_REPOST_COOLDOWN_HOURS"));
+  assert.ok(source.includes("getActiveReservedProductKeys"));
+  assert.ok(source.includes("reserveShopeeProductKey"));
+  assert.ok(source.includes("releaseShopeeProductReservation"));
+  assert.ok(source.includes("ShopeeProductReservation"));
+  assert.ok(source.includes("duplicate_product_48h"));
+  assert.ok(source.includes("reserved_product"));
+  assert.ok(source.includes("excludedRecent48h"));
+  assert.ok(source.includes("excludedReserved"));
+  assert.equal(packageSource.includes("ProductPostHistory.create"), false);
+  assert.ok(queueSource.includes("POSTED_PRODUCT_HISTORY_SAVED"));
+  assert.ok(queueSource.includes("status === \"published\""));
+  assert.ok(queueSource.includes("ProductPostHistory.findOneAndUpdate"));
+  assert.ok(queueSource.includes("releaseShopeeProductReservation"));
+  assert.ok(panelSource.includes("All Products / สินค้าทั้งหมดในหมวดที่เลือก"));
+  assert.ok(panelSource.includes("Selected categories"));
+  assert.ok(panelSource.includes("allProductsCategoryMissing"));
+  assert.ok(routeSource.includes("all_products_category_required"));
+  console.log("PASS Shopee all_products cooldown and reservation guards");
+}
+
 function testAutoPostProcessStepNoEligibleProductsReturnsDiagnostics() {
   const source = readAutoPostProcessStepRouteSource();
   assert.ok(source.includes("shopee_no_eligible_products"));
@@ -530,4 +587,5 @@ testShopeeVisionRescueUsesActualImageInput();
 testShopeeCaptionHumanReadabilityGuards();
 testShopeeCaptionFallbackGenerationGuards();
 testShopeeProductIntelligenceLayerGuards();
+testShopeeAllProductsAndCooldownGuards();
 testAutoPostProcessStepNoEligibleProductsReturnsDiagnostics();
