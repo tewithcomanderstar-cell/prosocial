@@ -7,9 +7,15 @@ import {
 } from "@/lib/services/shopee-affiliate-core";
 import {
   analyzeShopeeProductImageUnderstanding,
-  generateFacebookContent,
   generateProductReferenceImage,
+  analyzeThaiBuyerProductIntelligence,
+  generateThaiSocialProductCaption,
+  generateThaiLifestyleImagePrompt,
   getContentModel,
+  type ThaiSocialCaptionResult,
+  type ThaiSocialCaptionStyle,
+  type ThaiLifestyleImagePromptResult,
+  type ThaiBuyerProductIntelligenceResult,
   type ShopeeVisionUnderstandingResult
 } from "@/lib/services/ai";
 import { assertNoLargeMongoFields, uploadAutoPostImage } from "@/lib/services/blob-storage";
@@ -65,7 +71,23 @@ export type ShopeeProductIntelligence = {
   price: number;
   soldCount: number;
   shopName: string;
+  painPoint: {
+    primary: string;
+    secondary: string;
+  };
+  triggerMoment: {
+    time: string;
+    emotion: string;
+    season: string | null;
+  };
+  humanVoice: {
+    howFriendDescribes: string;
+    beforeAfter: string;
+    oneLinerHook: string;
+  };
+  contentTone: "friend" | "reviewer" | "homemaker" | "expert" | "storyteller";
   confidenceScore: number;
+  lowConfidenceReason?: string;
   confidence: number;
   source: "text" | "vision_rescue" | "merged";
   imageCount: number;
@@ -3555,6 +3577,15 @@ function assertValidShopeeProductUnderstanding(understanding: ShopeeProductUnder
 
 const SHOPEE_FORBIDDEN_PRODUCT_INTELLIGENCE_PHRASE_PATTERN =
   /ใช้ตามลักษณะสินค้าที่ระบุ|ดูรายละเอียดให้ตรงกับการใช้งานที่ต้องการ|ใช้งานได้หลากหลาย|เหมาะสำหรับทุกเพศทุกวัย|ใช้ได้ตรงกับจุดประสงค์มากขึ้น|เลือกใช้ได้ตรงกับประเภทสินค้า|เหมาะกับคนที่กำลังมองหา\s*ใช้งานจริง|สินค้าคุณภาพดี|คุ้มค่า\s*คุ้มราคา/iu;
+const THAI_SOCIAL_CAPTION_FORBIDDEN_WORDS = [
+  "คุณภาพดี",
+  "คุ้มค่า",
+  "คุ้มราคา",
+  "เหมาะสำหรับทุกเพศทุกวัย",
+  "สินค้าดีมีคุณภาพ",
+  "ไม่ควรพลาด",
+  "รีบสั่ง"
+];
 
 function getShopeeProductIntelligenceFromProduct(product: ShopeeProductRecord) {
   const intelligence = (product as ShopeeProductRecord & { productIntelligence?: ShopeeProductIntelligence }).productIntelligence;
@@ -3658,6 +3689,8 @@ function buildShopeeProductIntelligence(input: {
     getShopeeProductImageSourceText(product),
     imageUrls.length ? `${productNameThai} จากรูปสินค้า ${imageUrls.length} รูป` : ""
   ], product, 3).join(" | ");
+  const usageMoment = usageScenarios[0] || mainPurpose || `ตอนต้องใช้${productNameThai}`;
+  const benefitMoment = keyBenefits[0] || mainPurpose || `ช่วยให้${usageMoment}ง่ายขึ้น`;
   return {
     productId: product.productId,
     itemId: product.itemId,
@@ -3679,6 +3712,21 @@ function buildShopeeProductIntelligence(input: {
     price: getEffectiveProductPrice(product),
     soldCount: toFiniteNumber(product.salesCount),
     shopName: product.shopName ?? "",
+    painPoint: {
+      primary: cleanShopeeProductIntelligenceLine(understanding.captionAngle || understanding.keySellingPoint || `เวลาต้อง${mainPurpose || `ใช้${productNameThai}`}แล้วไม่อยากเสียเวลาเลือกผิด`, product),
+      secondary: cleanShopeeProductIntelligenceLine(`กังวลว่าจะไม่ตรงกับ${usageMoment}`, product)
+    },
+    triggerMoment: {
+      time: cleanShopeeProductIntelligenceLine(usageMoment, product),
+      emotion: cleanShopeeProductIntelligenceLine(`อยากให้${benefitMoment}`, product),
+      season: null
+    },
+    humanVoice: {
+      howFriendDescribes: cleanShopeeProductIntelligenceLine(`ตัวนี้เอาไว้${mainPurpose || usageMoment} ดูตรงกับที่ต้องใช้จริง`, product),
+      beforeAfter: cleanShopeeProductIntelligenceLine(`ก่อนใช้ยังต้องจัดการเองหลายขั้น หลังมี${productNameThai}ก็${benefitMoment}`, product),
+      oneLinerHook: cleanShopeeProductIntelligenceLine(`${productNameThai}ที่ช่วยเรื่อง${mainPurpose || usageMoment}`, product)
+    },
+    contentTone: "reviewer",
     confidenceScore: confidence,
     confidence,
     source: understanding.source,
@@ -3694,9 +3742,19 @@ function getShopeeProductIntelligenceFailureReasons(intelligence: ShopeeProductI
   if (!intelligence.targetCustomer?.trim()) failures.push("missing_target_customer");
   if (!intelligence.usageScenarios.length) failures.push("missing_real_use_case");
   if (!intelligence.keyBenefits.length) failures.push("missing_real_benefit");
+  if (!intelligence.painPoint?.primary?.trim()) failures.push("missing_primary_pain_point");
+  if (!intelligence.triggerMoment?.time?.trim()) failures.push("missing_trigger_moment");
+  if (!intelligence.humanVoice?.howFriendDescribes?.trim()) failures.push("missing_human_voice");
   if (SHOPEE_FORBIDDEN_PRODUCT_INTELLIGENCE_PHRASE_PATTERN.test([
     intelligence.mainPurpose,
     intelligence.targetCustomer,
+    intelligence.painPoint?.primary,
+    intelligence.painPoint?.secondary,
+    intelligence.triggerMoment?.time,
+    intelligence.triggerMoment?.emotion,
+    intelligence.humanVoice?.howFriendDescribes,
+    intelligence.humanVoice?.beforeAfter,
+    intelligence.humanVoice?.oneLinerHook,
     ...intelligence.usageScenarios,
     ...intelligence.keyBenefits,
     ...intelligence.uniqueSellingPoints
@@ -3741,7 +3799,16 @@ function applyShopeeProductIntelligence(product: ShopeeProductRecord, intelligen
     `Usage scenarios: ${intelligence.usageScenarios.join("; ")}`,
     `Key benefits: ${intelligence.keyBenefits.join("; ")}`,
     `Unique selling points: ${intelligence.uniqueSellingPoints.join("; ")}`,
-    `Product facts: ${intelligence.productFacts.join("; ")}`
+    `Product facts: ${intelligence.productFacts.join("; ")}`,
+    `Buyer pain point: ${intelligence.painPoint.primary}`,
+    `Buyer secondary concern: ${intelligence.painPoint.secondary}`,
+    `Trigger moment: ${intelligence.triggerMoment.time}`,
+    `Trigger emotion: ${intelligence.triggerMoment.emotion}`,
+    `Friend voice: ${intelligence.humanVoice.howFriendDescribes}`,
+    `Before/after: ${intelligence.humanVoice.beforeAfter}`,
+    `One-line hook: ${intelligence.humanVoice.oneLinerHook}`,
+    `Content tone: ${intelligence.contentTone}`,
+    intelligence.lowConfidenceReason ? `Low confidence reason: ${intelligence.lowConfidenceReason}` : ""
   ].filter(Boolean).join("\n");
   return {
     ...product,
@@ -3749,6 +3816,52 @@ function applyShopeeProductIntelligence(product: ShopeeProductRecord, intelligen
     productDescription: compactProductText(intelligenceDescription, 1600),
     category: [intelligence.category, intelligence.productType].filter(Boolean).join(" / ") || product.category,
     productIntelligence: intelligence
+  };
+}
+
+function mergeThaiBuyerProductIntelligence(
+  product: ShopeeProductRecord,
+  base: ShopeeProductIntelligence,
+  thaiBuyer: ThaiBuyerProductIntelligenceResult
+): ShopeeProductIntelligence {
+  const confidence = Math.round(Math.max(0, Math.min(1, thaiBuyer.confidenceScore)) * 100);
+  const productNameThai = cleanShopeeProductIntelligenceLine(thaiBuyer.productNameThai, product, base.productNameThai);
+  const productType = cleanShopeeProductIntelligenceLine(thaiBuyer.productType, product, base.productType);
+  const mainPurpose = cleanShopeeProductIntelligenceLine(thaiBuyer.mainPurpose, product, base.mainPurpose);
+  const targetCustomer = cleanShopeeProductIntelligenceLine(thaiBuyer.targetCustomer, product, base.targetCustomer);
+  const usageScenarios = uniqueShopeeIntelligenceLines([...thaiBuyer.usageScenarios, ...base.usageScenarios], product, 5);
+  const keyBenefits = uniqueShopeeIntelligenceLines([...thaiBuyer.keyBenefits, ...base.keyBenefits], product, 5);
+  const productFacts = uniqueShopeeIntelligenceLines([...thaiBuyer.productFacts, ...base.productFacts], product, 6);
+  const imageProductSummary = cleanShopeeProductIntelligenceLine(thaiBuyer.imageProductSummary, product, base.imageProductSummary);
+  return {
+    ...base,
+    productNameThai,
+    productName: productNameThai || base.productName,
+    productType,
+    mainPurpose,
+    targetCustomer,
+    usageScenarios,
+    keyBenefits,
+    productFacts,
+    imageProductSummary,
+    painPoint: {
+      primary: cleanShopeeProductIntelligenceLine(thaiBuyer.painPoint.primary, product, base.painPoint.primary),
+      secondary: cleanShopeeProductIntelligenceLine(thaiBuyer.painPoint.secondary, product, base.painPoint.secondary)
+    },
+    triggerMoment: {
+      time: cleanShopeeProductIntelligenceLine(thaiBuyer.triggerMoment.time, product, base.triggerMoment.time),
+      emotion: cleanShopeeProductIntelligenceLine(thaiBuyer.triggerMoment.emotion, product, base.triggerMoment.emotion),
+      season: thaiBuyer.triggerMoment.season ? cleanShopeeProductIntelligenceLine(thaiBuyer.triggerMoment.season, product, "") || null : null
+    },
+    humanVoice: {
+      howFriendDescribes: cleanShopeeProductIntelligenceLine(thaiBuyer.humanVoice.howFriendDescribes, product, base.humanVoice.howFriendDescribes),
+      beforeAfter: cleanShopeeProductIntelligenceLine(thaiBuyer.humanVoice.beforeAfter, product, base.humanVoice.beforeAfter),
+      oneLinerHook: cleanShopeeProductIntelligenceLine(thaiBuyer.humanVoice.oneLinerHook, product, base.humanVoice.oneLinerHook)
+    },
+    contentTone: thaiBuyer.contentTone || base.contentTone,
+    confidenceScore: confidence,
+    confidence,
+    lowConfidenceReason: thaiBuyer.lowConfidenceReason
   };
 }
 
@@ -3809,7 +3922,57 @@ async function createShopeeProductIntelligenceWithTracing(input: {
       });
     }
   }
-  const intelligence = buildShopeeProductIntelligence({ product: input.product, understanding });
+  let intelligence = buildShopeeProductIntelligence({ product: input.product, understanding });
+  const metadataText = ["productFeatures", "features", "specifications", "specs", "attributes", "variants"]
+    .flatMap((key) => stringifyShopeeMetadataValue((input.product as ShopeeProductRecord & Record<string, unknown>)[key]))
+    .join("; ");
+  try {
+    const thaiBuyerIntelligence = await analyzeThaiBuyerProductIntelligence({
+      userId: input.userId,
+      productTitle: input.product.productName,
+      productDescription: compactProductText(input.product.productDescription, 1200),
+      category: input.product.category,
+      specs: compactProductText(metadataText, 1200),
+      price: getEffectiveProductPrice(input.product),
+      soldCount: toFiniteNumber(input.product.salesCount),
+      rating: toFiniteNumber(input.product.rating),
+      imageProductSummary: intelligence.imageProductSummary
+    });
+    intelligence = mergeThaiBuyerProductIntelligence(input.product, intelligence, thaiBuyerIntelligence);
+    await logShopeePackageStage({
+      userId: input.userId,
+      jobId: input.jobId,
+      pageId: input.pageId,
+      product: input.product,
+      step: "THAI_BUYER_PRODUCT_INTELLIGENCE_COMPLETED",
+      status: "success",
+      message: "Thai buyer psychology analysis enhanced Product Intelligence",
+      metadata: {
+        productId: input.product.productId,
+        confidenceScore: thaiBuyerIntelligence.confidenceScore,
+        lowConfidenceReason: thaiBuyerIntelligence.lowConfidenceReason ?? "",
+        painPoint: thaiBuyerIntelligence.painPoint,
+        triggerMoment: thaiBuyerIntelligence.triggerMoment,
+        humanVoice: thaiBuyerIntelligence.humanVoice,
+        contentTone: thaiBuyerIntelligence.contentTone
+      }
+    });
+  } catch (error) {
+    await logShopeePackageStage({
+      userId: input.userId,
+      jobId: input.jobId,
+      pageId: input.pageId,
+      product: input.product,
+      step: "THAI_BUYER_PRODUCT_INTELLIGENCE_FAILED",
+      status: "failed",
+      message: "Thai buyer psychology analysis failed; using deterministic Product Intelligence",
+      metadata: {
+        productId: input.product.productId,
+        fallbackConfidence: intelligence.confidence
+      },
+      error
+    });
+  }
   try {
     assertValidShopeeProductIntelligence(input.product, intelligence);
   } catch (error) {
@@ -3882,6 +4045,121 @@ function getShopeeCaptionImageProductMismatch(input: {
     };
   }
   return null;
+}
+
+function getEnglishLetterRatio(value: string) {
+  const letters = value.match(/[A-Za-z]/g)?.length ?? 0;
+  const thaiLetters = value.match(/[\u0E00-\u0E7F]/g)?.length ?? 0;
+  return letters / Math.max(1, letters + thaiLetters);
+}
+
+function validateThaiLifestyleImagePromptResult(input: {
+  result: ThaiLifestyleImagePromptResult;
+  productIntelligence: ShopeeProductIntelligence;
+}) {
+  const fullPrompt = input.result.imagePrompt.fullPrompt.trim();
+  if (!fullPrompt) throw new Error("thai_lifestyle_image_prompt_empty");
+  if (input.result.productId && input.result.productId !== input.productIntelligence.productId) {
+    throw new Error("thai_lifestyle_image_prompt_product_id_mismatch");
+  }
+  if (!input.result.matchesCaptionMood) throw new Error("thai_lifestyle_image_prompt_caption_mood_mismatch");
+  if (input.result.confidenceScore > 0 && input.result.confidenceScore < 0.7) throw new Error("thai_lifestyle_image_prompt_low_confidence");
+  if (getEnglishLetterRatio(fullPrompt) < 0.85) throw new Error("thai_lifestyle_image_prompt_full_prompt_not_english");
+  if (/white background|plain white|product shot|packshot|studio lighting|studio product|isolated product/iu.test(fullPrompt)) {
+    throw new Error("thai_lifestyle_image_prompt_forbidden_packshot_language");
+  }
+}
+
+function appendLifestylePromptToShopeePromptSet(
+  promptSet: ReturnType<typeof buildShopeeImagePromptSet>,
+  lifestylePrompt: ThaiLifestyleImagePromptResult
+) {
+  const sceneContext = [
+    "Lifestyle scene direction from Product Intelligence:",
+    `Scene: ${lifestylePrompt.imagePrompt.scene}.`,
+    `Subject: ${lifestylePrompt.imagePrompt.subject}.`,
+    `Product placement: ${lifestylePrompt.imagePrompt.productPlacement}.`,
+    `Mood: ${lifestylePrompt.imagePrompt.mood}.`,
+    `Lighting: ${lifestylePrompt.imagePrompt.lighting}.`,
+    `Color palette: ${lifestylePrompt.imagePrompt.colorPalette}.`,
+    `Human presence: ${lifestylePrompt.imagePrompt.humanPresence}.`,
+    `Style reference: ${lifestylePrompt.imagePrompt.styleReference}.`,
+    `Full English scene prompt: ${lifestylePrompt.imagePrompt.fullPrompt}.`,
+    lifestylePrompt.imagePrompt.avoidElements.length
+      ? `Avoid these scene elements: ${lifestylePrompt.imagePrompt.avoidElements.join(", ")}.`
+      : "",
+    "Keep the exact referenced Shopee product identity unchanged while placing it naturally in this real-life context."
+  ].filter(Boolean).join(" ");
+  return {
+    ...promptSet,
+    consistencyInstructions: [
+      ...promptSet.consistencyInstructions,
+      sceneContext
+    ],
+    prompts: promptSet.prompts.map((prompt) => ({
+      ...prompt,
+      prompt: `${prompt.prompt} ${sceneContext}`
+    }))
+  };
+}
+
+async function buildLifestyleAwareShopeeImagePromptSet(input: {
+  userId: string;
+  jobId?: string;
+  pageId?: string;
+  product: ShopeeProductRecord;
+  style: ShopeeCaptionStyle;
+  socialCaptionStyle: ThaiSocialCaptionStyle;
+  productIntelligence: ShopeeProductIntelligence;
+}) {
+  const promptSet = buildShopeeImagePromptSet(input.product, input.style);
+  const captionStyle = input.socialCaptionStyle;
+  try {
+    const lifestylePrompt = await generateThaiLifestyleImagePrompt({
+      userId: input.userId,
+      productId: input.product.productId,
+      captionStyle,
+      productIntelligence: input.productIntelligence
+    });
+    validateThaiLifestyleImagePromptResult({
+      result: lifestylePrompt,
+      productIntelligence: input.productIntelligence
+    });
+    const enrichedPromptSet = appendLifestylePromptToShopeePromptSet(promptSet, lifestylePrompt);
+    await logShopeePackageStage({
+      userId: input.userId,
+      jobId: input.jobId,
+      pageId: input.pageId,
+      product: input.product,
+      step: "THAI_LIFESTYLE_IMAGE_PROMPT_USED",
+      status: "success",
+      message: "Lifestyle image prompt matched Product Intelligence and caption mood",
+      metadata: {
+        productId: input.product.productId,
+        captionStyle,
+        matchesCaptionMood: lifestylePrompt.matchesCaptionMood,
+        confidenceScore: lifestylePrompt.confidenceScore,
+        imagePrompt: lifestylePrompt.imagePrompt
+      }
+    });
+    return enrichedPromptSet;
+  } catch (error) {
+    await logShopeePackageStage({
+      userId: input.userId,
+      jobId: input.jobId,
+      pageId: input.pageId,
+      product: input.product,
+      step: "THAI_LIFESTYLE_IMAGE_PROMPT_FAILED",
+      status: "failed",
+      message: "Lifestyle image prompt generation failed; using deterministic UGC image prompts",
+      metadata: {
+        productId: input.product.productId,
+        captionStyle
+      },
+      error
+    });
+    return promptSet;
+  }
 }
 
 function getShopeeStoryboardInputText(product: ShopeeProductRecord) {
@@ -5039,7 +5317,11 @@ function buildDeterministicShopeeFallbackCaption(input: {
   const action = compactProductText(productIntelligence?.mainPurpose || getShopeeEntityActionText(storyboard), 82);
   const context = compactProductText(productIntelligence?.usageScenarios[0] || getShopeeEntityContextText(storyboard), 90);
   const targetCustomer = compactProductText(productIntelligence?.targetCustomer || storyboard.targetUser || "คนที่มีโจทย์ใช้งานแบบนี้", 92);
+  const buyerHook = compactProductText(productIntelligence?.humanVoice.oneLinerHook || productIntelligence?.painPoint.primary || "", 120);
   const benefitPool = dedupeCaptionBenefitLines([
+    productIntelligence?.humanVoice.howFriendDescribes,
+    productIntelligence?.humanVoice.beforeAfter,
+    productIntelligence?.painPoint.primary,
     ...(productIntelligence?.keyBenefits ?? []),
     ...(productIntelligence?.uniqueSellingPoints ?? []),
     storyboard.dailyBenefit,
@@ -5047,7 +5329,7 @@ function buildDeterministicShopeeFallbackCaption(input: {
     storyboard.problemSolved,
     action,
     context
-  ])
+  ].filter((line): line is string => Boolean(line)))
     .map((line) => compactProductText(humanizeShopeeStoryboardCaptionLine(line, storyboard), 82).replace(/[.!。?？]+$/u, ""))
     .filter(Boolean);
   const [benefit1, benefit2, benefit3, benefit4] = [
@@ -5060,7 +5342,7 @@ function buildDeterministicShopeeFallbackCaption(input: {
   const caption = [
     productLabel,
     "",
-    `${action}${context ? ` ใน${context}` : ""} ✅`,
+    `${buyerHook || `${action}${context ? ` ใน${context}` : ""}`} ✅`,
     "",
     `✅ ${benefit1}`,
     `✨ ${benefit2}`,
@@ -5614,21 +5896,128 @@ function validateStoryboardAffiliateCaption(caption: string, storyboard: ShopeeP
   return normalized;
 }
 
-function buildShopeeStoryboardCaption(input: {
+async function buildShopeeStoryboardCaption(input: {
   product: ShopeeProductRecord;
   storyboard: ShopeeProductStoryboard;
   affiliateLink: string;
+  style?: ShopeeCaptionStyle;
+  socialCaptionStyle?: ThaiSocialCaptionStyle;
+  userId?: string;
   jobId?: string;
 }) {
-  return buildShopeeStoryboardCaptionResult(input).caption;
+  return (await buildShopeeStoryboardCaptionResult(input)).caption;
 }
 
-function buildShopeeStoryboardCaptionResult(input: {
+function mapShopeeCaptionStyleToThaiSocialStyle(style?: ShopeeCaptionStyle): ThaiSocialCaptionStyle {
+  switch (style) {
+    case "problem_solution":
+      return "before_after";
+    case "review_style":
+      return "friend_tip";
+    case "deal_alert":
+      return "shock_hook";
+    case "lifestyle":
+      return "story";
+    case "urgency":
+      return "question";
+    case "soft_sell":
+    default:
+      return "list_benefit";
+  }
+}
+
+function isSpecificThaiTargetCustomer(targetCustomer?: string) {
+  const text = normalizeTextEncoding(targetCustomer ?? "").trim();
+  if (text.length < 8) return false;
+  return !/คนทั่วไป|ผู้ใช้งานทั่วไป|ทุกคน|ทุกเพศทุกวัย|คนที่ต้องการ|คนที่กำลังมองหา|ลูกค้าทั่วไป/iu.test(text);
+}
+
+function resolveThaiSocialCaptionStyle(input: {
+  configuredStyle?: ShopeeCaptionStyle;
+  productIntelligence: ShopeeProductIntelligence;
+}) {
+  if (input.configuredStyle && input.configuredStyle !== "soft_sell") {
+    return {
+      style: mapShopeeCaptionStyleToThaiSocialStyle(input.configuredStyle),
+      source: "user_setting"
+    };
+  }
+  const emotion = normalizeTextEncoding([
+    input.productIntelligence.triggerMoment.emotion,
+    input.productIntelligence.painPoint.primary,
+    input.productIntelligence.painPoint.secondary
+  ].filter(Boolean).join(" "));
+  if (/เหนื่อย|หนัก|ล้า|กังวล|เครียด|วุ่น|ยุ่งยาก|เบื่อ/iu.test(emotion)) {
+    return { style: "before_after" as const, source: "auto_emotion_heavy" };
+  }
+  if (input.productIntelligence.soldCount > 1000) {
+    return { style: "shock_hook" as const, source: "auto_sold_count_gt_1000" };
+  }
+  if (isSpecificThaiTargetCustomer(input.productIntelligence.targetCustomer)) {
+    return { style: "friend_tip" as const, source: "auto_specific_target_customer" };
+  }
+  return { style: "story" as const, source: "auto_default_story" };
+}
+
+function getThaiSocialCaptionGenericWords(caption: string) {
+  return THAI_SOCIAL_CAPTION_FORBIDDEN_WORDS.filter((word) => caption.includes(word));
+}
+
+function validateThaiSocialCaptionCandidate(input: {
+  captionResult: ThaiSocialCaptionResult;
+  productIntelligence: ShopeeProductIntelligence;
+}) {
+  const caption = normalizeTextEncoding(input.captionResult.captionText).trim();
+  const productName = normalizeShopeeEntityMentionText(input.productIntelligence.productNameThai || input.productIntelligence.productName);
+  const firstLine = normalizeShopeeEntityMentionText(caption.split(/\r?\n/).find(Boolean) ?? "");
+  const painPoint = normalizeShopeeEntityMentionText(input.productIntelligence.painPoint.primary);
+  const triggerTime = normalizeShopeeEntityMentionText(input.productIntelligence.triggerMoment.time);
+  const triggerEmotion = normalizeShopeeEntityMentionText(input.productIntelligence.triggerMoment.emotion);
+  const genericWordsFound = Array.from(new Set([
+    ...input.captionResult.genericWordsFound,
+    ...getThaiSocialCaptionGenericWords(caption)
+  ])).filter(Boolean);
+  if (!caption) throw new Error("thai_social_caption_empty");
+  if (genericWordsFound.length) throw new Error(`thai_social_caption_generic_words:${genericWordsFound.join(",")}`);
+  if (productName && firstLine.startsWith(productName)) throw new Error("thai_social_caption_starts_with_product_name");
+  const hasBuyerMoment = [painPoint, triggerTime, triggerEmotion]
+    .filter((token) => token.length >= 6)
+    .some((token) => normalizeShopeeEntityMentionText(caption).includes(token));
+  if (!hasBuyerMoment) throw new Error("thai_social_caption_missing_painpoint_or_trigger");
+  if (input.captionResult.qualityScore > 0 && input.captionResult.qualityScore < 0.7) throw new Error("thai_social_caption_low_quality_score");
+  if (input.captionResult.productId && input.captionResult.productId !== input.productIntelligence.productId) {
+    throw new Error("thai_social_caption_product_id_mismatch");
+  }
+}
+
+function buildThaiSocialCaptionForValidation(input: {
+  captionText: string;
   product: ShopeeProductRecord;
   storyboard: ShopeeProductStoryboard;
   affiliateLink: string;
+}) {
+  const body = normalizeShopeeCaptionLinkLine(input.captionText, input.affiliateLink).trim();
+  return [
+    body,
+    "",
+    formatShopeeStoryboardPriceLine(input.product, input.storyboard),
+    "🛒 ดูรายละเอียดได้ที่ลิงก์ด้านล่าง",
+    "",
+    formatShopeeShortLinkLine(input.affiliateLink),
+    "",
+    getShopeeStoryboardHashtags(input.product, input.storyboard).join(" ")
+  ].join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+async function buildShopeeStoryboardCaptionResult(input: {
+  product: ShopeeProductRecord;
+  storyboard: ShopeeProductStoryboard;
+  affiliateLink: string;
+  style?: ShopeeCaptionStyle;
+  socialCaptionStyle?: ThaiSocialCaptionStyle;
+  userId?: string;
   jobId?: string;
-}): ShopeeStoryboardCaptionResult {
+}): Promise<ShopeeStoryboardCaptionResult> {
   const { product, storyboard, affiliateLink } = input;
   const promptInput = getShopeeCaptionPromptInput({ product, storyboard, affiliateLink });
   const productIntelligence = getShopeeProductIntelligenceFromProduct(product);
@@ -5643,6 +6032,10 @@ function buildShopeeStoryboardCaptionResult(input: {
     targetCustomer: productIntelligence?.targetCustomer ?? storyboard.targetUser,
     usageScenarios: productIntelligence?.usageScenarios ?? [storyboard.realUsageScenario].filter(Boolean),
     keyBenefitsFromIntelligence: productIntelligence?.keyBenefits ?? [],
+    painPoint: productIntelligence?.painPoint ?? null,
+    triggerMoment: productIntelligence?.triggerMoment ?? null,
+    humanVoice: productIntelligence?.humanVoice ?? null,
+    contentTone: productIntelligence?.contentTone ?? "",
     price: productIntelligence?.price ?? getEffectiveProductPrice(product),
     productDescription: promptInput.productDescription,
     keySellingPoints: promptInput.keySellingPoints,
@@ -5673,6 +6066,68 @@ function buildShopeeStoryboardCaptionResult(input: {
     hasStoryboardSummary: Boolean(promptInput.storyboardSummary.productEntity && promptInput.storyboardSummary.mainUseCase),
     instruction: "Compose Thai seller-style caption from productEntity, productType, mainUseCase, and human benefit lines. Do not render metadata field names or labels such as usageContext/mainUseCase/productEntity/targetAudience."
   });
+  if (productIntelligence) {
+    const resolvedStyle = input.socialCaptionStyle
+      ? { style: input.socialCaptionStyle, source: "package_resolved" }
+      : resolveThaiSocialCaptionStyle({ configuredStyle: input.style, productIntelligence });
+    const socialCaptionStyle = resolvedStyle.style;
+    try {
+      const socialCaption = await generateThaiSocialProductCaption({
+        userId: input.userId,
+        productId: product.productId,
+        captionStyle: socialCaptionStyle,
+        productIntelligence
+      });
+      validateThaiSocialCaptionCandidate({
+        captionResult: socialCaption,
+        productIntelligence
+      });
+      const socialCaptionForValidation = buildThaiSocialCaptionForValidation({
+        captionText: socialCaption.captionText,
+        product,
+        storyboard,
+        affiliateLink
+      });
+      const normalizedSocialCaption = validateStoryboardAffiliateCaption(
+        socialCaptionForValidation,
+        storyboard,
+        product,
+        affiliateLink,
+        input.jobId
+      );
+      console.info("[THAI_SOCIAL_CAPTION_USED]", {
+        jobId: input.jobId ?? "",
+        productId: product.productId,
+        style: socialCaption.style,
+        styleSource: resolvedStyle.source,
+        tone: socialCaption.tone,
+        openingType: socialCaption.openingType,
+        wordCount: socialCaption.wordCount,
+        emojiCount: socialCaption.emojiCount,
+        genericWordsFound: socialCaption.genericWordsFound,
+        qualityScore: socialCaption.qualityScore,
+        captionPreview: normalizedSocialCaption.slice(0, 500)
+      });
+      return {
+        caption: assertValidTextEncoding(normalizedSocialCaption, "Shopee Thai social caption"),
+        fallbackUsed: false,
+        diagnostics: getShopeeCaptionGenerationDiagnostics({
+          product,
+          storyboard,
+          affiliateLink,
+          promptInput
+        })
+      };
+    } catch (error) {
+      console.warn("[THAI_SOCIAL_CAPTION_FAILED]", {
+        jobId: input.jobId ?? "",
+        productId: product.productId,
+        style: socialCaptionStyle,
+        styleSource: resolvedStyle.source,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
   const benefits = buildShopeeStoryboardBenefits(storyboard);
   const solutionLine = buildShopeeStoryboardSolutionLine(storyboard);
   const caption = [
@@ -7824,6 +8279,7 @@ export async function generateShopeeCaption(input: {
   product: ShopeeProductRecord;
   affiliateLink: string;
   style?: ShopeeCaptionStyle;
+  socialCaptionStyle?: ThaiSocialCaptionStyle;
   disclosureText?: string;
   jobId?: string;
 }) {
@@ -8292,10 +8748,13 @@ export async function generateShopeeCaption(input: {
   let storyboardCaption: string;
   let captionResult: ShopeeStoryboardCaptionResult | null = null;
   try {
-    captionResult = buildShopeeStoryboardCaptionResult({
+    captionResult = await buildShopeeStoryboardCaptionResult({
       product: productForStoryboard,
       storyboard,
       affiliateLink: input.affiliateLink,
+      style: input.style,
+      socialCaptionStyle: input.socialCaptionStyle,
+      userId: input.userId,
       jobId: input.jobId
     });
     storyboardCaption = captionResult.caption;
@@ -9571,6 +10030,27 @@ export async function buildShopeePostPackage(input: {
     product: input.product
   });
   const productForPackage = applyShopeeProductIntelligence(input.product, productIntelligence);
+  const resolvedCaptionStyle = resolveThaiSocialCaptionStyle({
+    configuredStyle: input.captionStyle ?? "soft_sell",
+    productIntelligence
+  });
+  await logShopeePackageStage({
+    userId: input.userId,
+    jobId: input.jobId,
+    pageId: input.pageId,
+    product: productForPackage,
+    step: "CAPTION_STYLE_RESOLVED",
+    status: "success",
+    message: "Resolved Thai social caption style before caption and image prompt generation",
+    metadata: {
+      configuredStyle: input.captionStyle ?? "soft_sell",
+      resolvedCaptionStyle: resolvedCaptionStyle.style,
+      styleSource: resolvedCaptionStyle.source,
+      triggerEmotion: productIntelligence.triggerMoment.emotion,
+      soldCount: productIntelligence.soldCount,
+      targetCustomer: productIntelligence.targetCustomer
+    }
+  });
 
   const linkResult = await createOrReuseAffiliateShortLink({
     userId: input.userId,
@@ -9593,9 +10073,18 @@ export async function buildShopeePostPackage(input: {
     product: productForPackage,
     affiliateLink: shortAffiliateLink,
     style: input.captionStyle,
+    socialCaptionStyle: resolvedCaptionStyle.style,
     jobId: input.jobId
   });
-  const imagePromptSet = buildShopeeImagePromptSet(productForPackage, input.captionStyle ?? "soft_sell");
+  const imagePromptSet = await buildLifestyleAwareShopeeImagePromptSet({
+    userId: input.userId,
+    jobId: input.jobId,
+    pageId: input.pageId,
+    product: productForPackage,
+    style: input.captionStyle ?? "soft_sell",
+    socialCaptionStyle: resolvedCaptionStyle.style,
+    productIntelligence
+  });
   const imagePrompts = imagePromptSet.prompts.map((item) => item.prompt);
   const imagePrompt = imagePrompts[0] ?? buildShopeeImagePrompt(productForPackage, input.captionStyle ?? "soft_sell");
   const captionProductId = productIntelligence.productId || productForPackage.productId;

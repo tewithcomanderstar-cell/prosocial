@@ -39,6 +39,67 @@ export type ShopeeVisionUnderstandingResult = {
   visualEvidence: string[];
 };
 
+export type ThaiBuyerProductIntelligenceResult = {
+  productNameThai: string;
+  productType: string;
+  mainPurpose: string;
+  targetCustomer: string;
+  usageScenarios: string[];
+  keyBenefits: string[];
+  productFacts: string[];
+  imageProductSummary: string;
+  painPoint: {
+    primary: string;
+    secondary: string;
+  };
+  triggerMoment: {
+    time: string;
+    emotion: string;
+    season: string | null;
+  };
+  humanVoice: {
+    howFriendDescribes: string;
+    beforeAfter: string;
+    oneLinerHook: string;
+  };
+  contentTone: "friend" | "reviewer" | "homemaker" | "expert" | "storyteller";
+  confidenceScore: number;
+  lowConfidenceReason?: string;
+};
+
+export type ThaiSocialCaptionStyle = "story" | "question" | "before_after" | "friend_tip" | "shock_hook" | "list_benefit";
+
+export type ThaiSocialCaptionResult = {
+  captionText: string;
+  style: ThaiSocialCaptionStyle;
+  tone: string;
+  openingType: "emotion" | "question" | "fact" | "scene" | "hook";
+  wordCount: number;
+  emojiCount: number;
+  genericWordsFound: string[];
+  qualityScore: number;
+  productId: string;
+};
+
+export type ThaiLifestyleImagePromptResult = {
+  imagePrompt: {
+    scene: string;
+    subject: string;
+    productPlacement: string;
+    mood: string;
+    lighting: string;
+    colorPalette: string;
+    humanPresence: string;
+    avoidElements: string[];
+    styleReference: string;
+    fullPrompt: string;
+  };
+  productId: string;
+  matchesCaptionMood: boolean;
+  confidenceScore: number;
+};
+
+
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
@@ -375,6 +436,350 @@ Description: ${input.productDescription ?? ""}`
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export async function analyzeThaiBuyerProductIntelligence(input: {
+  productTitle: string;
+  productDescription?: string;
+  category?: string;
+  specs?: string;
+  price?: number;
+  soldCount?: number;
+  rating?: number;
+  imageProductSummary?: string;
+  userId?: string;
+}): Promise<ThaiBuyerProductIntelligenceResult> {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error("Thai buyer product intelligence is not configured: missing OPENAI_API_KEY");
+  }
+
+  const model = getContentModel();
+  const prompt = `Given the following product data:
+- Title: ${input.productTitle}
+- Description: ${input.productDescription ?? ""}
+- Category: ${input.category ?? ""}
+- Specs/Attributes: ${input.specs ?? ""}
+- Price: ${input.price ?? 0}
+- Sold Count: ${input.soldCount ?? 0}
+- Rating: ${input.rating ?? 0}
+- Image summary: ${input.imageProductSummary ?? ""}
+
+Analyze this product from the perspective of a REAL Thai buyer, not a marketer.
+Think about who actually buys this, when, and why.
+
+Return ONLY a valid JSON object with this exact structure:
+
+{
+  "productNameThai": "ชื่อสินค้าภาษาไทยที่เป็นธรรมชาติ",
+  "productType": "ประเภทสินค้า",
+  "mainPurpose": "จุดประสงค์หลักในการใช้งาน",
+  "targetCustomer": "กลุ่มลูกค้าที่ชัดเจน เช่น แม่บ้านที่มีลูกเล็ก, คนทำงานออฟฟิศ",
+  "usageScenarios": ["สถานการณ์ใช้งานจริง 1", "สถานการณ์ 2", "สถานการณ์ 3"],
+  "keyBenefits": ["ประโยชน์จริงที่รู้สึกได้ 1", "ประโยชน์ 2", "ประโยชน์ 3"],
+  "productFacts": ["ข้อมูลจริงจากสินค้า 1", "ข้อมูล 2"],
+  "imageProductSummary": "สรุปภาพสินค้า",
+
+  "painPoint": {
+    "primary": "ปัญหาหลักที่สินค้านี้แก้ได้ เขียนในมุมคนมีปัญหาจริง เช่น 'รู้สึกหนักใจทุกครั้งที่ต้องล้างจาน ยิ่งมีคราบมัน'",
+    "secondary": "ปัญหารองหรือความกังวลก่อนซื้อ เช่น 'กังวลว่าจะแรงเกินไปสำหรับมือ'"
+  },
+
+  "triggerMoment": {
+    "time": "ช่วงเวลาหรือสถานการณ์ที่คนนึกถึงสินค้านี้ เช่น 'หลังทำอาหารเสร็จแล้วเห็นจานกองสูง'",
+    "emotion": "อารมณ์ที่เชื่อมกับสินค้า เช่น 'เหนื่อย, อยากเสร็จเร็ว, อยากให้บ้านสะอาด'",
+    "season": "ช่วงเวลา/ฤดู/เทศกาลที่ขายดีเป็นพิเศษ ถ้าไม่มีให้ใส่ null"
+  },
+
+  "humanVoice": {
+    "howFriendDescribes": "ถ้าเพื่อนบอกต่อเรื่องสินค้านี้จะพูดว่าอะไร ภาษาพูดธรรมชาติ",
+    "beforeAfter": "เปรียบเทียบก่อน/หลังใช้ แบบที่คนรีวิวจริงพูด",
+    "oneLinerHook": "ประโยคเดียวที่จะทำให้คนหยุดดูโพสต์"
+  },
+
+  "contentTone": "เลือก 1 จาก: friend / reviewer / homemaker / expert / storyteller",
+  "confidenceScore": 0.0
+}
+
+Rules:
+- painPoint ต้องเป็นภาษาคนจริง ไม่ใช่ feature list
+- triggerMoment.time ต้องระบุ scenario จริง ไม่ใช่แค่ "ทุกวัน"
+- humanVoice.howFriendDescribes ต้องใช้ภาษาพูดไม่เป็นทางการ
+- ถ้า confidence < 0.70 ให้ระบุเหตุผลใน field "lowConfidenceReason"
+- ห้ามใช้คำว่า: คุณภาพดี, คุ้มค่า, เหมาะสำหรับทุกคน, ใช้ได้ทุกโอกาส`;
+
+  const result = await traceExternalRequest(
+    {
+      step: "THAI_BUYER_PRODUCT_INTELLIGENCE",
+      url: "openai://responses.create",
+      fn: "analyzeThaiBuyerProductIntelligence",
+      source: "openai_product_intelligence",
+      userId: input.userId,
+      metadata: { model }
+    },
+    () => client.responses.create({
+      model,
+      input: [
+        {
+          role: "system",
+          content:
+            "You are a Thai consumer psychologist and product analyst. Return strict JSON only. Do not include markdown fences or commentary. Never use generic marketing language."
+        },
+        { role: "user", content: prompt }
+      ]
+    })
+  );
+
+  const parsed = JSON.parse(extractJson(result.output_text)) as Partial<ThaiBuyerProductIntelligenceResult>;
+  const confidenceRaw = Number(parsed.confidenceScore ?? 0) || 0;
+  const confidenceScore = confidenceRaw > 1 ? Math.max(0, Math.min(1, confidenceRaw / 100)) : Math.max(0, Math.min(1, confidenceRaw));
+  return {
+    productNameThai: normalizeExtractedText(String(parsed.productNameThai ?? "")),
+    productType: normalizeExtractedText(String(parsed.productType ?? "")),
+    mainPurpose: normalizeExtractedText(String(parsed.mainPurpose ?? "")),
+    targetCustomer: normalizeExtractedText(String(parsed.targetCustomer ?? "")),
+    usageScenarios: Array.isArray(parsed.usageScenarios) ? parsed.usageScenarios.map((item) => normalizeExtractedText(String(item))).filter(Boolean).slice(0, 5) : [],
+    keyBenefits: Array.isArray(parsed.keyBenefits) ? parsed.keyBenefits.map((item) => normalizeExtractedText(String(item))).filter(Boolean).slice(0, 5) : [],
+    productFacts: Array.isArray(parsed.productFacts) ? parsed.productFacts.map((item) => normalizeExtractedText(String(item))).filter(Boolean).slice(0, 6) : [],
+    imageProductSummary: normalizeExtractedText(String(parsed.imageProductSummary ?? "")),
+    painPoint: {
+      primary: normalizeExtractedText(String(parsed.painPoint?.primary ?? "")),
+      secondary: normalizeExtractedText(String(parsed.painPoint?.secondary ?? ""))
+    },
+    triggerMoment: {
+      time: normalizeExtractedText(String(parsed.triggerMoment?.time ?? "")),
+      emotion: normalizeExtractedText(String(parsed.triggerMoment?.emotion ?? "")),
+      season: parsed.triggerMoment?.season === null ? null : normalizeExtractedText(String(parsed.triggerMoment?.season ?? "")) || null
+    },
+    humanVoice: {
+      howFriendDescribes: normalizeExtractedText(String(parsed.humanVoice?.howFriendDescribes ?? "")),
+      beforeAfter: normalizeExtractedText(String(parsed.humanVoice?.beforeAfter ?? "")),
+      oneLinerHook: normalizeExtractedText(String(parsed.humanVoice?.oneLinerHook ?? ""))
+    },
+    contentTone: ["friend", "reviewer", "homemaker", "expert", "storyteller"].includes(String(parsed.contentTone))
+      ? parsed.contentTone as ThaiBuyerProductIntelligenceResult["contentTone"]
+      : "reviewer",
+    confidenceScore,
+    lowConfidenceReason: normalizeExtractedText(String(parsed.lowConfidenceReason ?? "")) || undefined
+  };
+}
+
+export async function generateThaiSocialProductCaption(input: {
+  productIntelligence: unknown;
+  captionStyle: ThaiSocialCaptionStyle;
+  productId: string;
+  userId?: string;
+}): Promise<ThaiSocialCaptionResult> {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error("Thai social product caption generation is not configured: missing OPENAI_API_KEY");
+  }
+
+  const model = getContentModel();
+  const productIntelligenceJSON = JSON.stringify(input.productIntelligence, null, 2);
+  const prompt = `You are a Thai social media content writer who writes like a real person, not a marketer.
+
+Product Intelligence Input:
+${productIntelligenceJSON}
+
+Caption Style: ${input.captionStyle}
+(Options: story | question | before_after | friend_tip | shock_hook | list_benefit)
+
+Post Platform: Facebook
+
+Write a Thai Facebook caption for this product.
+
+Rules by style:
+
+[story]
+- เล่าเรื่องสั้น 3-4 ประโยค จากมุมคนใช้จริง
+- เริ่มด้วย scene หรือ emotion ไม่ใช่ชื่อสินค้า
+- จบด้วย CTA ที่เป็นธรรมชาติ ไม่ใช่ "สั่งเลย!"
+
+[question]
+- เปิดด้วยคำถามที่คนอ่านแล้วรู้สึก "ใช่เลย"
+- ตอบด้วยสินค้า แบบเพื่อนแนะนำ
+- 2-3 ประโยค กระชับ
+
+[before_after]
+- ก่อน: อธิบาย pain point แบบที่คนเจอจริง
+- หลัง: ผลลัพธ์จากการใช้ เป็นรูปธรรม
+- ไม่เกิน 4 ประโยค
+
+[friend_tip]
+- เขียนราวกับ DM หาเพื่อน
+- ใช้คำพูดทั่วไป เช่น "เพิ่งลอง", "บอกเลย", "ไม่แน่ใจก็ลองดู"
+- มี emoji 1-3 ตัวที่เหมาะกับ tone
+
+[shock_hook]
+- เปิดด้วยตัวเลขหรือข้อเท็จจริงที่ทำให้หยุดเลื่อน
+- ขยายความสั้นๆ แล้วโยงกับสินค้า
+- ต้องเป็นข้อเท็จจริงจากข้อมูลสินค้าจริง ห้ามแต่ง
+
+[list_benefit]
+- 3 ข้อ แต่ละข้อต้องเป็น benefit จริง ไม่ใช่ feature
+- ใช้ emoji นำแต่ละข้อ
+- จบด้วย 1 ประโยค CTA
+
+Output Format (JSON):
+{
+  "captionText": "เนื้อหา caption ทั้งหมด",
+  "style": "${input.captionStyle}",
+  "tone": "tone ที่ใช้จริง",
+  "openingType": "emotion | question | fact | scene | hook",
+  "wordCount": 0,
+  "emojiCount": 0,
+  "genericWordsFound": [],
+  "qualityScore": 0.0,
+  "productId": "${input.productId}"
+}
+
+Hard Rules:
+- ห้ามใช้: คุณภาพดี, คุ้มค่า, คุ้มราคา, เหมาะสำหรับทุกเพศทุกวัย, สินค้าดีมีคุณภาพ, ไม่ควรพลาด, รีบสั่ง
+- ต้องใช้ข้อมูลจาก painPoint หรือ triggerMoment อย่างน้อย 1 อย่าง
+- ห้ามขึ้นต้นด้วยชื่อสินค้า
+- caption ต้องอ่านออกเสียงได้ฟังดูเป็นคนพูด ไม่ใช่อ่านสเปก`;
+
+  const result = await traceExternalRequest(
+    {
+      step: "THAI_SOCIAL_CAPTION_GENERATION",
+      url: "openai://responses.create",
+      fn: "generateThaiSocialProductCaption",
+      source: "openai_social_caption_generation",
+      userId: input.userId,
+      metadata: { model, captionStyle: input.captionStyle }
+    },
+    () => client.responses.create({
+      model,
+      input: [
+        {
+          role: "system",
+          content:
+            "You write Thai Facebook captions like a real person. Return strict JSON only. Never use generic marketing words. Never start with the product name."
+        },
+        { role: "user", content: prompt }
+      ]
+    })
+  );
+
+  const parsed = JSON.parse(extractJson(result.output_text)) as Partial<ThaiSocialCaptionResult>;
+  const qualityRaw = Number(parsed.qualityScore ?? 0) || 0;
+  const qualityScore = qualityRaw > 1 ? Math.max(0, Math.min(1, qualityRaw / 100)) : Math.max(0, Math.min(1, qualityRaw));
+  const style = parsed.style === input.captionStyle ? parsed.style : input.captionStyle;
+  const openingType = ["emotion", "question", "fact", "scene", "hook"].includes(String(parsed.openingType))
+    ? parsed.openingType as ThaiSocialCaptionResult["openingType"]
+    : "hook";
+  return {
+    captionText: normalizeExtractedText(String(parsed.captionText ?? "")),
+    style,
+    tone: normalizeExtractedText(String(parsed.tone ?? "")) || "natural",
+    openingType,
+    wordCount: Math.max(0, Number(parsed.wordCount ?? 0) || 0),
+    emojiCount: Math.max(0, Number(parsed.emojiCount ?? 0) || 0),
+    genericWordsFound: Array.isArray(parsed.genericWordsFound)
+      ? parsed.genericWordsFound.map((item) => normalizeExtractedText(String(item))).filter(Boolean)
+      : [],
+    qualityScore,
+    productId: normalizeExtractedText(String(parsed.productId ?? input.productId)) || input.productId
+  };
+}
+
+export async function generateThaiLifestyleImagePrompt(input: {
+  productIntelligence: unknown;
+  captionStyle: ThaiSocialCaptionStyle;
+  productId: string;
+  userId?: string;
+}): Promise<ThaiLifestyleImagePromptResult> {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error("Thai lifestyle image prompt generation is not configured: missing OPENAI_API_KEY");
+  }
+
+  const model = getContentModel();
+  const productIntelligenceJSON = JSON.stringify(input.productIntelligence, null, 2);
+  const prompt = `You are a creative director for Thai lifestyle social media content.
+
+Product Intelligence Input:
+${productIntelligenceJSON}
+
+Caption Style Used: ${input.captionStyle}
+
+Your job is to create an image generation prompt that shows the product in a REAL-LIFE CONTEXT,
+not a product shot or white background photo.
+
+The image should match the emotion and scene from the caption, not just show the product.
+
+Return ONLY a valid JSON object:
+
+{
+  "imagePrompt": {
+    "scene": "อธิบาย scene ที่เห็นในภาพ เช่น 'ครัวบ้านไทยตอนเย็น มีจานกองอยู่ในอ่าง'",
+    "subject": "สิ่งที่เป็น main focus ของภาพ",
+    "productPlacement": "สินค้าอยู่ตรงไหนในภาพ ทำอะไรอยู่",
+    "mood": "อารมณ์ของภาพ เช่น warm, satisfying, cozy, energetic",
+    "lighting": "แสงที่ใช้ เช่น golden hour, soft natural light, bright kitchen light",
+    "colorPalette": "โทนสีหลัก เช่น warm earth tones, clean white and green",
+    "humanPresence": "มีคนในภาพไหม ถ้ามีเป็นใคร ทำอะไร (ไม่ต้องเห็นหน้า)",
+    "avoidElements": ["สิ่งที่ไม่ควรมีในภาพ"],
+    "styleReference": "สไตล์ภาพ เช่น UGC photo, lifestyle editorial, candid home photo",
+    "fullPrompt": "prompt รวมทั้งหมดในภาษาอังกฤษสำหรับส่งให้ image AI"
+  },
+  "productId": "${input.productId}",
+  "matchesCaptionMood": true,
+  "confidenceScore": 0.0
+}
+
+Rules:
+- fullPrompt ต้องเป็นภาษาอังกฤษ
+- ห้ามใช้ white background, product shot, studio lighting ถ้าไม่ใช่สินค้าที่จำเป็น
+- scene ต้องสอดคล้องกับ triggerMoment.time จาก Product Intelligence
+- mood ต้องสอดคล้องกับ captionStyle ที่ใช้
+- ถ้า captionStyle เป็น "story" → ภาพต้องดู candid/real
+- ถ้า captionStyle เป็น "shock_hook" → ภาพต้องมี visual contrast ที่น่าสนใจ
+- humanPresence แนะนำให้มีคนบางส่วน (มือ, เงา) เพื่อให้ดูเป็นธรรมชาติ`;
+
+  const result = await traceExternalRequest(
+    {
+      step: "THAI_LIFESTYLE_IMAGE_PROMPT_GENERATION",
+      url: "openai://responses.create",
+      fn: "generateThaiLifestyleImagePrompt",
+      source: "openai_image_prompt_generation",
+      userId: input.userId,
+      metadata: { model, captionStyle: input.captionStyle }
+    },
+    () => client.responses.create({
+      model,
+      input: [
+        {
+          role: "system",
+          content:
+            "You are a creative director for Thai lifestyle social content. Return strict JSON only. fullPrompt must be English. Never propose white background, product-only packshot, studio lighting, ad layout, text overlays, or fake labels."
+        },
+        { role: "user", content: prompt }
+      ]
+    })
+  );
+
+  const parsed = JSON.parse(extractJson(result.output_text)) as Partial<ThaiLifestyleImagePromptResult>;
+  const confidenceRaw = Number(parsed.confidenceScore ?? 0) || 0;
+  const confidenceScore = confidenceRaw > 1 ? Math.max(0, Math.min(1, confidenceRaw / 100)) : Math.max(0, Math.min(1, confidenceRaw));
+  const imagePrompt = (parsed.imagePrompt ?? {}) as Partial<ThaiLifestyleImagePromptResult["imagePrompt"]>;
+  return {
+    imagePrompt: {
+      scene: normalizeExtractedText(String(imagePrompt.scene ?? "")),
+      subject: normalizeExtractedText(String(imagePrompt.subject ?? "")),
+      productPlacement: normalizeExtractedText(String(imagePrompt.productPlacement ?? "")),
+      mood: normalizeExtractedText(String(imagePrompt.mood ?? "")),
+      lighting: normalizeExtractedText(String(imagePrompt.lighting ?? "")),
+      colorPalette: normalizeExtractedText(String(imagePrompt.colorPalette ?? "")),
+      humanPresence: normalizeExtractedText(String(imagePrompt.humanPresence ?? "")),
+      avoidElements: Array.isArray(imagePrompt.avoidElements)
+        ? imagePrompt.avoidElements.map((item: unknown) => normalizeExtractedText(String(item))).filter(Boolean).slice(0, 12)
+        : [],
+      styleReference: normalizeExtractedText(String(imagePrompt.styleReference ?? "")),
+      fullPrompt: normalizeExtractedText(String(imagePrompt.fullPrompt ?? ""))
+    },
+    productId: normalizeExtractedText(String(parsed.productId ?? input.productId)) || input.productId,
+    matchesCaptionMood: parsed.matchesCaptionMood === true,
+    confidenceScore
+  };
 }
 
 export async function generateOptimizationSuggestions(input: OptimizationInput) {

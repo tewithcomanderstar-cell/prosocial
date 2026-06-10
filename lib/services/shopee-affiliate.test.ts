@@ -408,11 +408,25 @@ function testShopeeCaptionHumanReadabilityGuards() {
 
 function testShopeeCaptionFallbackGenerationGuards() {
   const source = readShopeeAffiliateServiceSource();
+  const aiSource = readAiServiceSource();
   const captionSource = sourceBetween(source, "function getShopeeCaptionPromptInput", "function createValidatedShopeeProductStoryboard");
   const generateSource = sourceBetween(source, "export async function generateShopeeCaption", "async function fetchShopeeReferenceImage");
   const statusSource = readAutoPostStatusRouteSource();
   const panelSource = readAutoPostPanelSource();
 
+  assert.ok(aiSource.includes("generateThaiSocialProductCaption"));
+  assert.ok(aiSource.includes("ThaiSocialCaptionResult"));
+  assert.ok(aiSource.includes("Caption Style"));
+  assert.ok(aiSource.includes("story | question | before_after | friend_tip | shock_hook | list_benefit"));
+  assert.ok(aiSource.includes("captionText"));
+  assert.ok(aiSource.includes("genericWordsFound"));
+  assert.ok(aiSource.includes("qualityScore"));
+  assert.ok(aiSource.includes("ห้ามขึ้นต้นด้วยชื่อสินค้า"));
+  assert.ok(captionSource.includes("generateThaiSocialProductCaption"));
+  assert.ok(captionSource.includes("validateThaiSocialCaptionCandidate"));
+  assert.ok(captionSource.includes("THAI_SOCIAL_CAPTION_USED"));
+  assert.ok(captionSource.includes("THAI_SOCIAL_CAPTION_FAILED"));
+  assert.ok(captionSource.indexOf("generateThaiSocialProductCaption") < captionSource.indexOf("CAPTION_RAW_OUTPUT"));
   assert.ok(captionSource.includes("productDescription"));
   assert.ok(captionSource.includes("keySellingPoints"));
   assert.ok(captionSource.includes("affiliateLink"));
@@ -480,6 +494,7 @@ function testShopeeCaptionFallbackGenerationGuards() {
 
 function testShopeeProductIntelligenceLayerGuards() {
   const source = readShopeeAffiliateServiceSource();
+  const aiSource = readAiServiceSource();
   const packageSource = sourceBetween(source, "export async function buildShopeePostPackage", "export async function recordShopeeQueueItem");
   const intelligenceSource = sourceBetween(source, "export type ShopeeProductIntelligence", "function getShopeeStoryboardInputText");
   const captionSource = sourceBetween(source, "function getShopeeCaptionPromptInput", "function createValidatedShopeeProductStoryboard");
@@ -503,8 +518,31 @@ function testShopeeProductIntelligenceLayerGuards() {
   assert.ok(intelligenceSource.includes("uniqueSellingPoints"));
   assert.ok(intelligenceSource.includes("productFacts"));
   assert.ok(intelligenceSource.includes("imageProductSummary"));
+  assert.ok(intelligenceSource.includes("painPoint"));
+  assert.ok(intelligenceSource.includes("triggerMoment"));
+  assert.ok(intelligenceSource.includes("humanVoice"));
+  assert.ok(intelligenceSource.includes("contentTone"));
+  assert.ok(intelligenceSource.includes("lowConfidenceReason"));
   assert.ok(intelligenceSource.includes("confidenceScore"));
   assert.ok(intelligenceSource.includes("intelligence.confidence < 70"));
+  assert.ok(source.includes("analyzeThaiBuyerProductIntelligence"));
+  assert.ok(source.includes("THAI_BUYER_PRODUCT_INTELLIGENCE_COMPLETED"));
+  assert.ok(source.includes("THAI_BUYER_PRODUCT_INTELLIGENCE_FAILED"));
+  assert.ok(source.includes("mergeThaiBuyerProductIntelligence"));
+  assert.ok(aiSource.includes("ThaiBuyerProductIntelligenceResult"));
+  assert.ok(aiSource.includes("You are a Thai consumer psychologist and product analyst"));
+  assert.ok(aiSource.includes("Return ONLY a valid JSON object"));
+  assert.ok(aiSource.includes("painPoint"));
+  assert.ok(aiSource.includes("triggerMoment"));
+  assert.ok(aiSource.includes("humanVoice"));
+  assert.ok(aiSource.includes("lowConfidenceReason"));
+  assert.ok(aiSource.includes("generateThaiLifestyleImagePrompt"));
+  assert.ok(aiSource.includes("ThaiLifestyleImagePromptResult"));
+  assert.ok(aiSource.includes("creative director for Thai lifestyle social media content"));
+  assert.ok(aiSource.includes("fullPrompt ต้องเป็นภาษาอังกฤษ"));
+  assert.ok(aiSource.includes("matchesCaptionMood"));
+  assert.ok(aiSource.includes("คุณภาพดี"));
+  assert.ok(aiSource.includes("คุ้มค่า"));
   assert.ok(source.includes("PRODUCT_UNDERSTANDING_LOW_CONFIDENCE"));
   assert.ok(source.includes("product_understanding_low_confidence"));
   assert.ok(source.includes("getShopeeNaturalThaiProductNameFromSlug"));
@@ -526,8 +564,21 @@ function testShopeeProductIntelligenceLayerGuards() {
   assert.ok(captionSource.includes("productIntelligence"));
   assert.ok(packageSource.includes("createShopeeProductIntelligenceWithTracing"));
   assert.ok(packageSource.includes("applyShopeeProductIntelligence"));
+  assert.ok(source.includes("resolveThaiSocialCaptionStyle"));
+  assert.ok(source.includes("isSpecificThaiTargetCustomer"));
+  assert.ok(source.includes("auto_emotion_heavy"));
+  assert.ok(source.includes("auto_sold_count_gt_1000"));
+  assert.ok(source.includes("auto_specific_target_customer"));
+  assert.ok(source.includes("auto_default_story"));
+  assert.ok(source.includes("CAPTION_STYLE_RESOLVED"));
+  assert.ok(source.includes("socialCaptionStyle"));
+  assert.ok(captionSource.includes("styleSource"));
+  assert.ok(captionSource.includes("package_resolved"));
   assert.ok(packageSource.indexOf("createShopeeProductIntelligenceWithTracing") < packageSource.indexOf("generateShopeeCaption"));
-  assert.ok(packageSource.indexOf("generateShopeeCaption") < packageSource.indexOf("buildShopeeImagePromptSet"));
+  assert.ok(packageSource.indexOf("generateShopeeCaption") < packageSource.indexOf("buildLifestyleAwareShopeeImagePromptSet"));
+  assert.ok(packageSource.indexOf("CAPTION_STYLE_RESOLVED") < packageSource.indexOf("generateShopeeCaption"));
+  assert.ok(packageSource.indexOf("CAPTION_STYLE_RESOLVED") < packageSource.indexOf("buildLifestyleAwareShopeeImagePromptSet"));
+  assert.ok(packageSource.includes("socialCaptionStyle: resolvedCaptionStyle.style"));
   assert.ok(packageSource.includes("CAPTION_IMAGE_PRODUCT_MISMATCH"));
   assert.ok(packageSource.includes("CAPTION_IMAGE_PRODUCT_MATCHED"));
   assert.ok(packageSource.includes("captionProductId"));
@@ -536,6 +587,12 @@ function testShopeeProductIntelligenceLayerGuards() {
   assert.ok(packageSource.includes("imageCanonicalProductKey"));
   assert.ok(packageSource.includes("getShopeeCaptionImageProductMismatch"));
   assert.ok(packageSource.includes("productIntelligence"));
+  assert.ok(source.includes("buildLifestyleAwareShopeeImagePromptSet"));
+  assert.ok(source.includes("generateThaiLifestyleImagePrompt"));
+  assert.ok(source.includes("THAI_LIFESTYLE_IMAGE_PROMPT_USED"));
+  assert.ok(source.includes("THAI_LIFESTYLE_IMAGE_PROMPT_FAILED"));
+  assert.ok(source.includes("appendLifestylePromptToShopeePromptSet"));
+  assert.ok(source.includes("white background"));
   console.log("PASS Shopee Product Intelligence layer guards");
 }
 
