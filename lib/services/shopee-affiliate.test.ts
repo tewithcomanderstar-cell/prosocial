@@ -260,8 +260,12 @@ function testShopeeSourceSpecificSelectionGuards() {
   assert.ok(source.includes("shopee_no_eligible_products"));
   assert.ok(source.includes("getShopeeProductHardSelectionRejectionReason"));
   assert.ok(source.includes("SHOPEE_MIN_SOURCE_SPECIFIC_SCORE = 20"));
+  assert.ok(source.includes("SHOPEE_MIN_ALL_PRODUCTS_SCORE = 10"));
+  assert.ok(source.includes("SHOPEE_REPOST_COOLDOWN_HOURS ?? \"24\""));
+  assert.ok(source.includes("sourceTag === \"all_products\" ? SHOPEE_MIN_ALL_PRODUCTS_SCORE : SHOPEE_MIN_SOURCE_SPECIFIC_SCORE"));
   assert.ok(source.includes("isShopeeProductNameEnglishOnly"));
   assert.ok(source.includes("english_only_product_name"));
+  assert.ok(source.includes("english_only_product_name is intentionally NOT checked here"));
   assert.ok(source.includes("Fetched Shopee product pool contains product names without Thai text"));
   assert.ok(source.includes("fallback_relaxed_selection"));
   assert.ok(source.includes("PRODUCT_SELECTION_ROOT_CAUSE"));

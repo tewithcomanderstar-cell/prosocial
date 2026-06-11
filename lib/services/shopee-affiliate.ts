@@ -108,7 +108,9 @@ const OPENAI_IMAGE_REQUEST_TIMEOUT_MS = Math.min(
 );
 const OPENAI_IMAGE_MAX_ATTEMPTS = 2;
 const VISION_RESCUE_TIMEOUT_MS = 30_000;
-const SHOPEE_REPOST_COOLDOWN_HOURS = Math.max(1, Number(process.env.SHOPEE_REPOST_COOLDOWN_HOURS ?? "48"));
+// Default cooldown is 24 h (down from 48 h) so the product pool rotates daily.
+// Override with SHOPEE_REPOST_COOLDOWN_HOURS env variable if needed.
+const SHOPEE_REPOST_COOLDOWN_HOURS = Math.max(1, Number(process.env.SHOPEE_REPOST_COOLDOWN_HOURS ?? "24"));
 const SHOPEE_PRODUCT_RESERVATION_TTL_MS = 30 * 60 * 1000;
 const AUTO_POST_SLOW_STAGE_WARNING_MS = 30_000;
 const SHOPEE_ACTION_LOG_TIMEOUT_MS = Math.max(
@@ -6758,6 +6760,10 @@ type ShopeeSourceScoredCandidate = {
 };
 
 const SHOPEE_MIN_SOURCE_SPECIFIC_SCORE = 20;
+// all_products pulls from a broad random pool where many products lack rating/sales data.
+// Their quality score ceiling is ~28 (price+image+link only), so a strict 20 threshold
+// kills nearly the entire pool. Use a lower bar and let scoring sort candidates instead.
+const SHOPEE_MIN_ALL_PRODUCTS_SCORE = 10;
 
 function toFiniteNumber(value: unknown, fallback = 0) {
   const numberValue = Number(value);
@@ -7819,7 +7825,10 @@ function getShopeeProductHardSelectionRejectionReason(product: ShopeeProductReco
   if (!product.productImageUrl && !product.productImageUrls?.length) return "missing_image";
   if (!product.productUrl && !product.affiliateUrl) return "missing_product_url";
   if (product.stock !== undefined && product.stock !== null && toFiniteNumber(product.stock) <= 0) return "out_of_stock";
-  if (isShopeeProductNameEnglishOnly(product.productName)) return "english_only_product_name";
+  // english_only_product_name is intentionally NOT checked here.
+  // The hard/fallback filter is a last resort; blocking on language at this stage
+  // can make the workflow fail when Thai products are simply unavailable.
+  // The strict filter (getShopeeProductFilterRejectionReason) handles language filtering.
   if (blockedCategories?.some((category) => isShopeeCategoryMatch(product.category, category))) return "blocked_category";
   return null;
 }
@@ -8126,7 +8135,8 @@ export async function selectShopeeProductsForPages(input: {
         continue;
       }
       selectionDiagnostics.afterRecentlyPostedFilter += 1;
-      if (scoreResult.sourceSpecificScore < SHOPEE_MIN_SOURCE_SPECIFIC_SCORE) {
+      const minScoreForSource = sourceTag === "all_products" ? SHOPEE_MIN_ALL_PRODUCTS_SCORE : SHOPEE_MIN_SOURCE_SPECIFIC_SCORE;
+      if (scoreResult.sourceSpecificScore < minScoreForSource) {
         logShopeeSourceScoreBreakdown({
           sourceTag,
           pageId,
