@@ -1224,18 +1224,31 @@ export function AutoPostPanel() {
 
         <div className="grid cols-2 auto-post-grid auto-post-grid-minimal">
           <label className="label">
-            Price Range
+            ราคาต่ำสุด (Min Price ฿)
             <input
               className="input"
-              value={`${config.shopeeMinPrice || ""}${config.shopeeMaxPrice ? `-${config.shopeeMaxPrice}` : ""}`}
-              onChange={(event) => {
-                const [min, max] = event.target.value.split("-").map((item) => Number(item.trim()) || 0);
-                updateConfig((current) => ({ ...current, shopeeMinPrice: min, shopeeMaxPrice: max ?? 0 }));
-              }}
-              placeholder="เช่น 100-1500"
+              type="number"
+              min="0"
+              value={config.shopeeMinPrice || ""}
+              onChange={(event) => updateConfig((current) => ({ ...current, shopeeMinPrice: Number(event.target.value) || 0 }))}
+              placeholder="เช่น 100"
             />
           </label>
 
+          <label className="label">
+            ราคาสูงสุด (Max Price ฿)
+            <input
+              className="input"
+              type="number"
+              min="0"
+              value={config.shopeeMaxPrice || ""}
+              onChange={(event) => updateConfig((current) => ({ ...current, shopeeMaxPrice: Number(event.target.value) || 0 }))}
+              placeholder="เช่น 1500"
+            />
+          </label>
+        </div>
+
+        <div className="grid cols-2 auto-post-grid auto-post-grid-minimal">
           <label className="label">
             Min Discount %
             <input

@@ -660,6 +660,10 @@ function testShopeeCaptionQualityAndSoldThresholdGuards() {
   assert.ok(panelSource.includes("Sold Count Filter"));
   assert.ok(panelSource.includes("No sold filter"));
   assert.ok(panelSource.includes("shopeeMinSoldCount"));
+  assert.ok(panelSource.includes("ราคาต่ำสุด (Min Price ฿)"));
+  assert.ok(panelSource.includes("ราคาสูงสุด (Max Price ฿)"));
+  assert.equal(panelSource.includes("Price Range"), false);
+  assert.equal(panelSource.includes("split(\"-\")"), false);
   assert.ok(autoPostSource.includes("shopeeMinSoldCount"));
   assert.ok(autoPostSource.includes("product_understanding_low_confidence"));
   console.log("PASS Shopee caption quality and sold threshold guards");
