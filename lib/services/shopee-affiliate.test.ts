@@ -70,6 +70,10 @@ function readAutoPostRouteSource() {
   return readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../../app/api/auto-post/route.ts"), "utf8");
 }
 
+function readShopeeProductsRouteSource() {
+  return readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../../app/api/shopee/products/route.ts"), "utf8");
+}
+
 function sourceBetween(source: string, start: string, end: string) {
   const startIndex = source.indexOf(start);
   const endIndex = source.indexOf(end, startIndex + start.length);
@@ -710,8 +714,11 @@ function testShopeeAllProductsAndCooldownGuards() {
   assert.ok(source.includes("selectedCategoryIds"));
   assert.ok(source.includes("shuffleWithShopeeSeed"));
   assert.ok(source.includes("sortModes"));
+  assert.ok(source.includes("page: randomPage"));
+  assert.ok(source.includes("fetch_all_selected_categories_with_new_random_page"));
   assert.ok(source.includes("dedupeShopeeProducts"));
   assert.ok(source.includes("getShopeeCanonicalProductKey"));
+  assert.ok(source.includes("return getShopeeCanonicalProductKey(product) || getShopeeProductIdentity(product)"));
   assert.ok(source.includes("getRecentlyPostedProductKeys"));
   assert.ok(source.includes("lookbackHours"));
   assert.ok(source.includes("SHOPEE_REPOST_COOLDOWN_HOURS"));
@@ -733,6 +740,79 @@ function testShopeeAllProductsAndCooldownGuards() {
   assert.ok(panelSource.includes("allProductsCategoryMissing"));
   assert.ok(routeSource.includes("all_products_category_required"));
   console.log("PASS Shopee all_products cooldown and reservation guards");
+}
+
+function testShopeeProductFilteringAuditGuards() {
+  const source = readShopeeAffiliateServiceSource();
+  const routeSource = readShopeeProductsRouteSource();
+  const selectionSource = sourceBetween(source, "export async function selectShopeeProductsForPages", "export function buildShopeeImagePrompt");
+  const filterSource = sourceBetween(source, "function getShopeeProductFilterRejectionReason", "function logShopeeSourceScoreBreakdown");
+  const funnelSource = sourceBetween(source, "function logProductSelectionDiagnostics", "function getProductSelectionDiagnosticsPayload");
+  const docSource = readFileSync(resolve("docs/shopee-product-filtering-audit.md"), "utf8");
+
+  assert.ok(source.includes("PRODUCT_SELECTION_FUNNEL"));
+  for (const field of [
+    "afterNormalize",
+    "afterImageFilter",
+    "afterUrlFilter",
+    "afterStockFilter",
+    "afterBlockedCategory",
+    "afterPriceFilter",
+    "afterRatingFilter",
+    "afterSalesFilter",
+    "afterDiscountFilter",
+    "afterSoldCountFilter",
+    "afterDuplicate48hFilter",
+    "afterReservationFilter",
+    "afterSourceScoreFilter",
+    "afterProductIntelligence",
+    "rejectionSummary",
+    "sampleRejectedProducts"
+  ]) {
+    assert.ok(funnelSource.includes(field), `Missing PRODUCT_SELECTION_FUNNEL field ${field}`);
+  }
+
+  for (const reason of [
+    "missing_image",
+    "missing_product_url",
+    "out_of_stock",
+    "blocked_category",
+    "below_min_price",
+    "above_max_price",
+    "below_min_rating",
+    "below_min_sales",
+    "below_min_discount",
+    "below_min_sold_count",
+    "duplicate_48h",
+    "reserved_by_active_job",
+    "below_source_score",
+    "product_understanding_low_confidence"
+  ]) {
+    assert.ok(source.includes(reason) || docSource.includes(reason), `Missing rejection reason ${reason}`);
+  }
+
+  assert.ok(filterSource.indexOf("missing_image") < filterSource.indexOf("missing_product_url"));
+  assert.ok(filterSource.indexOf("missing_product_url") < filterSource.indexOf("out_of_stock"));
+  assert.ok(filterSource.indexOf("out_of_stock") < filterSource.indexOf("blocked_category"));
+  assert.ok(filterSource.indexOf("below_min_price") < filterSource.indexOf("above_max_price"));
+  assert.ok(filterSource.indexOf("below_min_rating") < filterSource.indexOf("below_min_sales"));
+  assert.ok(filterSource.indexOf("below_min_sales") < filterSource.indexOf("below_min_sold_count"));
+  assert.ok(filterSource.indexOf("below_min_sold_count") < filterSource.indexOf("below_min_discount"));
+  assert.ok(filterSource.indexOf("duplicate_product_48h") < filterSource.indexOf("reserved_product"));
+
+  assert.ok(selectionSource.includes("for (const category of discoveryCategories)"));
+  assert.ok(selectionSource.includes("discoveredByCategory.flat()"));
+  assert.ok(selectionSource.includes("dedupeShopeeProducts(discoveredByCategory.flat())"));
+  assert.ok(selectionSource.includes("PRODUCT_SELECTION_EXPANDED"));
+  assert.ok(selectionSource.includes("SHOPEE_ALLOW_RELAX_SOLD_THRESHOLD_ON_EMPTY"));
+  assert.ok(selectionSource.indexOf("PRODUCT_SELECTION_EXPANDED") < selectionSource.indexOf("No eligible Shopee products found after strict and fallback product selection"));
+  assert.ok(routeSource.includes("fetchProductsForCategories"));
+  assert.ok(routeSource.includes("for (const category of categories)"));
+  assert.ok(routeSource.includes("getShopeeCanonicalProductKey(product)"));
+  assert.ok(docSource.includes("OR logic"));
+  assert.ok(docSource.includes("SOLD 500+"));
+  assert.ok(docSource.includes("PRODUCT_SELECTION_EXPANDED"));
+  console.log("PASS Shopee product filtering audit guards");
 }
 
 function testShopeeMultiCategorySelectionRescueGuards() {
@@ -779,5 +859,6 @@ testShopeeCaptionQualityAndSoldThresholdGuards();
 testAutoPostStopsOnCaptionImageProductMismatch();
 testStatusDoesNotDeriveImageFailedFromStaleStartOnly();
 testShopeeAllProductsAndCooldownGuards();
+testShopeeProductFilteringAuditGuards();
 testShopeeMultiCategorySelectionRescueGuards();
 testAutoPostProcessStepNoEligibleProductsReturnsDiagnostics();

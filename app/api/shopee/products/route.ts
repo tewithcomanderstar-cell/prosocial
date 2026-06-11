@@ -6,6 +6,7 @@ import {
   fetchShopeeAllProductsForSelectedCategories,
   scoreShopeeProductForSource,
   ShopeeProviderError,
+  getShopeeCanonicalProductKey,
   upsertShopeeProducts,
   ShopeeSourceTag
 } from "@/lib/services/shopee-affiliate";
@@ -80,7 +81,7 @@ async function fetchProductsForCategories(input: {
   const products = batches.flat();
   const seen = new Set<string>();
   return products.filter((product) => {
-    const key = String(product.productId || `${product.shopId}:${product.itemId}`);
+    const key = getShopeeCanonicalProductKey(product) || String(product.productId || `${product.shopId}:${product.itemId}`);
     if (!key || seen.has(key)) return false;
     if ((input.minSoldCount ?? 0) > 0 && (product.salesCount ?? 0) < (input.minSoldCount ?? 0)) return false;
     seen.add(key);
