@@ -26,6 +26,7 @@ import {
   DEFAULT_SHOPEE_CATEGORY,
   getShopeeCategoryLabel,
   getShopeeCategorySearchTerms,
+  getShopeeCategoryThaiKeyword,
   isShopeeCategoryMatch,
   normalizeShopeeCategories,
   normalizeShopeeCategory
@@ -525,7 +526,9 @@ export class ShopeeOfficialApiProvider implements ShopeeProductProvider {
 
     // Adapter shell: keep official API specifics isolated so we can swap endpoint contracts safely.
     const url = new URL(endpoint);
-    if (query.keyword) url.searchParams.set("keyword", query.keyword);
+    // Use Thai keyword if no manual keyword supplied, so results come back in Thai.
+    const resolvedKeyword = query.keyword || getShopeeCategoryThaiKeyword(query.category);
+    if (resolvedKeyword) url.searchParams.set("keyword", resolvedKeyword);
     const categoryTerms = getShopeeCategorySearchTerms(query.category);
     if (categoryTerms.length) url.searchParams.set("category", categoryTerms[0]);
     if (query.sourceTag) url.searchParams.set("source_tag", query.sourceTag);
@@ -698,7 +701,9 @@ function buildShopeeAffiliateGraphqlQuery(query: ProductDiscoveryQuery): ShopeeA
     });
   }
   if (matchId) args.push(`matchId: "${escapeGraphqlString(matchId)}"`);
-  const keyword = query.keyword?.trim() || getShopeeCategorySearchTerms(query.category)[0] || "";
+  // Prefer Thai keyword so Shopee TH API returns Thai-language product listings.
+  // Fall back to user-supplied keyword, then English category label.
+  const keyword = query.keyword?.trim() || getShopeeCategoryThaiKeyword(query.category) || getShopeeCategorySearchTerms(query.category)[0] || "";
   if (keyword) args.push(`keyword: "${escapeGraphqlString(keyword)}"`);
 
   return {
@@ -7396,6 +7401,12 @@ function getEffectiveShopeeMinSoldCount(configuredMinSoldCount = 0) {
   return Math.max(configuredMinSoldCount, Number(process.env.SHOPEE_MIN_SOLD_COUNT ?? "0") || 0);
 }
 
+function isShopeeProductNameEnglishOnly(productName: string): boolean {
+  const normalized = productName.trim();
+  if (!normalized) return false;
+  return !/[\u0E00-\u0E7F]/u.test(normalized);
+}
+
 function getShopeeProductFilterRejectionReason(input: {
   product: ShopeeProductRecord;
   excludedProductIds: Set<string>;
@@ -7421,6 +7432,7 @@ function getShopeeProductFilterRejectionReason(input: {
   if (!input.product.productImageUrl && !input.product.productImageUrls?.length) return "missing_image";
   if (!input.product.productUrl && !input.product.affiliateUrl) return "missing_product_url";
   if (input.product.stock !== undefined && input.product.stock !== null && toFiniteNumber(input.product.stock) <= 0) return "out_of_stock";
+  if (isShopeeProductNameEnglishOnly(input.product.productName)) return "english_only_product_name";
   if (input.blockedCategories?.some((category) => isShopeeCategoryMatch(input.product.category, category))) return "blocked_category";
   if ((input.minPrice ?? 0) > 0 && effectivePrice < (input.minPrice ?? 0)) return "below_min_price";
   if ((input.maxPrice ?? 0) > 0 && effectivePrice > (input.maxPrice ?? 0)) return "above_max_price";
@@ -7481,7 +7493,8 @@ const PRODUCT_SELECTION_REJECTION_REASONS = [
   "duplicate_product_48h",
   "reserved_product",
   "recently_posted",
-  "below_min_source_score"
+  "below_min_source_score",
+  "english_only_product_name"
 ] as const;
 
 type ProductSelectionDiagnostics = {
@@ -7742,7 +7755,8 @@ function logProductSelectionDiagnostics(diagnostics: ProductSelectionDiagnostics
     duplicate_product_48h: "48-hour repost cooldown is eliminating recently published Shopee products.",
     reserved_product: "Active product reservations are preventing parallel jobs from reusing the same Shopee product.",
     recently_posted: "Recent-post duplicate protection is eliminating products for the selected page.",
-    below_min_source_score: "Source-specific score relies on signals that are weak or missing from Shopee API responses."
+    below_min_source_score: "Source-specific score relies on signals that are weak or missing from Shopee API responses.",
+    english_only_product_name: "Fetched Shopee product pool contains product names without Thai text."
   };
   console.info("PRODUCT_SELECTION_ROOT_CAUSE", {
     fetchedProducts: diagnostics.fetchedProducts,
@@ -7805,6 +7819,7 @@ function getShopeeProductHardSelectionRejectionReason(product: ShopeeProductReco
   if (!product.productImageUrl && !product.productImageUrls?.length) return "missing_image";
   if (!product.productUrl && !product.affiliateUrl) return "missing_product_url";
   if (product.stock !== undefined && product.stock !== null && toFiniteNumber(product.stock) <= 0) return "out_of_stock";
+  if (isShopeeProductNameEnglishOnly(product.productName)) return "english_only_product_name";
   if (blockedCategories?.some((category) => isShopeeCategoryMatch(product.category, category))) return "blocked_category";
   return null;
 }
@@ -7865,9 +7880,13 @@ export async function fetchShopeeAllProductsForSelectedCategories(input: {
     const sortMode = sortModes[categoriesTried % sortModes.length] ?? "relevance";
     const randomPage = 1 + Math.floor(seededShopeeRandom(`${input.randomSeed ?? ""}:${category}`)() * 5);
     categoriesTried += 1;
+    // Use Thai keyword for the category so Shopee TH returns Thai-language listings.
+    // Fall back to sort mode signal for non-relevance modes.
+    const thaiKeyword = getShopeeCategoryThaiKeyword(category);
+    const fetchKeyword = thaiKeyword || (sortMode === "relevance" ? undefined : sortMode);
     const categoryProducts = await provider.fetchProducts({
       sourceTag: "all_products",
-      keyword: sortMode === "relevance" ? undefined : sortMode,
+      keyword: fetchKeyword,
       category,
       limit: Math.max(input.limit * 3, 30)
     });

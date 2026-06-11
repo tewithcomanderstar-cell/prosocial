@@ -17,7 +17,7 @@ import {
 // @ts-ignore Node strip-types runner resolves the .ts module directly in tests.
 import type { ShopeeProductRecord } from "./shopee-affiliate-core.ts";
 // @ts-ignore Node strip-types runner resolves the .ts module directly in tests.
-import { getShopeeCategoryLabel, normalizeShopeeCategories, normalizeShopeeCategory } from "../shopee-categories.ts";
+import { getShopeeCategoryLabel, getShopeeCategoryThaiKeyword, normalizeShopeeCategories, normalizeShopeeCategory } from "../shopee-categories.ts";
 
 const sampleProduct: ShopeeProductRecord = {
   productId: "test-product",
@@ -104,6 +104,7 @@ function testShopeeCategoryNormalization() {
   assert.deepEqual(normalizeShopeeCategories(["all", "Automotive", "Sports & Outdoors"]), ["automotive", "sports"]);
   assert.deepEqual(normalizeShopeeCategories([]), []);
   assert.equal(getShopeeCategoryLabel("beauty"), "Beauty & Personal Care");
+  assert.equal(getShopeeCategoryThaiKeyword("fashion"), "เสื้อผ้าแฟชั่น");
   console.log("PASS Shopee category dropdown values normalize legacy text");
 }
 
@@ -259,6 +260,9 @@ function testShopeeSourceSpecificSelectionGuards() {
   assert.ok(source.includes("shopee_no_eligible_products"));
   assert.ok(source.includes("getShopeeProductHardSelectionRejectionReason"));
   assert.ok(source.includes("SHOPEE_MIN_SOURCE_SPECIFIC_SCORE = 20"));
+  assert.ok(source.includes("isShopeeProductNameEnglishOnly"));
+  assert.ok(source.includes("english_only_product_name"));
+  assert.ok(source.includes("Fetched Shopee product pool contains product names without Thai text"));
   assert.ok(source.includes("fallback_relaxed_selection"));
   assert.ok(source.includes("PRODUCT_SELECTION_ROOT_CAUSE"));
   assert.ok(source.includes("all_products"));
@@ -266,6 +270,8 @@ function testShopeeSourceSpecificSelectionGuards() {
   assert.ok(source.includes("SHOPEE_ALL_PRODUCTS_FETCH_STARTED"));
   assert.ok(source.includes("SHOPEE_ALL_PRODUCTS_CATEGORY_FETCHED"));
   assert.ok(source.includes("SHOPEE_ALL_PRODUCTS_FETCH_COMPLETED"));
+  assert.ok(source.includes("getShopeeCategoryThaiKeyword"));
+  assert.ok(source.includes("const fetchKeyword = thaiKeyword || (sortMode === \"relevance\" ? undefined : sortMode)"));
   assert.ok(source.includes("getRecentlyPostedProductKeys"));
   assert.ok(source.includes("SHOPEE_REPOST_COOLDOWN_HOURS"));
   assert.ok(source.includes("duplicate_product_48h"));
