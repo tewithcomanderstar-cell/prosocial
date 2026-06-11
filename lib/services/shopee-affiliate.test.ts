@@ -830,10 +830,15 @@ function testShopeeMultiCategorySelectionRescueGuards() {
 
 function testAutoPostProcessStepNoEligibleProductsReturnsDiagnostics() {
   const source = readAutoPostProcessStepRouteSource();
+  const autoPostSource = readAutoPostServiceSource();
   assert.ok(source.includes("shopee_no_eligible_products"));
   assert.ok(source.includes("diagnostics"));
   assert.ok(source.includes("NextResponse.json"));
   assert.ok(source.includes("responseSummary"));
+  assert.ok(autoPostSource.includes("getShopeeNoEligibleDiagnostics"));
+  assert.ok(autoPostSource.includes("PRODUCT_SELECTION_NO_ELIGIBLE_DIAGNOSTICS"));
+  assert.ok(autoPostSource.includes("primaryFailureReason"));
+  assert.ok(autoPostSource.includes("sampleRejectedProducts"));
   console.log("PASS auto-post process-step returns diagnostics for no eligible products");
 }
 

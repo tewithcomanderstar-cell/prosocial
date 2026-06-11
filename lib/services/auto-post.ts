@@ -719,6 +719,20 @@ function getAutoPostResponseSummary(error: unknown) {
   return String((error as { responseSummary?: unknown }).responseSummary ?? "");
 }
 
+function getShopeeNoEligibleDiagnostics(error: unknown) {
+  if (getAutoPostErrorCode(error) !== "shopee_no_eligible_products") return null;
+  const summary = getAutoPostResponseSummary(error);
+  if (!summary) return null;
+  try {
+    return JSON.parse(summary) as Record<string, unknown>;
+  } catch {
+    return {
+      parseError: "invalid_no_eligible_response_summary",
+      responseSummary: summary.slice(0, 2000)
+    };
+  }
+}
+
 function getStoryboardCaptionFailedRules(error: unknown) {
   const summary = getAutoPostResponseSummary(error);
   if (!summary) return [];
@@ -1290,27 +1304,58 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
     });
 
   for (let attempt = 1; attempt <= AUTO_POST_MAX_PRODUCT_ATTEMPTS; attempt += 1) {
-    const selectedProducts =
-      searchCycle === 1 && attempt === 1 && input.initialSelectedProducts.length
-        ? input.initialSelectedProducts
-        : await selectShopeeProductsForPages({
-            userId: input.config.userId,
-            pageIds: input.eligiblePageIds.slice(0, 1),
+    let selectedProducts: ShopeeSelectedProduct[];
+    try {
+      selectedProducts =
+        searchCycle === 1 && attempt === 1 && input.initialSelectedProducts.length
+          ? input.initialSelectedProducts
+          : await selectShopeeProductsForPages({
+              userId: input.config.userId,
+              pageIds: input.eligiblePageIds.slice(0, 1),
+              sourceTag: input.config.shopeeSourceTag ?? "trending",
+              keyword: input.config.shopeeKeyword,
+              category: normalizeShopeeCategory(input.config.shopeeCategory),
+              categories: normalizeShopeeCategories(input.config.shopeeCategories?.length ? input.config.shopeeCategories : input.config.shopeeCategory),
+              categoryPriority: input.config.shopeeCategoryPriority ?? [],
+              blockedCategories: input.config.shopeeBlockedCategories ?? [],
+              minPrice: input.config.shopeeMinPrice ?? 0,
+              maxPrice: input.config.shopeeMaxPrice ?? 0,
+              minRating: input.config.shopeeMinRating ?? 0,
+              minSales: input.config.shopeeMinSales ?? 0,
+              minSoldCount: input.config.shopeeMinSoldCount ?? 0,
+              minDiscountPercent: input.config.shopeeMinDiscountPercent ?? 0,
+              excludedProductIds: Array.from(skippedProductIds),
+              jobId: input.records.workflowRunId
+            });
+    } catch (error) {
+      const noEligibleDiagnostics = getShopeeNoEligibleDiagnostics(error);
+      if (noEligibleDiagnostics) {
+        await logShopeeStep({
+          config: input.config,
+          step: "PRODUCT_SELECTION_NO_ELIGIBLE_DIAGNOSTICS",
+          status: "failed",
+          message: "Shopee product selection found no eligible products during retry attempt; diagnostics captured",
+          metadata: {
+            ...noEligibleDiagnostics,
+            primaryFailureReason: noEligibleDiagnostics.primaryFailureReason ?? null,
+            rejectionSummary: noEligibleDiagnostics.rejectionSummary ?? null,
+            sampleRejectedProducts: noEligibleDiagnostics.sampleRejectedProducts ?? null,
+            attempt,
+            searchCycle,
+            maxSearchCycles: AUTO_POST_MAX_SEARCH_CYCLES,
+            maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
+            excludedProductIds: Array.from(skippedProductIds),
             sourceTag: input.config.shopeeSourceTag ?? "trending",
-            keyword: input.config.shopeeKeyword,
+            keyword: input.config.shopeeKeyword ?? "",
             category: normalizeShopeeCategory(input.config.shopeeCategory),
             categories: normalizeShopeeCategories(input.config.shopeeCategories?.length ? input.config.shopeeCategories : input.config.shopeeCategory),
-            categoryPriority: input.config.shopeeCategoryPriority ?? [],
-            blockedCategories: input.config.shopeeBlockedCategories ?? [],
-            minPrice: input.config.shopeeMinPrice ?? 0,
-            maxPrice: input.config.shopeeMaxPrice ?? 0,
-            minRating: input.config.shopeeMinRating ?? 0,
-            minSales: input.config.shopeeMinSales ?? 0,
-            minSoldCount: input.config.shopeeMinSoldCount ?? 0,
-            minDiscountPercent: input.config.shopeeMinDiscountPercent ?? 0,
-            excludedProductIds: Array.from(skippedProductIds),
-            jobId: input.records.workflowRunId
-          });
+            workflowRunId: input.records.workflowRunId
+          },
+          error
+        });
+      }
+      throw error;
+    }
 
     const selected = selectedProducts[0];
     if (!selected) {
@@ -2225,23 +2270,51 @@ async function queueShopeeAutoPostsForConfig(
   const productSelectionPageIds = SHOPEE_BATCH_PRODUCT_MODE === "single"
     ? eligiblePageIds.slice(0, 1)
     : eligiblePageIds;
-  let selectedProducts = await selectShopeeProductsForPages({
-    userId: config.userId,
-    pageIds: productSelectionPageIds,
-    sourceTag: config.shopeeSourceTag ?? "trending",
-    keyword: config.shopeeKeyword,
-    category: normalizeShopeeCategory(config.shopeeCategory),
-    categories: normalizeShopeeCategories(config.shopeeCategories?.length ? config.shopeeCategories : config.shopeeCategory),
-    categoryPriority: config.shopeeCategoryPriority ?? [],
-    blockedCategories: config.shopeeBlockedCategories ?? [],
-    minPrice: config.shopeeMinPrice ?? 0,
-    maxPrice: config.shopeeMaxPrice ?? 0,
-    minRating: config.shopeeMinRating ?? 0,
-    minSales: config.shopeeMinSales ?? 0,
-    minSoldCount: config.shopeeMinSoldCount ?? 0,
-    minDiscountPercent: config.shopeeMinDiscountPercent ?? 0,
-    jobId: records.workflowRunId
-  });
+  let selectedProducts: ShopeeSelectedProduct[];
+  try {
+    selectedProducts = await selectShopeeProductsForPages({
+      userId: config.userId,
+      pageIds: productSelectionPageIds,
+      sourceTag: config.shopeeSourceTag ?? "trending",
+      keyword: config.shopeeKeyword,
+      category: normalizeShopeeCategory(config.shopeeCategory),
+      categories: normalizeShopeeCategories(config.shopeeCategories?.length ? config.shopeeCategories : config.shopeeCategory),
+      categoryPriority: config.shopeeCategoryPriority ?? [],
+      blockedCategories: config.shopeeBlockedCategories ?? [],
+      minPrice: config.shopeeMinPrice ?? 0,
+      maxPrice: config.shopeeMaxPrice ?? 0,
+      minRating: config.shopeeMinRating ?? 0,
+      minSales: config.shopeeMinSales ?? 0,
+      minSoldCount: config.shopeeMinSoldCount ?? 0,
+      minDiscountPercent: config.shopeeMinDiscountPercent ?? 0,
+      jobId: records.workflowRunId
+    });
+  } catch (error) {
+    const noEligibleDiagnostics = getShopeeNoEligibleDiagnostics(error);
+    if (noEligibleDiagnostics) {
+      await logShopeeStep({
+        config,
+        step: "PRODUCT_SELECTION_NO_ELIGIBLE_DIAGNOSTICS",
+        status: "failed",
+        message: "Shopee product selection found no eligible products; diagnostics captured",
+        metadata: {
+          ...noEligibleDiagnostics,
+          primaryFailureReason: noEligibleDiagnostics.primaryFailureReason ?? null,
+          rejectionSummary: noEligibleDiagnostics.rejectionSummary ?? null,
+          sampleRejectedProducts: noEligibleDiagnostics.sampleRejectedProducts ?? null,
+          sourceTag: config.shopeeSourceTag ?? "trending",
+          keyword: config.shopeeKeyword ?? "",
+          category: normalizeShopeeCategory(config.shopeeCategory),
+          categories: normalizeShopeeCategories(config.shopeeCategories?.length ? config.shopeeCategories : config.shopeeCategory),
+          selectedPagesCount: eligiblePageIds.length,
+          selectionPageCount: productSelectionPageIds.length,
+          workflowRunId: records.workflowRunId
+        },
+        error
+      });
+    }
+    throw error;
+  }
   const selectedProductsBeforeModeGuard = selectedProducts.length;
   await logShopeeStep({
     config,
