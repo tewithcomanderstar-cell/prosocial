@@ -66,6 +66,10 @@ export function normalizeShopeeCategories(values?: Array<string | null | undefin
     .filter(Boolean);
   const unique = Array.from(new Set(normalized));
   if (!unique.length) return [];
+  // If only "all" is present (or all values resolved to "all"), treat as no specific category.
+  // But if the user also picked specific categories alongside "all", keep those specific ones.
+  const withoutAll = unique.filter((c) => c !== DEFAULT_SHOPEE_CATEGORY);
+  if (withoutAll.length) return withoutAll;
   if (unique.includes(DEFAULT_SHOPEE_CATEGORY)) return [];
   return unique;
 }

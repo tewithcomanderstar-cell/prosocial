@@ -101,7 +101,7 @@ function testShopeeCategoryNormalization() {
   assert.equal(normalizeShopeeCategory("Lifestyle, Beauty, Home"), "all");
   assert.equal(normalizeShopeeCategory("Home & Living"), "home_living");
   assert.deepEqual(normalizeShopeeCategories(["Automotive", "Sports & Outdoors"]), ["automotive", "sports"]);
-  assert.deepEqual(normalizeShopeeCategories(["all", "Automotive", "Sports & Outdoors"]), []);
+  assert.deepEqual(normalizeShopeeCategories(["all", "Automotive", "Sports & Outdoors"]), ["automotive", "sports"]);
   assert.deepEqual(normalizeShopeeCategories([]), []);
   assert.equal(getShopeeCategoryLabel("beauty"), "Beauty & Personal Care");
   console.log("PASS Shopee category dropdown values normalize legacy text");
@@ -258,6 +258,7 @@ function testShopeeSourceSpecificSelectionGuards() {
   assert.ok(source.includes("FALLBACK_PRODUCT_SELECTION_USED"));
   assert.ok(source.includes("shopee_no_eligible_products"));
   assert.ok(source.includes("getShopeeProductHardSelectionRejectionReason"));
+  assert.ok(source.includes("SHOPEE_MIN_SOURCE_SPECIFIC_SCORE = 20"));
   assert.ok(source.includes("fallback_relaxed_selection"));
   assert.ok(source.includes("PRODUCT_SELECTION_ROOT_CAUSE"));
   assert.ok(source.includes("all_products"));
@@ -542,6 +543,8 @@ function testShopeeProductIntelligenceLayerGuards() {
   assert.ok(source.includes("Math.max(base.confidence, thaiBuyerConfidence)"));
   assert.ok(source.includes("baseConfidenceBeforeThaiBuyer"));
   assert.ok(source.includes("finalConfidence"));
+  assert.ok(source.includes("freshProductIntelligence"));
+  assert.ok(source.includes("Strip old intelligence"));
   assert.ok(source.includes("mergeThaiBuyerProductIntelligence"));
   assert.ok(aiSource.includes("ThaiBuyerProductIntelligenceResult"));
   assert.ok(aiSource.includes("You are a Thai consumer psychologist and product analyst"));
@@ -723,7 +726,8 @@ function testShopeeMultiCategorySelectionRescueGuards() {
   const selectionSource = sourceBetween(source, "export async function selectShopeeProductsForPages", "export function buildShopeeImagePrompt");
   assert.ok(selectionSource.includes("MULTI_CATEGORY_PRODUCT_SELECTION_RESCUE_STARTED"));
   assert.ok(selectionSource.includes("MULTI_CATEGORY_PRODUCT_SELECTION_RESCUE_COMPLETED"));
-  assert.ok(selectionSource.includes("categories.length > 1 && sourceTag !== \"all_products\""));
+  assert.ok(selectionSource.includes("categories.length > 1"));
+  assert.equal(selectionSource.includes("sourceTag !== \"all_products\""), false);
   assert.ok(selectionSource.includes("fetchShopeeAllProductsForSelectedCategories"));
   assert.ok(selectionSource.includes("multi_category_rescue_selection"));
   assert.ok(selectionSource.indexOf("MULTI_CATEGORY_PRODUCT_SELECTION_RESCUE_STARTED") < selectionSource.indexOf("No eligible Shopee products found after strict and fallback product selection"));

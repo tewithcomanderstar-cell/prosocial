@@ -6752,7 +6752,7 @@ type ShopeeSourceScoredCandidate = {
   finalRank?: number;
 };
 
-const SHOPEE_MIN_SOURCE_SPECIFIC_SCORE = 35;
+const SHOPEE_MIN_SOURCE_SPECIFIC_SCORE = 20;
 
 function toFiniteNumber(value: unknown, fallback = 0) {
   const numberValue = Number(value);
@@ -8286,7 +8286,7 @@ export async function selectShopeeProductsForPages(input: {
     }
   }
 
-  if (!selected.length && categories.length > 1 && sourceTag !== "all_products") {
+  if (!selected.length && categories.length > 1) {
     console.warn("MULTI_CATEGORY_PRODUCT_SELECTION_RESCUE_STARTED", {
       source: sourceTag,
       selectedCategories: categories,
@@ -8796,10 +8796,20 @@ export async function generateShopeeCaption(input: {
     }
   });
 
+  // Build fresh product intelligence from the current understanding run.
+  // This replaces any stale intelligence stored in the DB record, which may
+  // have been generated for a previous (possibly failed) post of the same product.
+  const freshProductIntelligence = buildShopeeProductIntelligence({
+    product,
+    understanding: productUnderstanding
+  });
+
   const productForStoryboard: ShopeeProductRecord = {
     ...product,
-    productName: existingProductIntelligence?.productNameThai ||
-      existingProductIntelligence?.productName ||
+    // Strip old intelligence — always use the freshly-built one above.
+    productIntelligence: freshProductIntelligence,
+    productName: freshProductIntelligence.productNameThai ||
+      freshProductIntelligence.productName ||
       productUnderstanding.productEntity ||
       productUnderstanding.cleanedTitle ||
       titleInfo.cleanedTitle ||
