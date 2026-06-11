@@ -12,13 +12,6 @@ const autoPostConfigSchema = new Schema(
     },
     folderId: { type: String, default: "root" },
     folderName: { type: String, default: "My Drive" },
-    shopeeSourceTag: {
-      type: String,
-      enum: ["trending", "best_selling", "top_search", "best_roi", "manual", "all_products"],
-      default: "trending",
-      index: true
-    },
-    shopeeKeyword: { type: String, default: "" },
     shopeeCategory: { type: String, default: "" },
     shopeeCategories: { type: [String], default: [] },
     shopeeCaptionStyle: {
@@ -31,10 +24,7 @@ const autoPostConfigSchema = new Schema(
     shopeeCategoryPriority: { type: [String], default: [] },
     shopeeMinPrice: { type: Number, default: 0 },
     shopeeMaxPrice: { type: Number, default: 0 },
-    shopeeMinRating: { type: Number, default: 0 },
-    shopeeMinSales: { type: Number, default: 0 },
     shopeeMinSoldCount: { type: Number, default: 0 },
-    shopeeMinDiscountPercent: { type: Number, default: 0 },
     approvalMode: { type: Boolean, default: false, index: true },
     targetPageIds: { type: [String], default: [] },
     intervalMinutes: {

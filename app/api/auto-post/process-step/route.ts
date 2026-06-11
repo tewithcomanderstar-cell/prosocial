@@ -110,17 +110,39 @@ export async function POST(request: Request) {
         diagnostics = errorRecord.responseSummary;
       }
     }
+    const diagnosticsRecord = diagnostics && typeof diagnostics === "object" && !Array.isArray(diagnostics)
+      ? diagnostics as Record<string, unknown>
+      : null;
+    const primaryFailureReason = diagnosticsRecord && typeof diagnosticsRecord.primaryFailureReason === "string"
+      ? diagnosticsRecord.primaryFailureReason
+      : null;
+    const eligibleProducts = diagnosticsRecord && typeof diagnosticsRecord.eligibleProducts === "number"
+      ? diagnosticsRecord.eligibleProducts
+      : null;
+    const fetchedProducts = diagnosticsRecord && typeof diagnosticsRecord.fetchedProducts === "number"
+      ? diagnosticsRecord.fetchedProducts
+      : null;
+    const errorMessage = error instanceof Error ? error.message : "Auto Post worker step failed";
+    const noEligibleLogMessage = primaryFailureReason
+      ? `${errorMessage} | primaryFailureReason=${primaryFailureReason} | fetched=${fetchedProducts ?? "-"} eligible=${eligibleProducts ?? "-"}`
+      : errorMessage;
 
     const userId = body.userId;
     if (userId) {
       await logAndNotifyError({
         userId,
-        message: error instanceof Error ? error.message : "Auto Post worker step failed",
+        message: errorCode === "shopee_no_eligible_products" ? noEligibleLogMessage : errorMessage,
         metadata: {
           autoPost: true,
           autoPostConfigId: body.configId,
           action: "process-step",
-          mode: body.mode ?? "both"
+          mode: body.mode ?? "both",
+          diagnostics,
+          primaryFailureReason,
+          rejectionSummary: diagnosticsRecord?.rejectionSummary ?? null,
+          sampleRejectedProducts: diagnosticsRecord?.sampleRejectedProducts ?? null,
+          fetchedProducts,
+          eligibleProducts
         },
         error
       });
@@ -129,7 +151,7 @@ export async function POST(request: Request) {
     if (errorCode === "shopee_no_eligible_products") {
       return NextResponse.json({
         ok: false,
-        message: error instanceof Error ? error.message : "No eligible Shopee products found",
+        message: errorCode === "shopee_no_eligible_products" ? noEligibleLogMessage : errorMessage,
         code: errorCode,
         diagnostics
       }, { status: errorStatus });

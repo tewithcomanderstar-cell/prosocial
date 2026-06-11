@@ -19,8 +19,6 @@ type LeanAutoPostConfig = {
   targetPageIds: string[];
   intervalMinutes: number;
   contentSource?: "shopee-affiliate" | "google-drive";
-  shopeeSourceTag?: "trending" | "best_selling" | "top_search" | "best_roi" | "manual" | "all_products";
-  shopeeKeyword?: string;
   shopeeCategory?: string;
   shopeeCategories?: string[];
   shopeeCaptionStyle?: "soft_sell" | "urgency" | "problem_solution" | "review_style" | "deal_alert" | "lifestyle";
@@ -53,9 +51,6 @@ function sanitizeLegacyMessage(value?: string | null) {
 const BROKEN_FOLDER_ID = "1sbp9Ql8moMDs9xBSha5IWoKdE1WlEEWz";
 const FIXED_FOLDER_ID = "1sbp9Ql8moMDs9xBSha5lWoKdE1WiEEWz";
 const AUTO_POST_JOB_TIMEOUT_MS = Number(process.env.AUTO_POST_JOB_TIMEOUT_MS ?? "300000");
-const LEGACY_SOLD_SOURCE_THRESHOLDS = Object.fromEntries(
-  [500, 1000, 1500, 2000].map((threshold) => [`sold_${threshold}_plus`, threshold])
-) as Record<string, number>;
 
 function normalizeFolderId(value: string) {
   const trimmed = value.trim();
@@ -86,25 +81,8 @@ export async function POST(request: Request) {
       return jsonError("Auto Post settings not found", 404);
     }
 
-    const legacySoldThreshold = LEGACY_SOLD_SOURCE_THRESHOLDS[String((config as Record<string, unknown>).shopeeSourceTag ?? "")] ?? 0;
-    if (legacySoldThreshold > 0) {
-      await AutoPostConfig.findByIdAndUpdate(config._id, {
-        shopeeSourceTag: "best_selling",
-        shopeeMinSoldCount: legacySoldThreshold
-      });
-      (config as Record<string, unknown>).shopeeSourceTag = "best_selling";
-      (config as Record<string, unknown>).shopeeMinSoldCount = legacySoldThreshold;
-    }
-
     if (!config.targetPageIds.length) {
       return jsonError("Select at least one Facebook page first", 400);
-    }
-
-    if (config.shopeeSourceTag === "manual" && !config.shopeeKeyword?.trim()) {
-      return jsonError("Manual keyword search requires a keyword", 400, "manual_keyword_required");
-    }
-    if (config.shopeeSourceTag === "all_products" && !normalizeShopeeCategories(config.shopeeCategories?.length ? config.shopeeCategories : config.shopeeCategory).length) {
-      return jsonError("All Products source requires at least one selected Shopee category", 400, "all_products_category_required");
     }
 
     if (config.targetPageIds.length > 100) {
@@ -297,8 +275,6 @@ export async function POST(request: Request) {
         autoPost: true,
         autoPostConfigId: config._id,
         contentSource: "shopee-affiliate",
-        shopeeSourceTag: config.shopeeSourceTag ?? "trending",
-        shopeeKeyword: config.shopeeKeyword ?? "",
         shopeeCategory: normalizeShopeeCategory(config.shopeeCategory),
         shopeeCategories: normalizeShopeeCategories(config.shopeeCategories?.length ? config.shopeeCategories : config.shopeeCategory),
         targetPageCount: config.targetPageIds.length,

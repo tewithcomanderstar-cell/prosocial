@@ -16,8 +16,6 @@ type AutoPostConfig = {
   contentSource: "shopee-affiliate" | "google-drive";
   folderId: string;
   folderName: string;
-  shopeeSourceTag: "trending" | "best_selling" | "top_search" | "best_roi" | "manual" | "all_products";
-  shopeeKeyword: string;
   shopeeCategory: string;
   shopeeCategories: string[];
   shopeeCaptionStyle: "soft_sell" | "urgency" | "problem_solution" | "review_style" | "deal_alert" | "lifestyle";
@@ -26,10 +24,7 @@ type AutoPostConfig = {
   shopeeCategoryPriority: string[];
   shopeeMinPrice: number;
   shopeeMaxPrice: number;
-  shopeeMinRating: number;
-  shopeeMinSales: number;
   shopeeMinSoldCount: number;
-  shopeeMinDiscountPercent: number;
   approvalMode: boolean;
   targetPageIds: string[];
   intervalMinutes: number;
@@ -228,8 +223,6 @@ const defaults: AutoPostConfig = {
   contentSource: "shopee-affiliate",
   folderId: "root",
   folderName: "My Drive",
-  shopeeSourceTag: "trending",
-  shopeeKeyword: "",
   shopeeCategory: DEFAULT_SHOPEE_CATEGORY,
   shopeeCategories: [],
   shopeeCaptionStyle: "soft_sell",
@@ -238,10 +231,7 @@ const defaults: AutoPostConfig = {
   shopeeCategoryPriority: [],
   shopeeMinPrice: 0,
   shopeeMaxPrice: 0,
-  shopeeMinRating: 0,
-  shopeeMinSales: 0,
   shopeeMinSoldCount: 0,
-  shopeeMinDiscountPercent: 0,
   approvalMode: false,
   targetPageIds: [],
   intervalMinutes: 60,
@@ -255,15 +245,6 @@ const defaults: AutoPostConfig = {
   autoPostStatus: "paused",
   jobStatus: "pending",
   retryCount: 0
-};
-
-const SHOPEE_SOURCE_HELPER_TEXT: Record<AutoPostConfig["shopeeSourceTag"], string> = {
-  trending: "คัดสินค้ากำลังมาแรง โดยดูยอดขาย ส่วนลด เรตติ้ง และสัญญาณความนิยม",
-  best_selling: "คัดสินค้ายอดขายสูงจริงเป็นหลัก",
-  top_search: "คัดสินค้าที่มี demand สูงจาก keyword/search signal ถ้ามีข้อมูลจาก Shopee",
-  best_roi: "คัดสินค้าที่คาดว่าทำรายได้ Affiliate ดี จากค่าคอม ราคา ยอดขาย และเรตติ้ง",
-  manual: "ค้นสินค้าตาม keyword ที่กำหนดเอง",
-  all_products: "สุ่มสินค้าจากทุกหมวด Shopee ที่เลือก พร้อมกันสินค้าซ้ำในช่วง 48 ชั่วโมง"
 };
 
 function getConfigShopeeCategories(config?: Partial<AutoPostConfig> | null) {
@@ -788,12 +769,6 @@ export function AutoPostPanel() {
       shopeeCategory: shopeeCategories[0] ?? DEFAULT_SHOPEE_CATEGORY,
       enabled: enabledOverride ?? config.enabled
     };
-    if (payload.shopeeSourceTag === "manual" && !payload.shopeeKeyword.trim()) {
-      throw new Error("Manual keyword search requires a keyword");
-    }
-    if (payload.shopeeSourceTag === "all_products" && getConfigShopeeCategories(payload).length === 0) {
-      throw new Error("All Products source requires at least one selected Shopee category");
-    }
     const response = await fetch("/api/auto-post", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -885,9 +860,7 @@ export function AutoPostPanel() {
   const hasFacebookPages = pages.length > 0;
   const setupRequired = visibleState === "setup_required" || controlPanel?.affiliateConfigStatus === "setup_required";
   const displayStatus = ((controlPanel?.autoPostEngineStatus as AutoPostStatus | undefined) ?? config.autoPostStatus ?? "paused");
-  const manualKeywordMissing = config.shopeeSourceTag === "manual" && !config.shopeeKeyword.trim();
-  const allProductsCategoryMissing = config.shopeeSourceTag === "all_products" && getConfigShopeeCategories(config).length === 0;
-  const startDisabled = starting || saving || setupRequired || manualKeywordMissing || allProductsCategoryMissing || ["running", "posting", "retrying"].includes(displayStatus);
+  const startDisabled = starting || saving || setupRequired || ["running", "posting", "retrying"].includes(displayStatus);
   const facebookRequired = visibleState === "facebook_required" || !hasFacebookPages;
   const blockingError = visibleState === "error" ? error || "Unable to load Auto Post control panel" : "";
   const missingConfig = controlPanel?.missingEnv?.length ? ` Missing: ${controlPanel.missingEnv.join(", ")}` : "";
@@ -1017,32 +990,6 @@ export function AutoPostPanel() {
 
         <div className="grid cols-2 auto-post-grid auto-post-grid-minimal">
           <label className="label">
-            Shopee Product Source
-            <select
-              className="select"
-              value={config.shopeeSourceTag}
-              onChange={(event) =>
-                updateConfig((current) => ({
-                  ...current,
-                  contentSource: "shopee-affiliate",
-                  shopeeSourceTag: event.target.value as AutoPostConfig["shopeeSourceTag"]
-                }))
-              }
-            >
-              <option value="trending">Trending products</option>
-              <option value="best_selling">Best-selling products</option>
-              <option value="top_search">Top searched products</option>
-              <option value="best_roi">Best ROI products</option>
-              <option value="manual">Manual keyword search</option>
-              <option value="all_products">All Products / สินค้าทั้งหมดในหมวดที่เลือก</option>
-            </select>
-            <span className="muted">{SHOPEE_SOURCE_HELPER_TEXT[config.shopeeSourceTag]}</span>
-            {config.shopeeSourceTag === "all_products" ? (
-              <span className="muted">Selected categories: {getConfigShopeeCategories(config).length}</span>
-            ) : null}
-          </label>
-
-          <label className="label">
             Every
             <select
               className="select"
@@ -1053,24 +1000,6 @@ export function AutoPostPanel() {
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
             </select>
-          </label>
-        </div>
-
-        <div className="grid cols-2 auto-post-grid auto-post-grid-minimal">
-          <label className="label">
-            Keyword
-            <input
-              className="input"
-              value={config.shopeeKeyword}
-              onChange={(event) => updateConfig((current) => ({ ...current, shopeeKeyword: event.target.value }))}
-              placeholder="เช่น ของใช้ในบ้าน, แก้วเก็บความเย็น"
-            />
-            {manualKeywordMissing ? (
-              <span className="muted">Manual keyword search requires a keyword</span>
-            ) : null}
-            {allProductsCategoryMissing ? (
-              <span className="muted">All Products requires at least one selected category</span>
-            ) : null}
           </label>
 
           <div className="label" ref={categoryDropdownRef}>
@@ -1180,32 +1109,6 @@ export function AutoPostPanel() {
 
         <div className="grid cols-2 auto-post-grid auto-post-grid-minimal">
           <label className="label">
-            Min Rating
-            <input
-              className="input"
-              type="number"
-              min="0"
-              max="5"
-              step="0.1"
-              value={config.shopeeMinRating}
-              onChange={(event) => updateConfig((current) => ({ ...current, shopeeMinRating: Number(event.target.value) || 0 }))}
-              placeholder="เช่น 4.5"
-            />
-          </label>
-
-          <label className="label">
-            Min Sales
-            <input
-              className="input"
-              type="number"
-              min="0"
-              value={config.shopeeMinSales}
-              onChange={(event) => updateConfig((current) => ({ ...current, shopeeMinSales: Number(event.target.value) || 0 }))}
-              placeholder="เช่น 100"
-            />
-          </label>
-
-          <label className="label">
             Sold Count Filter
             <select
               className="select"
@@ -1220,9 +1123,7 @@ export function AutoPostPanel() {
             </select>
             <span className="muted">Reject products below the selected sold count.</span>
           </label>
-        </div>
 
-        <div className="grid cols-2 auto-post-grid auto-post-grid-minimal">
           <label className="label">
             ราคาต่ำสุด (Min Price ฿)
             <input
@@ -1249,28 +1150,15 @@ export function AutoPostPanel() {
         </div>
 
         <div className="grid cols-2 auto-post-grid auto-post-grid-minimal">
-          <label className="label">
-            Min Discount %
-            <input
-              className="input"
-              type="number"
-              min="0"
-              max="100"
-              value={config.shopeeMinDiscountPercent}
-              onChange={(event) => updateConfig((current) => ({ ...current, shopeeMinDiscountPercent: Number(event.target.value) || 0 }))}
-              placeholder="เช่น 20"
-            />
-          </label>
-        </div>
-
-        <label className="auto-post-toggle auto-post-approval-toggle">
+          <label className="auto-post-toggle auto-post-approval-toggle">
           <span>Manual approval before publish</span>
           <input
             type="checkbox"
             checked={config.approvalMode}
             onChange={(event) => updateConfig((current) => ({ ...current, approvalMode: event.target.checked }))}
           />
-        </label>
+          </label>
+        </div>
 
         <div className="grid cols-2 auto-post-grid auto-post-grid-minimal">
           <label className="label">

@@ -13,8 +13,7 @@ import {
   recordShopeeQueueItem,
   releaseShopeeProductReservation,
   selectShopeeProductsForPages,
-  ShopeeCaptionStyle,
-  ShopeeSourceTag
+  ShopeeCaptionStyle
 } from "@/lib/services/shopee-affiliate";
 import { randomItem } from "@/lib/utils";
 import { normalizeShopeeCategories, normalizeShopeeCategory } from "@/lib/shopee-categories";
@@ -35,8 +34,6 @@ type LeanAutoPostConfig = {
   contentSource?: "shopee-affiliate" | "google-drive";
   folderId: string;
   folderName?: string;
-  shopeeSourceTag?: ShopeeSourceTag;
-  shopeeKeyword?: string;
   shopeeCategory?: string;
   shopeeCategories?: string[];
   shopeeCaptionStyle?: ShopeeCaptionStyle;
@@ -45,10 +42,7 @@ type LeanAutoPostConfig = {
   shopeeCategoryPriority?: string[];
   shopeeMinPrice?: number;
   shopeeMaxPrice?: number;
-  shopeeMinRating?: number;
-  shopeeMinSales?: number;
   shopeeMinSoldCount?: number;
-  shopeeMinDiscountPercent?: number;
   approvalMode?: boolean;
   targetPageIds: string[];
   intervalMinutes: number;
@@ -1312,18 +1306,13 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
           : await selectShopeeProductsForPages({
               userId: input.config.userId,
               pageIds: input.eligiblePageIds.slice(0, 1),
-              sourceTag: input.config.shopeeSourceTag ?? "trending",
-              keyword: input.config.shopeeKeyword,
               category: normalizeShopeeCategory(input.config.shopeeCategory),
               categories: normalizeShopeeCategories(input.config.shopeeCategories?.length ? input.config.shopeeCategories : input.config.shopeeCategory),
               categoryPriority: input.config.shopeeCategoryPriority ?? [],
               blockedCategories: input.config.shopeeBlockedCategories ?? [],
               minPrice: input.config.shopeeMinPrice ?? 0,
               maxPrice: input.config.shopeeMaxPrice ?? 0,
-              minRating: input.config.shopeeMinRating ?? 0,
-              minSales: input.config.shopeeMinSales ?? 0,
               minSoldCount: input.config.shopeeMinSoldCount ?? 0,
-              minDiscountPercent: input.config.shopeeMinDiscountPercent ?? 0,
               excludedProductIds: Array.from(skippedProductIds),
               jobId: input.records.workflowRunId
             });
@@ -1345,8 +1334,6 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
             maxSearchCycles: AUTO_POST_MAX_SEARCH_CYCLES,
             maxAttempts: AUTO_POST_MAX_PRODUCT_ATTEMPTS,
             excludedProductIds: Array.from(skippedProductIds),
-            sourceTag: input.config.shopeeSourceTag ?? "trending",
-            keyword: input.config.shopeeKeyword ?? "",
             category: normalizeShopeeCategory(input.config.shopeeCategory),
             categories: normalizeShopeeCategories(input.config.shopeeCategories?.length ? input.config.shopeeCategories : input.config.shopeeCategory),
             workflowRunId: input.records.workflowRunId
@@ -2245,8 +2232,6 @@ async function queueShopeeAutoPostsForConfig(
     status: "started",
     message: "Fetching Shopee products for this auto-post run",
     metadata: {
-      sourceTag: config.shopeeSourceTag ?? "trending",
-      keyword: config.shopeeKeyword ?? "",
       category: normalizeShopeeCategory(config.shopeeCategory),
       categories: normalizeShopeeCategories(config.shopeeCategories?.length ? config.shopeeCategories : config.shopeeCategory),
       pageCount: eligiblePageIds.length,
@@ -2260,8 +2245,6 @@ async function queueShopeeAutoPostsForConfig(
     status: "started",
     message: "Fetching and scoring Shopee products",
     metadata: {
-      sourceTag: config.shopeeSourceTag ?? "trending",
-      keyword: config.shopeeKeyword ?? "",
       category: normalizeShopeeCategory(config.shopeeCategory),
       categories: normalizeShopeeCategories(config.shopeeCategories?.length ? config.shopeeCategories : config.shopeeCategory),
       pageCount: eligiblePageIds.length
@@ -2275,18 +2258,13 @@ async function queueShopeeAutoPostsForConfig(
     selectedProducts = await selectShopeeProductsForPages({
       userId: config.userId,
       pageIds: productSelectionPageIds,
-      sourceTag: config.shopeeSourceTag ?? "trending",
-      keyword: config.shopeeKeyword,
       category: normalizeShopeeCategory(config.shopeeCategory),
       categories: normalizeShopeeCategories(config.shopeeCategories?.length ? config.shopeeCategories : config.shopeeCategory),
       categoryPriority: config.shopeeCategoryPriority ?? [],
       blockedCategories: config.shopeeBlockedCategories ?? [],
       minPrice: config.shopeeMinPrice ?? 0,
       maxPrice: config.shopeeMaxPrice ?? 0,
-      minRating: config.shopeeMinRating ?? 0,
-      minSales: config.shopeeMinSales ?? 0,
       minSoldCount: config.shopeeMinSoldCount ?? 0,
-      minDiscountPercent: config.shopeeMinDiscountPercent ?? 0,
       jobId: records.workflowRunId
     });
   } catch (error) {
@@ -2302,8 +2280,6 @@ async function queueShopeeAutoPostsForConfig(
           primaryFailureReason: noEligibleDiagnostics.primaryFailureReason ?? null,
           rejectionSummary: noEligibleDiagnostics.rejectionSummary ?? null,
           sampleRejectedProducts: noEligibleDiagnostics.sampleRejectedProducts ?? null,
-          sourceTag: config.shopeeSourceTag ?? "trending",
-          keyword: config.shopeeKeyword ?? "",
           category: normalizeShopeeCategory(config.shopeeCategory),
           categories: normalizeShopeeCategories(config.shopeeCategories?.length ? config.shopeeCategories : config.shopeeCategory),
           selectedPagesCount: eligiblePageIds.length,

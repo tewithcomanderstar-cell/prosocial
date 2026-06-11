@@ -4,81 +4,32 @@ import {
   getShopeeEnvStatus,
   getShopeeProductProvider,
   fetchShopeeAllProductsForSelectedCategories,
-  scoreShopeeProductForSource,
   ShopeeProviderError,
   getShopeeCanonicalProductKey,
   upsertShopeeProducts,
-  ShopeeSourceTag
 } from "@/lib/services/shopee-affiliate";
 import { DEFAULT_SHOPEE_CATEGORY, normalizeShopeeCategories, normalizeShopeeCategory } from "@/lib/shopee-categories";
 
 const querySchema = z.object({
-  sourceTag: z.enum(["trending", "best_selling", "top_search", "best_roi", "manual", "all_products"]).default("trending"),
-  keyword: z.string().optional(),
   category: z.string().default(DEFAULT_SHOPEE_CATEGORY),
   categories: z.array(z.string()).default([]),
   minSoldCount: z.number().min(0).default(0),
   limit: z.number().min(1).max(50).default(20)
 });
 
-function parseSourceTag(value: string | null): ShopeeSourceTag {
-  const allowed: ShopeeSourceTag[] = ["trending", "best_selling", "top_search", "best_roi", "manual", "all_products"];
-  return allowed.includes(value as ShopeeSourceTag) ? (value as ShopeeSourceTag) : "trending";
-}
-
 async function fetchProductsForCategories(input: {
   userId: string;
-  provider: ReturnType<typeof getShopeeProductProvider>;
-  sourceTag: ShopeeSourceTag;
-  keyword?: string;
   categories: string[];
   minSoldCount?: number;
   limit: number;
 }) {
   const categories = input.categories.length ? input.categories : [DEFAULT_SHOPEE_CATEGORY];
-  const batches = [];
-  const errors: string[] = [];
-
-  if (input.sourceTag === "manual" && !input.keyword?.trim()) {
-    throw new ShopeeProviderError(
-      "Manual keyword search requires a keyword",
-      400,
-      "manual_keyword_required",
-      "internal_api"
-    );
-  }
-  if (input.sourceTag === "all_products") {
-    const products = await fetchShopeeAllProductsForSelectedCategories({
-      userId: input.userId,
-      selectedCategoryIds: categories,
-      limit: input.limit,
-      randomSeed: `${categories.join(",")}:${Date.now()}`
-    });
-    return (input.minSoldCount ?? 0) > 0
-      ? products.filter((product) => (product.salesCount ?? 0) >= (input.minSoldCount ?? 0))
-      : products;
-  }
-
-  for (const category of categories) {
-    try {
-      batches.push(
-        await input.provider.fetchProducts({
-          sourceTag: input.sourceTag,
-          keyword: input.keyword,
-          category,
-          limit: input.limit
-        })
-      );
-    } catch (error) {
-      errors.push(`${category}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
-  if (!batches.length && errors.length) {
-    throw new Error(`Unable to fetch Shopee products for selected categories: ${errors.join(" | ")}`);
-  }
-
-  const products = batches.flat();
+  const products = await fetchShopeeAllProductsForSelectedCategories({
+    userId: input.userId,
+    selectedCategoryIds: categories,
+    limit: input.limit,
+    randomSeed: `${categories.join(",")}:${Date.now()}`
+  });
   const seen = new Set<string>();
   return products.filter((product) => {
     const key = getShopeeCanonicalProductKey(product) || String(product.productId || `${product.shopId}:${product.itemId}`);
@@ -93,8 +44,6 @@ export async function GET(request: Request) {
   try {
     const userId = await requireAuth();
     const url = new URL(request.url);
-    const sourceTag = parseSourceTag(url.searchParams.get("sourceTag"));
-    const keyword = url.searchParams.get("keyword") ?? undefined;
     const category = normalizeShopeeCategory(url.searchParams.get("category"));
     const categories = normalizeShopeeCategories(url.searchParams.getAll("categories").length ? url.searchParams.getAll("categories") : category);
     const minSoldCount = Number(url.searchParams.get("minSoldCount") ?? "0") || 0;
@@ -106,18 +55,13 @@ export async function GET(request: Request) {
       userId,
       provider: provider.name,
       providerMode: envStatus.providerMode,
-      sourceTag,
-      hasKeyword: Boolean(keyword),
       hasCategory: category !== DEFAULT_SHOPEE_CATEGORY,
       categories,
       limit: Number.isFinite(limit) ? limit : 20,
       missingEnv: envStatus.missing
     });
     const products = await fetchProductsForCategories({
-      provider,
       userId,
-      sourceTag,
-      keyword,
       categories,
       minSoldCount,
       limit: Number.isFinite(limit) ? limit : 20
@@ -125,10 +69,7 @@ export async function GET(request: Request) {
     await upsertShopeeProducts(products);
 
     return jsonOk({
-      products: products.map((product) => ({
-        ...product,
-        score: scoreShopeeProductForSource({ product, sourceTag, keyword, categories }).score
-      })),
+      products,
       count: products.length,
       provider: provider.name
     });
@@ -164,33 +105,20 @@ export async function POST(request: Request) {
       userId,
       provider: provider.name,
       providerMode: envStatus.providerMode,
-      sourceTag: payload.sourceTag,
-      hasKeyword: Boolean(payload.keyword),
       hasCategory: normalizeShopeeCategory(payload.category) !== DEFAULT_SHOPEE_CATEGORY,
       categories: normalizeShopeeCategories((payload.categories ?? []).length ? payload.categories : payload.category),
       limit: payload.limit,
       missingEnv: envStatus.missing
     });
     const products = await fetchProductsForCategories({
-      provider,
       userId,
-      sourceTag: payload.sourceTag ?? "trending",
-      keyword: payload.keyword,
       categories: normalizeShopeeCategories((payload.categories ?? []).length ? payload.categories : payload.category),
       minSoldCount: payload.minSoldCount ?? 0,
       limit: payload.limit ?? 20
     });
     await upsertShopeeProducts(products);
     return jsonOk({
-      products: products.map((product) => ({
-        ...product,
-        score: scoreShopeeProductForSource({
-          product,
-          sourceTag: payload.sourceTag ?? "trending",
-          keyword: payload.keyword,
-          categories: normalizeShopeeCategories((payload.categories ?? []).length ? payload.categories : payload.category)
-        }).score
-      })),
+      products,
       count: products.length,
       provider: provider.name
     });

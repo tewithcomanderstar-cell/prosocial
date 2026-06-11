@@ -2,110 +2,76 @@
 
 Last updated: 2026-06-12
 
-This document traces the current Shopee product selection flow from product fetch to the final selected product used by Auto Post.
+This document describes the simplified Shopee product selection flow used by Auto Post after removing source-specific scoring, manual keyword search, min rating, min sales, and min discount filters.
+
+## Current Model
+
+Auto Post now treats Shopee discovery as:
+
+```text
+Selected categories
+-> fetch broad product pool
+-> normalize and dedupe
+-> hard product validity filters
+-> price filter
+-> Sold Count Filter
+-> 48h duplicate and reservation filters
+-> random pick from remaining products
+-> Product Intelligence / caption / image package
+```
+
+There is no user-facing source selector, no user keyword search, and no source-specific product score in the final selection path.
 
 ## Entry Points
 
 UI:
+
 - `components/auto-post-panel.tsx`
-- Source field: `shopeeSourceTag`
-- Sold threshold field: `shopeeMinSoldCount`
 - Category field: `shopeeCategories` / `shopeeCategory`
+- Sold threshold field: `shopeeMinSoldCount`
+- Price fields: `shopeeMinPrice`, `shopeeMaxPrice`
 
 API:
-- `app/api/auto-post/route.ts` saves config and normalizes legacy sold sources.
-- `app/api/auto-post/start/route.ts` starts a manual run and validates required source inputs.
-- `app/api/auto-post/process-step/route.ts` runs the worker step.
-- `app/api/shopee/products/route.ts` previews/discovers Shopee products.
 
-Service:
+- `app/api/auto-post/route.ts` saves config and unsets legacy source/keyword/rating/sales/discount fields.
+- `app/api/auto-post/start/route.ts` starts a manual run.
+- `app/api/auto-post/process-step/route.ts` runs the worker step.
+- `app/api/shopee/products/route.ts` previews/discovers Shopee products from selected categories.
+
+Services:
+
 - `lib/services/auto-post.ts`
 - `lib/services/shopee-affiliate.ts`
+- `lib/services/queue.ts` records posted product history after successful publish.
 
 Shopee provider:
+
 - `getShopeeProductProvider()`
 - `ShopeeOfficialApiProvider.fetchProducts()`
 - `fetchShopeeAffiliateGraphqlProducts()`
 - `MockShopeeProvider.fetchProducts()` when mock mode is active.
 
-## Source Flow
+## Discovery Flow
 
-All real Auto Post source selection eventually calls:
+All Auto Post selection calls:
 
 ```ts
 selectShopeeProductsForPages()
 ```
 
-### Source Matrix
+That function always discovers products through:
 
-| Source | Function Called | Shopee API Query | Categories Applied | Multi Category Logic | Initial Fetch Size |
-|---|---|---|---|---|---|
-| Trending | `provider.fetchProducts({ sourceTag: "trending" })` | GraphQL `productOfferV2(limit, page, listType: 0, keyword)` or REST query params | Yes | OR, fetch each selected category then merge | 30-50 per category |
-| Best Selling | `provider.fetchProducts({ sourceTag: "best_selling" })` | GraphQL `productOfferV2`, `listType: 1` only when allowed by matchId | Yes | OR, fetch each selected category then merge | 30-50 per category |
-| Top Searched | `provider.fetchProducts({ sourceTag: "top_search" })` | GraphQL `productOfferV2`, `listType: 2` only when allowed by matchId | Yes | OR, fetch each selected category then merge | 30-50 per category |
-| Best ROI | `provider.fetchProducts({ sourceTag: "best_roi" })` | GraphQL `productOfferV2`, `listType: 3` only when allowed by matchId | Yes | OR, fetch each selected category then merge | 30-50 per category |
-| Manual Keyword | `provider.fetchProducts({ sourceTag: "manual", keyword })` | GraphQL `productOfferV2(limit, page, listType: 0, keyword)` | Yes | OR, fetch each selected category then merge | 30-50 per category |
-| All Products | `fetchShopeeAllProductsForSelectedCategories()` | Calls provider once per selected category with randomized page and category Thai keyword | Required | OR, fetch every selected category, merge and dedupe | `limit * 3`, minimum 30 per category |
-| SOLD 500+ | Same selected source + `minSoldCount = 500` | Not a separate Shopee source | Yes | Same as selected source | Same as selected source |
-| SOLD 1000+ | Same selected source + `minSoldCount = 1000` | Not a separate Shopee source | Yes | Same as selected source | Same as selected source |
-| SOLD 1500+ | Same selected source + `minSoldCount = 1500` | Not a separate Shopee source | Yes | Same as selected source | Same as selected source |
-| SOLD 2000+ | Same selected source + `minSoldCount = 2000` | Not a separate Shopee source | Yes | Same as selected source | Same as selected source |
-
-Important: SOLD 500/1000/1500/2000 are filters, not source tags. Legacy configs that stored sold thresholds as source tags are normalized to `best_selling + shopeeMinSoldCount`.
-
-## Shopee API Details
-
-When `SHOPEE_AUTH_MODE=affiliate_graphql`, the query is:
-
-```graphql
-query {
-  productOfferV2(limit: N, page: P, listType: X, keyword: "...") {
-    nodes {
-      productName
-      itemId
-      shopId
-      productLink
-      offerLink
-      imageUrl
-      price
-      priceMin
-      priceMax
-      sales
-      ratingStar
-      commissionRate
-      shopName
-    }
-  }
-}
+```ts
+fetchShopeeAllProductsForSelectedCategories()
 ```
 
-`listType` behavior:
-- `trending`, `manual`, `all_products`: `0`
-- `best_selling`: `1`
-- `top_search`: `2`
-- `best_roi`: `3`
-
-If `listType` needs `matchId` and no `SHOPEE_AFFILIATE_MATCH_ID` exists, the system skips invalid listType usage and logs `listType_requires_matchId_but_matchId_missing`.
-
-If GraphQL returns an empty listType result, the provider retries a minimal `productOfferV2(limit, page)` query.
-
-## Category Logic
-
-Selected categories are normalized with:
+The selected categories are normalized with:
 
 ```ts
 normalizeShopeeCategories()
 ```
 
-For normal sources, the service loops over every selected category:
-
-```ts
-for (const category of discoveryCategories) {
-  provider.fetchProducts({ sourceTag, keyword, category, limit })
-}
-```
-
-The result is OR logic:
+Multi-category behavior is OR logic:
 
 ```text
 category A products
@@ -117,19 +83,40 @@ category A products
 
 The system does not require one product to match every selected category.
 
-For `all_products`, `fetchShopeeAllProductsForSelectedCategories()` shuffles selected categories, fetches each one with a random page, merges all results, and dedupes.
+## Shopee API Behavior
 
-Dedupe key order:
+`fetchShopeeAllProductsForSelectedCategories()`:
+
+- Loads selected categories.
+- Shuffles category order.
+- Fetches each selected category.
+- Uses randomized page/offset where supported.
+- Uses randomized sort modes where supported.
+- Fetches a broader pool than needed.
+- Normalizes all provider responses.
+- Deduplicates before filtering.
+
+For each category, provider fetch still may pass a category-derived Thai discovery term internally. This is only for product discovery and is not a user keyword filter or caption input.
+
+## Deduplication
+
+Dedupe key priority:
+
 1. `shopId:itemId`
 2. `productId`
-3. product URL item id
-4. hash of normalized product name + shop name
+3. product URL canonical item id
+4. normalized product name + shop name hash fallback
+
+Implemented around:
+
+- `getShopeeCanonicalProductKey()`
+- `dedupeShopeeProducts()`
 
 ## Filter Order
 
 Implemented mainly in `getShopeeProductFilterRejectionReason()` and `selectShopeeProductsForPages()`.
 
-Exact strict filter order:
+Current strict filter order:
 
 1. Already selected in the same request
 2. Explicitly excluded product ID
@@ -138,19 +125,25 @@ Exact strict filter order:
 5. Not out of stock
 6. Product name is not English-only
 7. Not blocked category
-8. Min price
-9. Max price
-10. Min rating
-11. Min sales
-12. Sold count filter
-13. Min discount
-14. Duplicate 48h cooldown
-15. Active reservation
-16. Already posted today
-17. Page-level recently posted check
-18. Source score filter
-19. Ranked top-candidate random selection
-20. Product Intelligence confidence, after selection during package/caption generation
+8. Min Price
+9. Max Price
+10. Sold Count Filter
+11. Duplicate 48h cooldown
+12. Active reservation
+13. Already posted today
+14. Page-level recently posted check
+15. Random selection from remaining products
+16. Product Intelligence confidence, after selection during package/caption generation
+
+Removed selection controls:
+
+- Source selector
+- User keyword search
+- Rating threshold
+- Sales threshold
+- Discount threshold
+- Source score threshold
+- Ranked scoring
 
 ## Rejection Reasons
 
@@ -162,96 +155,82 @@ Public diagnostics use these names:
 | `missing_product_url` | Product has no product URL or affiliate URL | Strict |
 | `out_of_stock` | Stock exists and is `<= 0` | Strict |
 | `blocked_category` | Product category matches blocked category config | Strict |
-| `below_min_price` | Product price is lower than configured min | Relaxable |
-| `above_max_price` | Product price is higher than configured max | Relaxable |
-| `below_min_rating` | Product rating is below configured min | Relaxable |
-| `below_min_sales` | Product sales count is below configured min | Relaxable |
-| `below_min_discount` | Discount percent is below configured min | Relaxable |
-| `below_min_sold_count` | Sold count is below selected SOLD threshold | Relaxable only when `SHOPEE_ALLOW_RELAX_SOLD_THRESHOLD_ON_EMPTY=true` |
+| `below_min_price` | Product price is lower than configured min | Configurable |
+| `above_max_price` | Product price is higher than configured max | Configurable |
+| `below_min_sold_count` | Sold count is below selected Sold Count Filter | Configurable |
 | `duplicate_48h` | Product was posted within cooldown window | Strict |
 | `reserved_by_active_job` | Product is reserved by another active job | Strict |
-| `below_source_score` | Source-specific score is below threshold | Relaxable by fallback/expanded selection |
 | `product_understanding_low_confidence` | Product Intelligence confidence is below 70 after selection | Strict for content generation |
 
-Internal legacy aliases still exist in code for backward compatibility:
+Internal aliases:
+
 - `duplicate_product_48h` -> `duplicate_48h`
 - `reserved_product` -> `reserved_by_active_job`
-- `below_min_source_score` -> `below_source_score`
 
-## Source Scoring
+## Sold Count Filter
 
-Implemented in `scoreShopeeProductForSource()`.
+Sold Count Filter is separate from product discovery. It is not a Shopee source.
 
-Trending:
+Supported thresholds:
 
-```text
-salesMomentumScore * 0.35
-+ discountScore * 0.20
-+ ratingScore * 0.15
-+ reviewScore * 0.10
-+ freshnessScore * 0.10
-+ sourceApiBonus * 0.10
-```
+- No sold filter
+- Sold Count Filter 500+
+- Sold Count Filter 1000+
+- Sold Count Filter 1500+
+- Sold Count Filter 2000+
 
-Best Selling:
+Filtering rule:
 
 ```text
-salesScore * 0.60
-+ reviewScore * 0.20
-+ ratingScore * 0.15
-+ productQualityScore * 0.05
+product.soldCount < selected threshold
+-> reject below_min_sold_count
 ```
 
-Top Searched:
+Related logs:
 
-If `searchVolume` exists, it is used. Otherwise the fallback is:
+- `SOLD_COUNT_FILTER_APPLIED`
+- `PRODUCT_REJECTED_BELOW_MIN_SOLD`
+- `PRODUCT_ACCEPTED_SOLD_THRESHOLD`
+
+## Selection
+
+After filters pass, selection is intentionally unscored:
 
 ```text
-keywordMatchScore * 0.35
-+ salesScore * 0.25
-+ reviewScore * 0.15
-+ ratingScore * 0.10
-+ sourceApiBonus * 0.15
+eligible products
+-> buildUnscoredShopeeSelectionCandidate()
+-> pickRandomFilteredShopeeCandidate()
 ```
 
-Best ROI:
+The selected candidate records the reason:
 
 ```text
-estimatedCommissionScore * 0.45
-+ conversionProxy * 0.45
-+ productQualityScore * 0.10
+selected_by_filters_only
 ```
 
-Manual Keyword:
+This prevents stale score logic from eliminating valid Shopee products.
 
-```text
-exactKeywordMatch * 0.40
-+ partialKeywordMatch * 0.20
-+ categoryMatch * 0.10
-+ salesScore * 0.15
-+ ratingScore * 0.10
-+ commissionScore * 0.05
-```
+## Duplicate And Reservation Guard
 
-All Products:
+48-hour duplicate prevention applies after the sold count and price filters.
 
-```text
-productQualityScore * 0.35
-+ ratingScore * 0.20
-+ salesScore * 0.20
-+ discountScore * 0.15
-+ reviewScore * 0.10
-```
+Flow:
 
-Source score thresholds:
-- Normal sources: `SHOPEE_MIN_SOURCE_SPECIFIC_SCORE = 20`
-- `all_products`: `SHOPEE_MIN_ALL_PRODUCTS_SCORE = 10`
+1. Fetch products.
+2. Remove invalid products.
+3. Apply price and Sold Count Filter.
+4. Exclude products posted within the cooldown window.
+5. Exclude products reserved by active jobs.
+6. Reserve the selected product.
+7. Save posted history only after successful Facebook publish.
 
-Final source selection:
-1. Calculate source-specific score.
-2. Sort candidates descending.
-3. Keep top 5 or top 10 depending on source.
-4. Randomly pick only inside top candidates.
+Related logs:
+
+- `RECENT_PRODUCT_EXCLUSION_APPLIED`
+- `DUPLICATE_PRODUCT_SKIPPED_48H`
+- `PRODUCT_RESERVED`
+- `PRODUCT_RESERVATION_RELEASED`
+- `POSTED_PRODUCT_HISTORY_SAVED`
 
 ## Product Intelligence Filter
 
@@ -259,10 +238,7 @@ Product Intelligence runs after product selection, before caption/image package 
 
 ```text
 selected Shopee product
--> generateShopeeCaption()
--> extract text understanding
--> optional vision rescue
--> analyzeThaiBuyerProductIntelligence()
+-> Product Intelligence
 -> confidenceScore >= 0.70 required
 ```
 
@@ -289,13 +265,9 @@ The selection service logs:
   "afterStockFilter": 86,
   "afterBlockedCategory": 84,
   "afterPriceFilter": 82,
-  "afterRatingFilter": 82,
-  "afterSalesFilter": 82,
-  "afterDiscountFilter": 82,
   "afterSoldCountFilter": 40,
   "afterDuplicate48hFilter": 36,
   "afterReservationFilter": 35,
-  "afterSourceScoreFilter": 22,
   "afterProductIntelligence": 1,
   "finalEligibleProducts": 1,
   "rejectionSummary": {},
@@ -304,9 +276,9 @@ The selection service logs:
 ```
 
 Related logs:
+
 - `PRODUCT_REJECTION_SUMMARY`
 - `TOP_REJECTED_PRODUCTS`
-- `SOURCE_SCORE_BREAKDOWN`
 - `SOURCE_DATA_QUALITY`
 - `SOLD_COUNT_FILTER_APPLIED`
 - `PRODUCT_SELECTION_ROOT_CAUSE`
@@ -317,47 +289,36 @@ Related logs:
 If strict filtering returns zero selected products:
 
 1. `FALLBACK_PRODUCT_SELECTION_USED`
-   - Keeps only hard requirements.
-   - Still protects sold threshold, duplicate 48h, and active reservations.
+   - Keeps hard product validity checks.
+   - Still protects price, sold threshold, duplicate 48h, and active reservations unless explicitly configured otherwise.
 
 2. `MULTI_CATEGORY_PRODUCT_SELECTION_RESCUE_STARTED`
    - For multi-category runs.
-   - Fetches broad `all_products` pool from all selected categories.
+   - Fetches a broad category pool again.
 
 3. `PRODUCT_SELECTION_EXPANDED`
-   - Runs before final failure.
-   - Fetches all selected categories again with a fresh random page seed.
+   - Fetches selected categories again with a fresh random page seed.
    - Keeps OR category logic.
-   - Keeps duplicate and reservation protection.
-   - Lowers sold threshold only when `SHOPEE_ALLOW_RELAX_SOLD_THRESHOLD_ON_EMPTY=true`.
 
-Only after all recovery attempts are exhausted does the service throw:
+The workflow should only report no eligible products after all recovery attempts are exhausted.
 
-```text
-shopee_no_eligible_products
-```
-
-## Why "No Eligible Shopee Products" Can Happen
+## Why No Eligible Products Can Still Happen
 
 Common causes:
 
-1. Selected categories return too few products from Shopee.
-2. Products do not have image/product URL fields.
-3. Products are blocked by sold threshold.
-4. Products are blocked by price/rating/sales/discount filters.
-5. Products were posted within the 24h/48h cooldown window.
-6. Products are reserved by another active job.
-7. Source score threshold is too high for sparse Shopee API fields.
-8. Product Intelligence confidence fails after selection.
+- Shopee API returned products without image URLs.
+- Shopee API returned products without product or affiliate URLs.
+- Products are out of stock.
+- The selected categories are too narrow.
+- The min/max price range excludes every product.
+- Sold Count Filter is higher than available products in the selected categories.
+- Every product was posted within the 48-hour cooldown window.
+- Every product is reserved by an active job.
+- Product Intelligence rejects selected products due to low confidence.
 
-## Recommendations
+## Recommended Operating Defaults
 
-To keep workflow running continuously:
-
-1. Prefer `all_products` when selected categories are broad.
-2. Keep SOLD threshold separate from source selection.
-3. Keep min rating/sales/discount defaults low unless the user explicitly configures them.
-4. Use `PRODUCT_SELECTION_FUNNEL` and `PRODUCT_SELECTION_ROOT_CAUSE` to tune filters from real evidence.
-5. Enable `SHOPEE_ALLOW_RELAX_SOLD_THRESHOLD_ON_EMPTY=true` only if continuous posting matters more than strict sold thresholds.
-6. Keep duplicate and reservation filters strict to avoid repeated posts.
-7. Do not move Product Intelligence before product pool filtering unless cost is acceptable.
+- Keep Sold Count Filter unset or 500+ for broad categories.
+- Use Min Price and Max Price only when needed.
+- Select multiple categories when the product pool is too small.
+- Avoid very narrow price ranges combined with high sold thresholds.

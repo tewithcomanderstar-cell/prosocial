@@ -62,8 +62,6 @@ const schema = z.object({
   contentSource: z.enum(["shopee-affiliate", "google-drive"]).default("shopee-affiliate"),
   folderId: z.string().min(1).default("root"),
   folderName: z.string().min(1).default("My Drive"),
-  shopeeSourceTag: z.enum(["trending", "best_selling", "top_search", "best_roi", "manual", "all_products"]).default("trending"),
-  shopeeKeyword: z.string().default(""),
   shopeeCategory: z.string().default(DEFAULT_SHOPEE_CATEGORY),
   shopeeCategories: z.array(z.string()).default([]),
   shopeeCaptionStyle: z
@@ -74,10 +72,7 @@ const schema = z.object({
   shopeeCategoryPriority: z.array(z.string()).default([]),
   shopeeMinPrice: z.number().min(0).default(0),
   shopeeMaxPrice: z.number().min(0).default(0),
-  shopeeMinRating: z.number().min(0).max(5).default(0),
-  shopeeMinSales: z.number().min(0).default(0),
   shopeeMinSoldCount: z.number().min(0).default(0),
-  shopeeMinDiscountPercent: z.number().min(0).max(100).default(0),
   approvalMode: z.boolean().default(false),
   targetPageIds: z.array(z.string()).max(100, "Select up to 100 Facebook pages").default([]),
   intervalMinutes: intervalSchema.default(60),
@@ -98,10 +93,6 @@ const DEFAULT_POSTING_WINDOW_START = "00:00";
 const DEFAULT_POSTING_WINDOW_END = "23:59";
 const LEGACY_POSTING_WINDOW_START = "06:00";
 const LEGACY_POSTING_WINDOW_END = "00:00";
-const LEGACY_SOLD_SOURCE_THRESHOLDS = Object.fromEntries(
-  [500, 1000, 1500, 2000].map((threshold) => [`sold_${threshold}_plus`, threshold])
-) as Record<string, number>;
-
 function shouldMigrateLegacyPostingWindow(config: { postingWindowStart?: string | null; postingWindowEnd?: string | null; postingWindowCustomized?: boolean | null }) {
   return (
     config.postingWindowCustomized !== true &&
@@ -125,7 +116,6 @@ export async function GET() {
           retryCount: 0,
           intervalMinutes: 60,
           contentSource: "shopee-affiliate",
-          shopeeSourceTag: "trending",
           shopeeCategory: DEFAULT_SHOPEE_CATEGORY,
           shopeeCategories: [],
           shopeeCaptionStyle: "soft_sell",
@@ -177,17 +167,6 @@ export async function GET() {
       config.shopeeCategory = normalizedCategory;
       config.shopeeCategories = normalizedCategories;
     }
-
-    const legacySoldThreshold = LEGACY_SOLD_SOURCE_THRESHOLDS[String((config as Record<string, unknown>).shopeeSourceTag ?? "")] ?? 0;
-    if (legacySoldThreshold > 0) {
-      await AutoPostConfig.findOneAndUpdate(
-        { userId },
-        { shopeeSourceTag: "best_selling", shopeeMinSoldCount: legacySoldThreshold }
-      );
-      (config as Record<string, unknown>).shopeeSourceTag = "best_selling";
-      (config as Record<string, unknown>).shopeeMinSoldCount = legacySoldThreshold;
-    }
-
     if (config.lastError) {
       const sanitizedLastError = sanitizeLegacyMessage(config.lastError);
       if (sanitizedLastError !== config.lastError) {
@@ -226,19 +205,11 @@ export async function POST(request: Request) {
     const { userId } = await requireRole(["admin", "editor"]);
     const payload = parseBody(schema, await request.json());
     const normalizedFolderId = normalizeFolderId(payload.folderId ?? "root");
-    const shopeeKeyword = (payload.shopeeKeyword ?? "").trim();
     const shopeeCategories = normalizeShopeeCategories((payload.shopeeCategories ?? []).length ? payload.shopeeCategories : payload.shopeeCategory);
     const shopeeCategory = shopeeCategories[0] ?? DEFAULT_SHOPEE_CATEGORY;
     const shopeeTrackingId = (payload.shopeeTrackingId ?? "").trim();
     const targetPageIds = uniquePageIds(payload.targetPageIds);
     const current = (await AutoPostConfig.findOne({ userId }).lean()) as LeanAutoPostConfig | null;
-
-    if (payload.shopeeSourceTag === "manual" && !shopeeKeyword) {
-      return jsonError("Manual keyword search requires a keyword", 400, "manual_keyword_required");
-    }
-    if (payload.shopeeSourceTag === "all_products" && !shopeeCategories.length) {
-      return jsonError("All Products source requires at least one selected Shopee category", 400, "all_products_category_required");
-    }
 
     const nextRunAt = payload.enabled
       ? current?.enabled
@@ -265,7 +236,6 @@ export async function POST(request: Request) {
         contentSource: "shopee-affiliate",
         folderId: normalizedFolderId,
         targetPageIds,
-        shopeeKeyword,
         shopeeCategory,
         shopeeCategories,
         shopeeTrackingId,
@@ -291,7 +261,6 @@ export async function POST(request: Request) {
       },
       { upsert: true, new: true }
     ).lean();
-
     await logAction({
       userId,
       type: "settings",
@@ -301,17 +270,12 @@ export async function POST(request: Request) {
         autoPost: true,
         folderId: normalizedFolderId,
         contentSource: "shopee-affiliate",
-        shopeeSourceTag: payload.shopeeSourceTag,
-        shopeeKeyword,
         shopeeCategory,
         shopeeCategories,
         shopeeCaptionStyle: payload.shopeeCaptionStyle,
         shopeeMinPrice: payload.shopeeMinPrice,
         shopeeMaxPrice: payload.shopeeMaxPrice,
-        shopeeMinRating: payload.shopeeMinRating,
-        shopeeMinSales: payload.shopeeMinSales,
         shopeeMinSoldCount: payload.shopeeMinSoldCount,
-        shopeeMinDiscountPercent: payload.shopeeMinDiscountPercent,
         approvalMode: payload.approvalMode,
         targetPageCount: targetPageIds.length,
         dedupedTargetPageCount: targetPageIds.length,
