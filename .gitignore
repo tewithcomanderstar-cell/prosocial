@@ -12,3 +12,5 @@ dist
 
 .dev-preview.log
 .dev-preview.err
+
+.vercel

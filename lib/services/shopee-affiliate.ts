@@ -737,10 +737,34 @@ function isShopeeGraphqlSystemError(payload: Record<string, any>) {
   });
 }
 
-function optionalShopeeNumber(value: unknown) {
+function parseShopeeNumber(value: unknown) {
   if (value === undefined || value === null || value === "") return undefined;
-  const numberValue = Number(value);
+  if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
+  const raw = String(value).trim().toLowerCase();
+  if (!raw) return undefined;
+  const compact = raw.replace(/[,，\s]/g, "");
+  const unitMatch = compact.match(/(-?\d+(?:\.\d+)?)(k|พัน|หมื่น|m|ล้าน)?/iu);
+  if (unitMatch) {
+    const base = Number(unitMatch[1]);
+    if (Number.isFinite(base)) {
+      const unit = unitMatch[2] ?? "";
+      const multiplier = unit === "k" || unit === "พัน"
+        ? 1_000
+        : unit === "หมื่น"
+          ? 10_000
+          : unit === "m" || unit === "ล้าน"
+            ? 1_000_000
+            : 1;
+      return base * multiplier;
+    }
+  }
+  const cleaned = compact.replace(/[^\d.-]/g, "");
+  const numberValue = Number(cleaned);
   return Number.isFinite(numberValue) ? numberValue : undefined;
+}
+
+function optionalShopeeNumber(value: unknown) {
+  return parseShopeeNumber(value);
 }
 
 function optionalShopeeDate(value: unknown) {
@@ -756,19 +780,19 @@ function normalizeCachedShopeeProduct(product: any, sourceTag: ShopeeSourceTag):
     itemId: String(product.itemId ?? product.productId),
     productName: String(product.productName ?? "Shopee Product"),
     productDescription: String(product.productDescription ?? ""),
-    productPrice: Number(product.productPrice ?? 0),
-    discountPrice: product.discountPrice === null || product.discountPrice === undefined ? undefined : Number(product.discountPrice),
-    discountPercent: product.discountPercent === null || product.discountPercent === undefined ? undefined : Number(product.discountPercent),
+    productPrice: parseShopeeNumber(product.productPrice) ?? 0,
+    discountPrice: product.discountPrice === null || product.discountPrice === undefined ? undefined : parseShopeeNumber(product.discountPrice),
+    discountPercent: product.discountPercent === null || product.discountPercent === undefined ? undefined : parseShopeeNumber(product.discountPercent),
     productImageUrl: String(product.productImageUrl ?? product.productImageUrls?.[0] ?? ""),
     productImageUrls: Array.isArray(product.productImageUrls) ? product.productImageUrls.map(String).filter(Boolean) : undefined,
     productUrl: String(product.productUrl ?? ""),
     affiliateUrl: product.affiliateUrl ? String(product.affiliateUrl) : undefined,
     category: String(product.category ?? "General"),
-    salesCount: product.salesCount === undefined || product.salesCount === null ? undefined : Number(product.salesCount),
-    reviewCount: product.reviewCount === undefined || product.reviewCount === null ? undefined : Number(product.reviewCount),
+    salesCount: product.salesCount === undefined || product.salesCount === null ? undefined : parseShopeeNumber(product.salesCount),
+    reviewCount: product.reviewCount === undefined || product.reviewCount === null ? undefined : parseShopeeNumber(product.reviewCount),
     shopName: product.shopName ? String(product.shopName) : undefined,
-    rating: product.rating === undefined || product.rating === null ? undefined : Number(product.rating),
-    commissionRate: product.commissionRate === undefined || product.commissionRate === null ? undefined : Number(product.commissionRate),
+    rating: product.rating === undefined || product.rating === null ? undefined : parseShopeeNumber(product.rating),
+    commissionRate: product.commissionRate === undefined || product.commissionRate === null ? undefined : parseShopeeNumber(product.commissionRate),
     searchVolume: optionalShopeeNumber(product.searchVolume),
     recentSales: optionalShopeeNumber(product.recentSales),
     salesVelocity: optionalShopeeNumber(product.salesVelocity),
@@ -1054,31 +1078,43 @@ function mapExternalProduct(sourceTag: ShopeeSourceTag, options: { sourceApiSign
     const shopId = String(item.shop_id ?? item.shopId ?? "");
     const itemId = String(item.item_id ?? item.itemId ?? productId);
     const productCreatedAt = item.product_created_at ?? item.productCreatedAt ?? item.created_at ?? item.createdAt;
+    const productImageUrls = Array.isArray(item.product_image_urls)
+      ? item.product_image_urls.map(String).filter(Boolean)
+      : Array.isArray(item.productImageUrls)
+        ? item.productImageUrls.map(String).filter(Boolean)
+        : Array.isArray(item.images)
+          ? item.images.map(String).filter(Boolean)
+          : undefined;
+    const productImageUrl = String(
+      item.product_image_url ??
+      item.productImageUrl ??
+      item.image_url ??
+      item.imageUrl ??
+      item.image ??
+      productImageUrls?.[0] ??
+      ""
+    );
     return {
       productId,
       shopId,
       itemId,
       productName: String(item.product_name ?? item.name ?? item.productName ?? "Shopee Product"),
       productDescription: String(item.product_description ?? item.description ?? item.productDescription ?? ""),
-      productPrice: Number(item.product_price ?? item.price ?? item.priceMin ?? item.price_min ?? 0),
-      discountPrice: item.discount_price === undefined && item.priceMin === undefined ? undefined : Number(item.discount_price ?? item.priceMin),
-      discountPercent: item.discount_percent === undefined ? undefined : Number(item.discount_percent),
-      productImageUrl: String(item.product_image_url ?? item.image ?? item.productImageUrl ?? item.imageUrl ?? ""),
-      productImageUrls: Array.isArray(item.product_image_urls)
-        ? item.product_image_urls.map(String).filter(Boolean)
-        : Array.isArray(item.images)
-          ? item.images.map(String).filter(Boolean)
-          : undefined,
-      productUrl: String(item.product_url ?? item.url ?? item.productUrl ?? item.productLink ?? ""),
+      productPrice: parseShopeeNumber(item.product_price ?? item.price ?? item.priceMin ?? item.price_min) ?? 0,
+      discountPrice: item.discount_price === undefined && item.priceMin === undefined ? undefined : parseShopeeNumber(item.discount_price ?? item.priceMin),
+      discountPercent: item.discount_percent === undefined ? undefined : parseShopeeNumber(item.discount_percent),
+      productImageUrl,
+      productImageUrls,
+      productUrl: String(item.product_url ?? item.url ?? item.productUrl ?? item.productLink ?? item.product_link ?? ""),
       affiliateUrl: item.affiliate_url || item.offerLink ? String(item.affiliate_url ?? item.offerLink) : undefined,
       category: String(item.category ?? item.categoryName ?? "General"),
-      salesCount: item.sales_count === undefined && item.sales === undefined && item.sold_count === undefined && item.sold === undefined && item.historical_sold === undefined
+      salesCount: item.sales_count === undefined && item.salesCount === undefined && item.sales === undefined && item.sold_count === undefined && item.soldCount === undefined && item.sold === undefined && item.historical_sold === undefined && item.historicalSold === undefined
         ? undefined
-        : Number(item.sales_count ?? item.sales ?? item.sold_count ?? item.sold ?? item.historical_sold),
-      reviewCount: item.review_count === undefined ? undefined : Number(item.review_count),
+        : parseShopeeNumber(item.sales_count ?? item.salesCount ?? item.sales ?? item.sold_count ?? item.soldCount ?? item.sold ?? item.historical_sold ?? item.historicalSold),
+      reviewCount: item.review_count === undefined && item.reviewCount === undefined ? undefined : parseShopeeNumber(item.review_count ?? item.reviewCount),
       shopName: item.shop_name === undefined && item.shopName === undefined ? undefined : String(item.shop_name ?? item.shopName),
-      rating: item.rating === undefined && item.ratingStar === undefined ? undefined : Number(item.rating ?? item.ratingStar),
-      commissionRate: item.commission_rate === undefined && item.commissionRate === undefined ? undefined : Number(item.commission_rate ?? item.commissionRate),
+      rating: item.rating === undefined && item.ratingStar === undefined ? undefined : parseShopeeNumber(item.rating ?? item.ratingStar),
+      commissionRate: item.commission_rate === undefined && item.commissionRate === undefined ? undefined : parseShopeeNumber(item.commission_rate ?? item.commissionRate),
       searchVolume: optionalShopeeNumber(item.search_volume ?? item.searchVolume ?? item.search_count ?? item.searchCount),
       recentSales: optionalShopeeNumber(item.recent_sales ?? item.recentSales),
       salesVelocity: optionalShopeeNumber(item.sales_velocity ?? item.salesVelocity),
@@ -6670,8 +6706,7 @@ function pickRandomFilteredShopeeCandidate(candidates: ShopeeSelectionCandidate[
 }
 
 function toFiniteNumber(value: unknown, fallback = 0) {
-  const numberValue = Number(value);
-  return Number.isFinite(numberValue) ? numberValue : fallback;
+  return parseShopeeNumber(value) ?? fallback;
 }
 
 function getEffectiveProductPrice(product: ShopeeProductRecord) {
@@ -6897,7 +6932,15 @@ function getRotatedShopeeCategories(categories: string[], seed = Math.random()) 
 }
 
 function getEffectiveShopeeMinSoldCount(configuredMinSoldCount = 0) {
-  return Math.max(configuredMinSoldCount, Number(process.env.SHOPEE_MIN_SOLD_COUNT ?? "0") || 0);
+  return Math.max(0, configuredMinSoldCount || 0);
+}
+
+function hasShopeeProductLinkOrIdentity(product: ShopeeProductRecord) {
+  return Boolean(
+    product.productUrl?.trim() ||
+    product.affiliateUrl?.trim() ||
+    (String(product.shopId ?? "").trim() && String(product.itemId ?? "").trim())
+  );
 }
 
 function isShopeeProductNameEnglishOnly(productName: string): boolean {
@@ -6926,7 +6969,7 @@ function getShopeeProductFilterRejectionReason(input: {
   if (input.selectedProductIds.has(productId) || input.selectedProductIdentities.has(identity)) return "already_selected_in_request";
   if (input.excludedProductIds.has(productId)) return "excluded_product_id";
   if (!input.product.productImageUrl && !input.product.productImageUrls?.length) return "missing_image";
-  if (!input.product.productUrl && !input.product.affiliateUrl) return "missing_product_url";
+  if (!hasShopeeProductLinkOrIdentity(input.product)) return "missing_product_url";
   if (input.product.stock !== undefined && input.product.stock !== null && toFiniteNumber(input.product.stock) <= 0) return "out_of_stock";
   if (isShopeeProductNameEnglishOnly(input.product.productName)) return "english_only_product_name";
   if (input.blockedCategories?.some((category) => isShopeeCategoryMatch(input.product.category, category))) return "blocked_category";
@@ -7082,7 +7125,7 @@ function recordProductSelectionStaticFunnel(input: {
   const effectivePrice = getEffectiveProductPrice(input.product);
   if (!input.product.productImageUrl && !input.product.productImageUrls?.length) return;
   input.diagnostics.afterMissingImageFilter += 1;
-  if (!input.product.productUrl && !input.product.affiliateUrl) return;
+  if (!hasShopeeProductLinkOrIdentity(input.product)) return;
   input.diagnostics.afterMissingUrlFilter += 1;
   if (input.product.stock !== undefined && input.product.stock !== null && toFiniteNumber(input.product.stock) <= 0) return;
   input.diagnostics.afterOutOfStockFilter += 1;
@@ -7275,7 +7318,7 @@ function isShopeeHardRequirementRejection(reason: string | null) {
 
 function getShopeeProductHardSelectionRejectionReason(product: ShopeeProductRecord, blockedCategories?: string[]) {
   if (!product.productImageUrl && !product.productImageUrls?.length) return "missing_image";
-  if (!product.productUrl && !product.affiliateUrl) return "missing_product_url";
+  if (!hasShopeeProductLinkOrIdentity(product)) return "missing_product_url";
   if (product.stock !== undefined && product.stock !== null && toFiniteNumber(product.stock) <= 0) return "out_of_stock";
   // english_only_product_name is intentionally NOT checked here.
   // The hard/fallback filter is a last resort; blocking on language at this stage

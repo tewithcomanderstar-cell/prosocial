@@ -658,6 +658,18 @@ function testShopeeCaptionQualityAndSoldThresholdGuards() {
   assert.ok(source.includes("SOLD_COUNT_FILTER_APPLIED"));
   assert.ok(source.includes("PRODUCT_REJECTED_BELOW_MIN_SOLD"));
   assert.ok(source.includes("PRODUCT_ACCEPTED_SOLD_THRESHOLD"));
+  assert.ok(source.includes("function getEffectiveShopeeMinSoldCount"));
+  assert.ok(source.includes("return Math.max(0, configuredMinSoldCount || 0)"));
+  assert.equal(source.includes("process.env.SHOPEE_MIN_SOLD_COUNT"), false);
+  assert.ok(source.includes("function hasShopeeProductLinkOrIdentity"));
+  assert.ok(source.includes("product.productUrl?.trim()"));
+  assert.ok(source.includes("String(product.shopId ?? \"\").trim() && String(product.itemId ?? \"\").trim()"));
+  assert.ok(source.includes("function parseShopeeNumber"));
+  assert.ok(source.includes("item.salesCount"));
+  assert.ok(source.includes("item.soldCount"));
+  assert.ok(source.includes("item.historicalSold"));
+  assert.ok(source.includes("item.image_url"));
+  assert.ok(source.includes("item.product_link"));
   assert.ok(source.includes("selectedSoldThreshold"));
   assert.ok(source.includes("productsAboveSoldThreshold"));
   assert.ok(source.includes("rejectedBelowSoldCount"));
