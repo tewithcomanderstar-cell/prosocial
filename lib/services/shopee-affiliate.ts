@@ -2441,10 +2441,17 @@ function collectShopeeProductFacts(product: ShopeeProductRecord) {
 
 export function normalizeShopeeCaptionLinkLine(caption: string, shopeeShortUrl?: string) {
   const preferredShortLink = shopeeShortUrl?.trim();
-  return normalizeTextEncoding(caption)
+  const withLink = normalizeTextEncoding(caption)
     .replace(/📍\s*พิกัด\s*\r?\n\s*(https:\/\/s\.shopee\.co\.th\/\S+)/giu, "📍 พิกัด $1")
     .replace(/📍\s*พิกัด\s+(https:\/\/s\.shopee\.co\.th\/\S+)/giu, "📍 พิกัด $1")
-    .replace(/📍\s*พิกัด\s*$/gimu, preferredShortLink ? `📍 พิกัด ${preferredShortLink}` : "📍 พิกัด")
+    .replace(/📍\s*พิกัด\s*$/gimu, preferredShortLink ? `📍 พิกัด ${preferredShortLink}` : "📍 พิกัด");
+  // Strip CTA lines (e.g. "🛒 ดูรายละเอียด...ได้ที่ลิงก์ด้านล่าง"): captions are hook + link only.
+  // The "📍 พิกัด <link>" line is preserved because it contains none of these phrases.
+  const withoutCta = withLink
+    .split(/\r?\n/)
+    .filter((line) => !/(?:ลิงก์ด้านล่าง|ดูรายละเอียด|กดสั่ง)/iu.test(line))
+    .join("\n");
+  return withoutCta
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
@@ -5577,9 +5584,7 @@ function repairStoryboardAffiliateCaption(caption: string, affiliateLink: string
     }
   }
 
-  if (!/🛒|กดสั่ง|ลิงก์ด้านล่าง|ดูรายละเอียด/iu.test(normalized)) {
-    normalized = `${normalized}\n\n${storyboard ? buildShopeeStoryboardCtaLine(storyboard) : "🛒 ดูรายละเอียดสินค้าได้ที่ลิงก์ด้านล่าง"}`;
-  }
+  // CTA auto-append removed: keep caption as hook + link only.
   if (!normalized.includes(affiliateLink)) {
     normalized = `${normalized}\n\n${formatShopeeShortLinkLine(affiliateLink)}`;
   }
@@ -5978,14 +5983,7 @@ function validateStoryboardAffiliateCaption(caption: string, storyboard: ShopeeP
     });
   }
   const bulletCount = (normalized.match(/^(?:🔋|💨|🔦|📱|🏃|💪|🎯|🏸|🌶️|🍽️|😋|🏠|✨|💖|🌸|💄|📸|🚶|🎥|🥤|🍳|💧|🎒|✈️|🏕️|🧹|👕|👗|👍|✅)\s/gmu) || []).length;
-  if (!/🛒|กดสั่ง|ลิงก์ด้านล่าง|ดูรายละเอียด/iu.test(normalized)) {
-    failedRules.push({
-      rule: "HAS_CTA",
-      message: "Caption is missing CTA",
-      expected: "CTA line such as 🛒 กดสั่งได้ที่ลิงก์ด้านล่าง",
-      actual: "CTA not found"
-    });
-  }
+  // HAS_CTA requirement removed: captions are lifestyle hook + link only (no CTA line).
   if (!normalized.includes(affiliateLink)) {
     failedRules.push({
       rule: "HAS_SHOPEE_SHORT_LINK",
