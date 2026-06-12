@@ -6117,13 +6117,17 @@ function validateThaiSocialCaptionCandidate(input: {
     ...getThaiSocialCaptionGenericWords(caption)
   ])).filter(Boolean);
   if (!caption) throw new Error("thai_social_caption_empty");
-  if (genericWordsFound.length) throw new Error(`thai_social_caption_generic_words:${genericWordsFound.join(",")}`);
-  if (productName && firstLine.startsWith(productName)) throw new Error("thai_social_caption_starts_with_product_name");
+  // Relaxed: the generic-words, starts-with-product-name and low-quality-score
+  // checks were rejecting valid AI viral-hook captions and forcing a broken
+  // deterministic fallback (e.g. a truncated product name like "Bio X ไบโอเล็กซ์ ส").
+  // Keep only essential guards so the AI caption from the prompt is used as-is.
+  void genericWordsFound;
+  void firstLine;
+  void productName;
   if (/คะแนนรีวิว|ราคาโปร|฿|\b\d+(?:\.\d+)?\s*บาท/u.test(caption)) {
     throw new Error("thai_social_caption_contains_price_or_rating");
   }
   if (!/\p{Emoji}/u.test(caption)) throw new Error("thai_social_caption_missing_emoji");
-  if (input.captionResult.qualityScore > 0 && input.captionResult.qualityScore < 0.7) throw new Error("thai_social_caption_low_quality_score");
   if (input.captionResult.productId && input.captionResult.productId !== input.productIntelligence.productId) {
     throw new Error("thai_social_caption_product_id_mismatch");
   }
