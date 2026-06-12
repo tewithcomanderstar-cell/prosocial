@@ -76,6 +76,17 @@ export function normalizeShopeeCategories(values?: Array<string | null | undefin
   return unique;
 }
 
+export function getAllShopeeSpecificCategoryValues() {
+  return SHOPEE_CATEGORY_OPTIONS
+    .filter((option) => option.value !== DEFAULT_SHOPEE_CATEGORY)
+    .map((option) => option.value);
+}
+
+export function expandShopeeDiscoveryCategories(values?: Array<string | null | undefined> | string | null) {
+  const normalized = normalizeShopeeCategories(values);
+  return normalized.length ? normalized : getAllShopeeSpecificCategoryValues();
+}
+
 export function isValidShopeeCategory(value?: string | null) {
   return OPTION_BY_VALUE.has(normalizeShopeeCategory(value));
 }

@@ -575,71 +575,43 @@ export async function generateThaiSocialProductCaption(input: {
 
   const model = getContentModel();
   const productIntelligenceJSON = JSON.stringify(input.productIntelligence, null, 2);
-  const prompt = `You are a Thai social media content writer who writes like a real person, not a marketer.
+  const prompt = `คุณคือนักเขียนแคปชัน Facebook Affiliate ภาษาไทยสไตล์เพจขายของไวรัล
 
-Product Intelligence Input:
+ข้อมูลสินค้า:
 ${productIntelligenceJSON}
 
 Caption Style: ${input.captionStyle}
-(Options: story | question | before_after | friend_tip | shock_hook | list_benefit)
 
-Post Platform: Facebook
+งาน: เขียนแคปชัน Facebook Affiliate สั้น กระชับ ดึงดูด สำหรับสินค้านี้
 
-Write a Thai Facebook caption for this product.
+กฎเหล็กที่ต้องทำตามอย่างเคร่งครัด:
+- ความยาวไม่เกิน 2 บรรทัด
+- ไม่เกิน 20 คำ
+- เขียนเหมือนเพจขายของไวรัล ที่คนหยุดเลื่อนทันที
+- เน้นจุดขายที่แรงที่สุดเพียง 1 จุด จาก painPoint หรือ triggerMoment
+- ห้ามรีวิว
+- ห้ามเล่าเรื่อง
+- ห้าม Bullet points
+- ห้าม Hashtag
+- ห้ามใช้: เหมาะสำหรับ, คุ้มค่า, คุ้มราคา, ใช้งานได้หลากหลาย, สินค้าคุณภาพดี, ตอบโจทย์, ไม่ควรพลาด, รีบสั่ง
+- ห้ามอธิบายยาว ห้ามเล่าสเปก
+- ห้ามใส่ราคา คะแนนรีวิว หรือ URL ใน captionText (ระบบจะเพิ่ม link ให้เอง)
 
-Target style:
-- Write like a Thai Facebook review page that makes readers want to click the Shopee link.
-- The post should feel like a practical recommendation, not an ad or metadata summary.
-- Use this structure inside captionText:
-  1. Hook line with an emoji or short attention phrase. Do NOT start with the product name.
-  2. Product name line or short product mention.
-  3. 1 short sentence explaining the real use case.
-  4. Exactly 3 benefit bullets using ✓ or ✔ only.
-  5. Short CTA sentence such as "ดูรายละเอียด/เช็กราคาได้ที่นี่ 👇" but do not include the URL.
-- Make the hook click-worthy by using painPoint, triggerMoment, soldCount, or a concrete use case.
-- Bullets must be specific and tangible, like "จับถนัดมือ", "กันน้ำและคราบเปื้อน", "พกไปทำงานได้", not generic claims.
-- Keep lines short like a mobile Facebook post.
-- Do not include rating, review score, price, hashtags, or the Shopee URL in captionText; the system will append the link.
-- Keep captionText under 7 lines total before CTA.
+รูปแบบผลลัพธ์ที่ต้องการ:
+บรรทัดที่ 1: Hook สั้น ๆ ที่ทำให้คนหยุดเลื่อน พร้อม Emoji 1-2 ตัวที่เหมาะสม
+(ไม่มีบรรทัดว่าง ไม่มี CTA บรรทัดแยก)
 
-Rules by style:
-
-[story]
-- เล่าเรื่องสั้น 3-4 ประโยค จากมุมคนใช้จริง
-- เริ่มด้วย scene หรือ emotion ไม่ใช่ชื่อสินค้า
-- จบด้วย CTA ที่เป็นธรรมชาติ ไม่ใช่ "สั่งเลย!"
-
-[question]
-- เปิดด้วยคำถามที่คนอ่านแล้วรู้สึก "ใช่เลย"
-- ตอบด้วยสินค้า แบบเพื่อนแนะนำ
-- 2-3 ประโยค กระชับ
-
-[before_after]
-- ก่อน: อธิบาย pain point แบบที่คนเจอจริง
-- หลัง: ผลลัพธ์จากการใช้ เป็นรูปธรรม
-- ไม่เกิน 4 ประโยค
-
-[friend_tip]
-- เขียนราวกับ DM หาเพื่อน
-- ใช้คำพูดทั่วไป เช่น "เพิ่งลอง", "บอกเลย", "ไม่แน่ใจก็ลองดู"
-- มี emoji 1-3 ตัวที่เหมาะกับ tone
-
-[shock_hook]
-- เปิดด้วยตัวเลขหรือข้อเท็จจริงที่ทำให้หยุดเลื่อน
-- ขยายความสั้นๆ แล้วโยงกับสินค้า
-- ต้องเป็นข้อเท็จจริงจากข้อมูลสินค้าจริง ห้ามแต่ง
-
-[list_benefit]
-- 3 ข้อ แต่ละข้อต้องเป็น benefit จริง ไม่ใช่ feature
-- ใช้ emoji นำแต่ละข้อ
-- จบด้วย 1 ประโยค CTA
+ตัวอย่างที่ดี:
+- "เย็นข้ามวันข้ามคืน ❗ ถังแช่น้ำแข็ง 95 ลิตร เก็บความเย็นได้นานมาก 🧊"
+- "ขนได้ทีเดียว 20 กิโล ไม่ปวดหลังอีกต่อไป 💪"
+- "นอนหลับทั้งคืนไม่ตื่นมาร้อน ❄️ ผ้าปูที่นอนเย็นสบาย ลืมแอร์ไปได้เลย"
 
 Output Format (JSON):
 {
-  "captionText": "เนื้อหา caption ทั้งหมด",
+  "captionText": "Hook 1 บรรทัด ไม่เกิน 20 คำ",
   "style": "${input.captionStyle}",
-  "tone": "tone ที่ใช้จริง",
-  "openingType": "emotion | question | fact | scene | hook",
+  "tone": "viral",
+  "openingType": "hook",
   "wordCount": 0,
   "emojiCount": 0,
   "genericWordsFound": [],
@@ -647,14 +619,11 @@ Output Format (JSON):
   "productId": "${input.productId}"
 }
 
-Hard Rules:
-- ห้ามใช้: คุณภาพดี, คุ้มค่า, คุ้มราคา, เหมาะสำหรับทุกเพศทุกวัย, สินค้าดีมีคุณภาพ, ไม่ควรพลาด, รีบสั่ง
-- ห้ามใช้ประโยคแนว metadata เช่น ใช้ตามลักษณะสินค้าที่ระบุ, ดูรายละเอียดให้ตรงกับการใช้งานที่ต้องการ, ใช้ได้ตรงกับจุดประสงค์มากขึ้น
-- ต้องใช้ข้อมูลจาก painPoint หรือ triggerMoment อย่างน้อย 1 อย่าง
+Hard Rules สุดท้าย:
+- captionText ต้องเป็น 1 บรรทัดเท่านั้น (ไม่มี \\n)
 - ห้ามขึ้นต้นด้วยชื่อสินค้า
-- caption ต้องอ่านออกเสียงได้ฟังดูเป็นคนพูด ไม่ใช่อ่านสเปก
-- caption ต้องมี exactly 3 bullet lines ที่ขึ้นต้นด้วย ✓ หรือ ✔
-- ห้ามใส่คะแนนรีวิวหรือราคาใน captionText`;
+- ต้องมี Emoji อย่างน้อย 1 ตัว
+- ใช้ข้อมูลจริงจาก painPoint หรือ triggerMoment เท่านั้น ห้ามแต่งเอง`;
 
   const result = await traceExternalRequest(
     {
@@ -671,7 +640,7 @@ Hard Rules:
         {
           role: "system",
           content:
-            "You write Thai Facebook review-page captions that make readers want to click. Return strict JSON only. Never use generic marketing words. Never start with the product name."
+            "คุณเขียนแคปชัน Facebook Affiliate ภาษาไทยสไตล์เพจขายของไวรัล สั้น กระชับ ไม่เกิน 1 บรรทัด ไม่เกิน 20 คำ มี Emoji ห้าม Bullet ห้าม Hashtag ห้ามรีวิว ห้ามเล่าเรื่อง Return strict JSON only."
         },
         { role: "user", content: prompt }
       ]

@@ -1116,6 +1116,8 @@ export function AutoPostPanel() {
               onChange={(event) => updateConfig((current) => ({ ...current, shopeeMinSoldCount: Number(event.target.value) || 0 }))}
             >
               <option value={0}>No sold filter</option>
+              <option value={50}>SOLD 50+</option>
+              <option value={100}>SOLD 100+</option>
               <option value={500}>SOLD 500+</option>
               <option value={1000}>SOLD 1000+</option>
               <option value={1500}>SOLD 1500+</option>
