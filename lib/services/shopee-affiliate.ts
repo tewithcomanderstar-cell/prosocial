@@ -24,6 +24,7 @@ import { logExternalResponseFailure, traceExternalRequest } from "@/lib/services
 import { assertValidTextEncoding, normalizeTextEncoding, validateTextEncoding } from "@/lib/services/text-encoding";
 import {
   DEFAULT_SHOPEE_CATEGORY,
+  expandShopeeDiscoveryCategories,
   getShopeeCategoryLabel,
   getShopeeCategorySearchTerms,
   getShopeeCategoryThaiKeyword,
@@ -90,7 +91,7 @@ export type ShopeeProductIntelligence = {
   confidenceScore: number;
   lowConfidenceReason?: string;
   confidence: number;
-  source: "text" | "vision_rescue" | "merged";
+  source: "text" | "vision_rescue" | "merged" | "product_intelligence";
   imageCount: number;
   visualEvidence: string[];
 };
@@ -2698,7 +2699,7 @@ type ShopeeProductEntity = {
 type ShopeeProductUnderstanding = ShopeeProductEntity & {
   targetAudience: string;
   confidence: number;
-  source: "text" | "vision_rescue" | "merged";
+  source: "text" | "vision_rescue" | "merged" | "product_intelligence";
   fallbackUsed: boolean;
   recognitionStatus: "recognized" | "fallback" | "failed";
   failureReasons: string[];
@@ -2814,6 +2815,9 @@ const SHOPEE_PRODUCT_TYPE_LIBRARY = [
   ["fan", "ช่วยเพิ่มลมและระบายอากาศ", "คนที่อยู่ห้องร้อนหรือทำงานที่โต๊ะ", "อากาศร้อนหรืออับระหว่างวัน", "เปิดใช้ให้รู้สึกสบายขึ้นในพื้นที่ส่วนตัว"],
   ["humidifier", "เพิ่มความชื้นในห้องหรือมุมพักผ่อน", "คนอยู่ห้องแอร์หรือห้องแห้ง", "อากาศแห้งจนรู้สึกไม่สบาย", "ช่วยให้มุมห้องรู้สึกสบายขึ้น"],
   ["home_fragrance", "เพิ่มกลิ่นหอมในห้องหรือมุมใช้งาน", "คนที่อยากปรับบรรยากาศห้อง", "ห้องมีกลิ่นอับหรืออยากให้มุมพักผ่อนหอมขึ้น", "ทำให้ห้องมีกลิ่นหอมและน่าอยู่ขึ้น"],
+  ["toilet_deodorizer", "ใช้ขจัดกลิ่นไม่พึงประสงค์ในห้องน้ำหรือท่อระบายน้ำ", "คนดูแลบ้าน ห้องน้ำ ร้านอาหาร หรือพื้นที่ที่มีกลิ่นท่อ", "ห้องน้ำหรือท่อมีกลิ่นอับกวนใจ", "ช่วยให้ห้องน้ำและท่อมีกลิ่นรบกวนน้อยลง"],
+  ["bio_deodorizer_powder", "ใช้ขจัดกลิ่นในท่อและห้องน้ำตามคำแนะนำบนสินค้า", "คนดูแลบ้าน คอนโด ร้านอาหาร หรือพื้นที่ที่เจอกลิ่นท่อ", "กลิ่นส้วมหรือกลิ่นท่อขึ้นมารบกวน", "ใช้ดูแลกลิ่นท่อและห้องน้ำได้เป็นรอบ ๆ"],
+  ["drain_deodorizer", "ใช้ดูแลกลิ่นท่อระบายน้ำและพื้นที่ห้องน้ำ", "คนที่มีปัญหากลิ่นท่อในบ้านหรือร้าน", "ท่อระบายน้ำมีกลิ่นย้อนขึ้นมา", "ช่วยลดกลิ่นย้อนจากท่อระบายน้ำ"],
   ["decorative_light", "ตกแต่งและเพิ่มบรรยากาศให้มุมห้อง", "คนที่แต่งห้องหรือจัดมุมถ่ายรูป", "มุมห้องดูเรียบหรือแสงไม่พอ", "ช่วยให้มุมห้องดูมีบรรยากาศขึ้น"],
   ["wall_hook", "แขวนของให้เป็นที่", "คนที่อยากจัดของโดยไม่กินพื้นที่", "ของใช้แขวนไม่เป็นที่และหาไม่เจอ", "แขวนของที่ใช้บ่อยให้หยิบง่ายขึ้น"],
   ["bathroom_accessory", "จัดของหรือใช้งานในห้องน้ำ", "คนที่ดูแลห้องน้ำหรือจัดของใช้ส่วนตัว", "ของในห้องน้ำวางไม่เป็นที่", "ช่วยให้มุมห้องน้ำเรียบร้อยและหยิบง่าย"],
@@ -2891,6 +2895,7 @@ function getShopeeMappedMainUseCase(productType?: string, productEntity?: string
   if (/จัดเก็บ|กล่องเก็บ|ชั้นวาง|storage|organizer/i.test(haystack)) return SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE.home_storage;
   if (/ครัว|ถาดน้ำแข็ง|หม้อ|กระทะ|kitchen|kitchenware/i.test(haystack)) return SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE.kitchenware;
   if (/สัตว์เลี้ยง|pet|cat|dog/i.test(haystack)) return SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE.pet_supply;
+  if (/ดับกลิ่นส้วม|กลิ่นส้วม|กลิ่นท่อ|ส้วมตัน|ท่อระบาย|toilet_deodorizer|bio_deodorizer|drain_deodorizer|deodorizer/i.test(haystack)) return SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE.toilet_deodorizer;
   if (/รถ|automotive|dashcam|กล้องติดรถ|ยาง|จัมป์|แบต/i.test(haystack)) return SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE.automotive_accessory;
   if (/มือถือ|หูฟัง|แกดเจ็ต|gadget|electronics|สมาร์ทวอทช์|charger|usb/i.test(haystack)) return SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE.electronics_accessory;
   if (/แต่งหน้า|makeup|beauty_tool|แปรงแต่งหน้า|พัฟ|ฟองน้ำ/i.test(haystack)) return SHOPEE_MAIN_USE_CASE_BY_PRODUCT_TYPE.beauty_tool;
@@ -2929,6 +2934,7 @@ function getShopeeProductTypeProfile(productType?: string, productEntity?: strin
     [/จัดเก็บ|ชั้นวาง|storage|organizer/i, "home_storage"],
     [/ครัว|ถาดน้ำแข็ง|หม้อ|กระทะ|kitchen|kitchenware/i, "kitchenware"],
     [/สัตว์เลี้ยง|pet|cat|dog/i, "pet_supply"],
+    [/ดับกลิ่นส้วม|กลิ่นส้วม|กลิ่นท่อ|ส้วมตัน|ท่อระบาย|toilet_deodorizer|bio_deodorizer|drain_deodorizer|deodorizer/i, "toilet_deodorizer"],
     [/รถ|automotive|dashcam|กล้องติดรถ|ยาง|จัมป์|แบต/i, "automotive_accessory"],
     [/มือถือ|หูฟัง|แกดเจ็ต|gadget|electronics|สมาร์ทวอทช์|charger|usb/i, "electronics_accessory"],
     [/แต่งหน้า|makeup|beauty_tool|แปรงแต่งหน้า|พัฟ|ฟองน้ำ/i, "beauty_tool"],
@@ -3084,6 +3090,29 @@ function extractShopeeProductEntity(product: ShopeeProductRecord): ShopeeProduct
       targetAudience: "คนที่ใช้โต๊ะกินข้าว โต๊ะทำงาน หรือโต๊ะอเนกประสงค์",
       captionAngle: "เล่าการใช้ผ้าปูโต๊ะกับโต๊ะจริง เน้นกันน้ำ กันคราบ และเช็ดทำความสะอาดง่าย",
       confidence: 94,
+      removedNoiseWords: titleInfo.removedNoiseWords
+    };
+  }
+
+  if (/ดับกลิ่นส้วม|กลิ่นส้วม|กลิ่นท่อ|ส้วมตัน|ท่อระบาย|bio\s*x|ไบโอเอ็กซ์|toilet\s?deodorizer|deodorizer/i.test(haystack)) {
+    const productEntity = /bio\s*x|ไบโอเอ็กซ์/i.test(haystack)
+      ? "ผงดับกลิ่นส้วม Bio X"
+      : "ผลิตภัณฑ์ดับกลิ่นห้องน้ำและท่อ";
+    return {
+      rawTitle,
+      cleanedTitle: compactProductText(productEntity, 64) || cleanedTitle,
+      productEntity,
+      brand: /bio\s*x|ไบโอเอ็กซ์/i.test(haystack) ? "Bio X" : extractShopeeKnownBrand(haystack),
+      model: extractShopeeKnownModel(haystack),
+      productType: /ผง|powder|bio\s*x|ไบโอเอ็กซ์/i.test(haystack) ? "bio_deodorizer_powder" : "toilet_deodorizer",
+      whatItIs: "ผลิตภัณฑ์สำหรับช่วยลดกลิ่นไม่พึงประสงค์ในห้องน้ำและท่อ",
+      mainUseCase: "ใช้ขจัดกลิ่นไม่พึงประสงค์ในห้องน้ำหรือท่อระบายน้ำ",
+      keySellingPoint: "ช่วยดูแลกลิ่นส้วม กลิ่นท่อ และปัญหากลิ่นอับในห้องน้ำ",
+      realUsageScenario: "ใช้ในห้องน้ำ ท่อระบายน้ำ หรือพื้นที่ที่มีกลิ่นท่อรบกวน",
+      targetUser: "คนดูแลบ้าน คอนโด ร้านอาหาร หรือพื้นที่ที่เจอกลิ่นท่อ",
+      targetAudience: "คนที่มีปัญหากลิ่นห้องน้ำหรือกลิ่นท่อ",
+      captionAngle: "เล่าการใช้ผลิตภัณฑ์ลดกลิ่นห้องน้ำและท่อจากปัญหากลิ่นรบกวนจริง",
+      confidence: 96,
       removedNoiseWords: titleInfo.removedNoiseWords
     };
   }
@@ -3496,6 +3525,43 @@ function mergeShopeeVisionUnderstanding(
 }
 
 function extractShopeeProductUnderstanding(product: ShopeeProductRecord): ShopeeProductUnderstanding {
+  const productIntelligence = getShopeeProductIntelligenceFromProduct(product);
+  if (
+    productIntelligence &&
+    productIntelligence.confidenceScore >= 0.7 &&
+    productIntelligence.productNameThai?.trim() &&
+    productIntelligence.productType?.trim() &&
+    productIntelligence.mainPurpose?.trim()
+  ) {
+    const titleInfo = getShopeeCleanedProductTitleInfo(product.productName);
+    const intelligenceUnderstanding: ShopeeProductUnderstanding = normalizeShopeeProductUnderstandingReadability({
+      rawTitle: titleInfo.rawTitle,
+      cleanedTitle: productIntelligence.productNameThai || titleInfo.cleanedTitle,
+      productEntity: productIntelligence.productNameThai || productIntelligence.productName || titleInfo.cleanedTitle,
+      brand: productIntelligence.brand,
+      model: extractShopeeKnownModel(`${productIntelligence.productNameThai} ${productIntelligence.productNameOriginal}`),
+      productType: productIntelligence.productType,
+      whatItIs: productIntelligence.productNameThai || productIntelligence.productName || productIntelligence.productType,
+      mainUseCase: productIntelligence.mainPurpose,
+      keySellingPoint: productIntelligence.keyBenefits[0] || productIntelligence.uniqueSellingPoints[0] || productIntelligence.mainPurpose,
+      realUsageScenario: productIntelligence.usageScenarios[0] || productIntelligence.triggerMoment.time || productIntelligence.mainPurpose,
+      targetUser: productIntelligence.targetCustomer,
+      targetAudience: productIntelligence.targetCustomer,
+      captionAngle: productIntelligence.humanVoice.oneLinerHook || `เล่าการใช้${productIntelligence.productNameThai}จากตัวสินค้าจริง`,
+      confidence: Math.round(productIntelligence.confidenceScore * 100),
+      removedNoiseWords: titleInfo.removedNoiseWords,
+      source: "product_intelligence",
+      fallbackUsed: false,
+      recognitionStatus: "recognized",
+      failureReasons: []
+    });
+    intelligenceUnderstanding.failureReasons = getShopeeProductUnderstandingFailureReasons(intelligenceUnderstanding);
+    intelligenceUnderstanding.recognitionStatus = intelligenceUnderstanding.failureReasons.length ? "failed" : "recognized";
+    recordShopeeProductUnderstandingCoverage(intelligenceUnderstanding);
+    logShopeeProductUnderstandingCoverageReport();
+    return intelligenceUnderstanding;
+  }
+
   const entity = extractShopeeProductEntity(product);
   const haystack = getShopeeStoryboardInputText({
     ...product,
@@ -3622,7 +3688,11 @@ const THAI_SOCIAL_CAPTION_FORBIDDEN_WORDS = [
   "ใช้ตามลักษณะสินค้าที่ระบุ",
   "ดูรายละเอียดให้ตรงกับการใช้งานที่ต้องการ",
   "ใช้ได้ตรงกับจุดประสงค์มากขึ้น",
-  "เลือกใช้ได้ตรงกับประเภทสินค้า"
+  "เลือกใช้ได้ตรงกับประเภทสินค้า",
+  "เหมาะสำหรับ",
+  "ใช้งานได้หลากหลาย",
+  "สินค้าคุณภาพดี",
+  "ตอบโจทย์"
 ];
 
 function getShopeeProductIntelligenceFromProduct(product: ShopeeProductRecord) {
@@ -4322,6 +4392,7 @@ function getShopeeStoryboardProductGroup(storyboard: Pick<ShopeeProductStoryboar
   if (/กล้องติดรถ|กล้องหน้ารถ|dash\s?cam|car\s?camera|บันทึกภาพรถ/i.test(haystack)) return "dashcam";
   if (/รถ|จัมป์|จั๊ม|ยาง|สตาร์ท|แบต/i.test(haystack)) return "automotive";
   if (/ลูกแบด|แบด|กีฬา|วิ่ง|ฟิตเนส|รองเท้า|ถุงเท้า/i.test(haystack)) return "sports";
+  if (/ดับกลิ่นส้วม|กลิ่นส้วม|กลิ่นท่อ|ส้วมตัน|ท่อระบาย|toilet_deodorizer|bio_deodorizer|drain_deodorizer|deodorizer/i.test(haystack)) return "home";
   if (/อาหาร|ขนม|น้ำพริก|กาแฟ|ชา|เครื่องดื่ม/i.test(haystack) && !/อาหารเสริม|วิตามิน|เวย์|โปรตีน/i.test(haystack)) return "food";
   if (/สกินแคร์|เซรั่ม|กันแดด|ผิว|เครื่องสำอาง|เวชสำอาง/i.test(haystack)) return "beauty";
   if (/สร้อย|สร้อยคอ|เครื่องประดับ|จี้|ต่างหู|แหวน|กำไล|jewelry|necklace|earring|ring|bracelet/i.test(haystack)) return "jewelry";
@@ -4738,6 +4809,18 @@ const SHOPEE_STORYBOARD_RULES: ShopeeStoryboardRule[] = [
     })
   },
   {
+    pattern: /ดับกลิ่นส้วม|กลิ่นส้วม|กลิ่นท่อ|ส้วมตัน|ท่อระบาย|bio\s*x|ไบโอเอ็กซ์|toilet\s?deodorizer|deodorizer/i,
+    build: (product) => makeShopeeStoryboard(product, {
+      productType: /ผง|powder|bio\s*x|ไบโอเอ็กซ์/i.test(getShopeeStoryboardInputText(product)) ? "bio_deodorizer_powder" : "toilet_deodorizer",
+      whatItIs: "ผลิตภัณฑ์สำหรับช่วยลดกลิ่นไม่พึงประสงค์ในห้องน้ำและท่อ",
+      mainUseCase: "ใช้ขจัดกลิ่นไม่พึงประสงค์ในห้องน้ำหรือท่อระบายน้ำ",
+      targetUser: "คนดูแลบ้าน คอนโด ร้านอาหาร หรือพื้นที่ที่เจอกลิ่นท่อ",
+      keySellingPoint: "ช่วยดูแลกลิ่นส้วม กลิ่นท่อ และปัญหากลิ่นอับในห้องน้ำ",
+      usageScene: "ห้องน้ำ ท่อระบายน้ำ หรือพื้นที่ที่มีกลิ่นท่อรบกวน",
+      captionAngle: "เล่าการใช้ผลิตภัณฑ์ลดกลิ่นห้องน้ำและท่อจากปัญหากลิ่นรบกวนจริง"
+    })
+  },
+  {
     pattern: /ทำความสะอาด|ไม้ถู|ชั้นวาง|กล่องเก็บ|จัดระเบียบ/i,
     build: (product) => makeShopeeStoryboard(product, {
       productType: "ของใช้ในบ้าน",
@@ -4813,6 +4896,7 @@ function inferShopeeFallbackProductType(product: ShopeeProductRecord, haystack: 
     [/กระเป๋า|bag|เป้|คาดอก|crossbody|wallet/i, "กระเป๋าพกพา"],
     [/art\s?toy|อาร์ตทอย|กล่องสุ่ม|blind\s?box|figure|ฟิกเกอร์|โมเดล|ของสะสม|ตุ๊กตา|จุ่ม/i, "Art Toy / ของสะสม"],
     [/สัตว์|pet|แมว|cat|สุนัข|dog|อาหารสัตว์|ทรายแมว|ปลอกคอ/i, "อุปกรณ์สัตว์เลี้ยง"],
+    [/ดับกลิ่นส้วม|กลิ่นส้วม|กลิ่นท่อ|ส้วมตัน|ท่อระบาย|bio\s*x|ไบโอเอ็กซ์|toilet\s?deodorizer|deodorizer/i, "ผลิตภัณฑ์ดับกลิ่นห้องน้ำและท่อ"],
     [/ทำความสะอาด|ไม้ถู|ชั้นวาง|กล่องเก็บ|จัดระเบียบ/i, "ของใช้ในบ้าน"],
     [/ขนม|snack|อาหาร(?!เสริม)|food|เครื่องดื่ม|drink|กาแฟ|coffee|ชา|tea|เปี๊ยะ|คุกกี้|เค้ก|น้ำพริก/i, /น้ำพริก/i.test(haystack) ? "น้ำพริก / ของกินติดบ้าน" : "ของกินติดบ้าน"]
   ];
@@ -5411,19 +5495,7 @@ function buildDeterministicShopeeFallbackCaption(input: {
   ];
   const caption = [
     hookLine,
-    productLabel,
-    "",
-    `${action}${triggerMoment ? ` สำหรับ${triggerMoment}` : ""}`,
-    "",
-    `✓ ${benefit1}`,
-    `✓ ${benefit2}`,
-    `✓ ${benefit3}`,
-    "",
-    "ดูรายละเอียด/เช็กราคาได้ที่นี่ 👇",
-    "",
-    formatShopeeShortLinkLine(affiliateLink),
-    "",
-    getShopeeStoryboardHashtags(product, storyboard).join(" ")
+    `📍 ${affiliateLink.trim()}`
   ].join("\n").replace(/\n{3,}/g, "\n\n").trim();
   return normalizeShopeeCaptionLinkLine(caption, affiliateLink);
 }
@@ -5915,16 +5987,11 @@ function validateStoryboardAffiliateCaption(caption: string, storyboard: ShopeeP
       actual: "short link not found in caption"
     });
   }
-  if (typeof product.discountPrice === "number" || typeof product.productPrice === "number") {
-    if (!/ราคาโปร|บาท|฿/u.test(normalized)) {
-      failedRules.push({
-        rule: "HAS_PRICE_WHEN_PRICE_EXISTS",
-        message: "Caption is missing price line",
-        expected: "price line with ราคาโปร/บาท",
-        actual: "price line not found"
-      });
-    }
-  }
+  // NOTE: HAS_PRICE_WHEN_PRICE_EXISTS rule intentionally disabled.
+  // Captions are designed to be price-free (validateThaiSocialCaptionCandidate
+  // rejects any caption containing ราคาโปร/฿/บาท). Requiring a price line here
+  // contradicted that and caused every priced product to be skipped with
+  // reason "storyboard_caption_has_price_when_price_exists".
   if (!validateShopeeProductStoryboard(storyboard)) {
     failedRules.push({
       rule: "STORYBOARD_REQUIRED",
@@ -6050,14 +6117,7 @@ function validateThaiSocialCaptionCandidate(input: {
   if (/คะแนนรีวิว|ราคาโปร|฿|\b\d+(?:\.\d+)?\s*บาท/u.test(caption)) {
     throw new Error("thai_social_caption_contains_price_or_rating");
   }
-  const reviewBulletCount = caption
-    .split(/\r?\n/)
-    .filter((line) => /^[✓✔]\s*\S/u.test(line.trim())).length;
-  if (reviewBulletCount < 3) throw new Error("thai_social_caption_missing_review_bullets");
-  const hasBuyerMoment = [painPoint, triggerTime, triggerEmotion]
-    .filter((token) => token.length >= 6)
-    .some((token) => normalizeShopeeEntityMentionText(caption).includes(token));
-  if (!hasBuyerMoment) throw new Error("thai_social_caption_missing_painpoint_or_trigger");
+  if (!/\p{Emoji}/u.test(caption)) throw new Error("thai_social_caption_missing_emoji");
   if (input.captionResult.qualityScore > 0 && input.captionResult.qualityScore < 0.7) throw new Error("thai_social_caption_low_quality_score");
   if (input.captionResult.productId && input.captionResult.productId !== input.productIntelligence.productId) {
     throw new Error("thai_social_caption_product_id_mismatch");
@@ -6073,10 +6133,7 @@ function buildThaiSocialCaptionForValidation(input: {
   const body = normalizeShopeeCaptionLinkLine(input.captionText, input.affiliateLink).trim();
   return [
     body,
-    "",
-    formatShopeeShortLinkLine(input.affiliateLink),
-    "",
-    getShopeeStoryboardHashtags(input.product, input.storyboard).join(" ")
+    `📍 ${input.affiliateLink.trim()}`
   ].join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
@@ -6203,20 +6260,7 @@ async function buildShopeeStoryboardCaptionResult(input: {
   const solutionLine = buildShopeeStoryboardSolutionLine(storyboard);
   const caption = [
     buildShopeeStoryboardHook(storyboard),
-    "",
-    solutionLine,
-    "",
-    ...benefits,
-    "",
-    compactProductText(`${sanitizeShopeeStoryboardTextForEntity(storyboard.purchaseReason, storyboard)} 👍`, 80),
-    "",
-    formatShopeeStoryboardPriceLine(product, storyboard),
-    "",
-    buildShopeeStoryboardCtaLine(storyboard),
-    "",
-    formatShopeeShortLinkLine(affiliateLink),
-    "",
-    getShopeeStoryboardHashtags(product, storyboard).join(" ")
+    `📍 ${affiliateLink.trim()}`
   ].join("\n").replace(/\n{3,}/g, "\n\n").trim();
   console.info("[CAPTION_RAW_OUTPUT]", {
     jobId: input.jobId ?? "",
@@ -7342,14 +7386,14 @@ export async function fetchShopeeAllProductsForSelectedCategories(input: {
   randomSeed?: string;
 }) {
   const provider = getShopeeProductProvider();
-  const selectedCategoryIds = normalizeShopeeCategories(input.selectedCategoryIds).length
-    ? normalizeShopeeCategories(input.selectedCategoryIds)
-    : [DEFAULT_SHOPEE_CATEGORY];
+  const selectedCategoryIds = expandShopeeDiscoveryCategories(input.selectedCategoryIds);
   const shuffledCategories = shuffleWithShopeeSeed(selectedCategoryIds, input.randomSeed);
   const sortModes = shuffleWithShopeeSeed(["sales", "latest", "popular", "price", "relevance"], `${input.randomSeed ?? ""}:sort`);
   const excludeProductIds = new Set((input.excludeProductIds ?? []).map(String));
   const fetchedByCategory: ShopeeProductRecord[][] = [];
   let categoriesTried = 0;
+  const targetTotalPoolSize = Math.max(input.limit * 4, 80);
+  const targetCategoryPoolSize = Math.max(10, Math.min(50, Math.ceil(targetTotalPoolSize / Math.max(1, selectedCategoryIds.length))));
 
   console.info("SHOPEE_ALL_PRODUCTS_FETCH_STARTED", {
     source: "all_products",
@@ -7357,6 +7401,8 @@ export async function fetchShopeeAllProductsForSelectedCategories(input: {
     selectedCategoryCount: selectedCategoryIds.length,
     categories: shuffledCategories,
     limit: input.limit,
+    targetCategoryPoolSize,
+    categoryExpansion: normalizeShopeeCategories(input.selectedCategoryIds).length ? "selected_categories" : "all_categories",
     randomSeed: input.randomSeed ?? ""
   });
 
@@ -7364,34 +7410,80 @@ export async function fetchShopeeAllProductsForSelectedCategories(input: {
     const sortMode = sortModes[categoriesTried % sortModes.length] ?? "relevance";
     const randomPage = 1 + Math.floor(seededShopeeRandom(`${input.randomSeed ?? ""}:${category}`)() * 5);
     categoriesTried += 1;
-    // Use Thai keyword for the category so Shopee TH returns Thai-language listings.
-    // Fall back to sort mode signal for non-relevance modes.
     const thaiKeyword = getShopeeCategoryThaiKeyword(category);
-    const fetchKeyword = thaiKeyword || (sortMode === "relevance" ? undefined : sortMode);
-    const categoryProducts = await provider.fetchProducts({
-      sourceTag: "all_products",
-      keyword: fetchKeyword,
-      category,
-      limit: Math.max(input.limit * 3, 30),
-      page: randomPage
+    const categoryAttempts = [
+      {
+        mode: "category_keyword_random_page",
+        keyword: thaiKeyword || (sortMode === "relevance" ? undefined : sortMode),
+        page: randomPage
+      },
+      {
+        mode: "category_keyword_first_page",
+        keyword: thaiKeyword || (sortMode === "relevance" ? undefined : sortMode),
+        page: 1
+      },
+      {
+        mode: "category_broad_first_page",
+        keyword: undefined,
+        page: 1
+      },
+      {
+        mode: "category_broad_random_page",
+        keyword: undefined,
+        page: randomPage
+      }
+    ].filter((attempt, index, attempts) => {
+      return attempts.findIndex((candidate) => candidate.page === attempt.page && candidate.keyword === attempt.keyword) === index;
     });
-    const normalized = categoryProducts
-      .filter((product) => !excludeProductIds.has(String(product.productId)))
-      .map((product) => ({
-        ...product,
-        category: product.category || category,
-        sourceTag: "all_products" as ShopeeSourceTag,
-        fetchedAt: product.fetchedAt ?? new Date()
-      }));
-    fetchedByCategory.push(normalized);
+    const categoryFetched: ShopeeProductRecord[] = [];
+    const categorySeenKeys = new Set<string>();
+
+    for (const attempt of categoryAttempts) {
+      const categoryProducts = await provider.fetchProducts({
+        sourceTag: "all_products",
+        keyword: attempt.keyword,
+        category,
+        limit: targetCategoryPoolSize,
+        page: attempt.page
+      });
+      const normalized = categoryProducts
+        .filter((product) => !excludeProductIds.has(String(product.productId)))
+        .map((product) => ({
+          ...product,
+          category: product.category || category,
+          sourceTag: "all_products" as ShopeeSourceTag,
+          fetchedAt: product.fetchedAt ?? new Date()
+        }));
+      for (const product of normalized) {
+        const dedupeKey = getShopeeProductDedupeKey(product);
+        if (!dedupeKey || categorySeenKeys.has(dedupeKey)) continue;
+        categorySeenKeys.add(dedupeKey);
+        categoryFetched.push(product);
+      }
+      console.info("SHOPEE_ALL_PRODUCTS_CATEGORY_FETCH_ATTEMPT", {
+        source: "all_products",
+        category,
+        sortMode,
+        attemptMode: attempt.mode,
+        hasKeyword: Boolean(attempt.keyword),
+        page: attempt.page,
+        fetchedProducts: categoryProducts.length,
+        normalizedProducts: normalized.length,
+        uniqueCategoryProducts: categoryFetched.length
+      });
+      if (categoryFetched.length >= targetCategoryPoolSize) break;
+    }
+
+    fetchedByCategory.push(categoryFetched);
     console.info("SHOPEE_ALL_PRODUCTS_CATEGORY_FETCHED", {
       source: "all_products",
       category,
       sortMode,
       randomPage,
       page: randomPage,
-      fetchedProducts: categoryProducts.length,
-      normalizedProducts: normalized.length
+      attemptsTried: categoryAttempts.length,
+      fetchedProducts: categoryFetched.length,
+      normalizedProducts: categoryFetched.length
     });
   }
 
@@ -7425,8 +7517,9 @@ export async function selectShopeeProductsForPages(input: {
   const sourceTag: ShopeeSourceTag = "all_products";
   const effectiveMinSoldCount = getEffectiveShopeeMinSoldCount(input.minSoldCount ?? 0);
   const excludedProductIds = new Set((input.excludedProductIds ?? []).map((productId) => String(productId)).filter(Boolean));
-  const categories = normalizeShopeeCategories(input.categories?.length ? input.categories : input.category);
-  const discoveryCategories = categories.length ? categories : [DEFAULT_SHOPEE_CATEGORY];
+  const rawCategoryInput = input.categories?.length ? input.categories : input.category;
+  const categories = normalizeShopeeCategories(rawCategoryInput);
+  const discoveryCategories = expandShopeeDiscoveryCategories(rawCategoryInput);
   const requestedPoolSize = Math.max(30, input.pageIds.length * Math.max(5, excludedProductIds.size + 5));
   const limitPerCategory = Math.max(30, Math.min(50, requestedPoolSize));
   const effectiveCategoryPriority = input.categoryPriority?.length ? input.categoryPriority : categories;
@@ -7592,16 +7685,16 @@ export async function selectShopeeProductsForPages(input: {
     }
   }
 
-  if (!selected.length && categories.length > 1) {
+  if (!selected.length && discoveryCategories.length > 1) {
     console.warn("MULTI_CATEGORY_PRODUCT_SELECTION_RESCUE_STARTED", {
       source: sourceTag,
-      selectedCategories: categories,
+      selectedCategories: discoveryCategories,
       reason: "strict_and_relaxed_selection_returned_zero_for_multi_category_source",
       configuredFilters: ["has_image", "min_price", "max_price", "sold_count"]
     });
     const rescueProducts = await fetchShopeeAllProductsForSelectedCategories({
       userId: input.userId,
-      selectedCategoryIds: categories,
+      selectedCategoryIds: discoveryCategories,
       limit: limitPerCategory,
       excludeProductIds: Array.from(excludedProductIds),
       randomSeed: `${input.userId}:${input.jobId ?? ""}:multi-category-rescue:${Date.now()}`
@@ -7656,7 +7749,7 @@ export async function selectShopeeProductsForPages(input: {
 
     console.warn("MULTI_CATEGORY_PRODUCT_SELECTION_RESCUE_COMPLETED", {
       source: sourceTag,
-      selectedCategories: categories,
+      selectedCategories: discoveryCategories,
       fetchedProducts: rescueProducts.length,
       uniqueNewProducts: rescueUnique.length,
       selectedProducts: selected.length
