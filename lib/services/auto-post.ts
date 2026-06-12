@@ -40,6 +40,7 @@ type LeanAutoPostConfig = {
   shopeeTrackingId?: string;
   shopeeBlockedCategories?: string[];
   shopeeCategoryPriority?: string[];
+  shopeeCategoryRotationIndex?: number;
   shopeeMinPrice?: number;
   shopeeMaxPrice?: number;
   shopeeMinSoldCount?: number;
@@ -431,6 +432,7 @@ async function updateAutoPostState(
     dailyImageUsageDate: string | null;
     dailyUsedImageIds: string[];
     enabled: boolean;
+    shopeeCategoryRotationIndex: number;
     lastStatus: "pending" | "posted" | "failed" | "paused";
     lastWorkflowId: unknown;
     lastWorkflowRunId: unknown;
@@ -1273,6 +1275,7 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
   pageSpacingMinutes: number;
 }) {
   const skippedProductIds = new Set<string>();
+  let shopeeCategoryRotationIndex = input.config.shopeeCategoryRotationIndex ?? 0;
   const skippedProducts: Array<{
     productId: string;
     shopId?: string;
@@ -1314,8 +1317,11 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
               maxPrice: input.config.shopeeMaxPrice ?? 0,
               minSoldCount: input.config.shopeeMinSoldCount ?? 0,
               excludedProductIds: Array.from(skippedProductIds),
+              categoryRotationIndex: shopeeCategoryRotationIndex,
               jobId: input.records.workflowRunId
             });
+      shopeeCategoryRotationIndex += 1;
+      void updateAutoPostState(input.config._id, { shopeeCategoryRotationIndex }).catch(() => undefined);
     } catch (error) {
       const noEligibleDiagnostics = getShopeeNoEligibleDiagnostics(error);
       if (noEligibleDiagnostics) {
@@ -2265,8 +2271,10 @@ async function queueShopeeAutoPostsForConfig(
       minPrice: config.shopeeMinPrice ?? 0,
       maxPrice: config.shopeeMaxPrice ?? 0,
       minSoldCount: config.shopeeMinSoldCount ?? 0,
+      categoryRotationIndex: config.shopeeCategoryRotationIndex ?? 0,
       jobId: records.workflowRunId
     });
+    void updateAutoPostState(config._id, { shopeeCategoryRotationIndex: (config.shopeeCategoryRotationIndex ?? 0) + 1 }).catch(() => undefined);
   } catch (error) {
     const noEligibleDiagnostics = getShopeeNoEligibleDiagnostics(error);
     if (noEligibleDiagnostics) {

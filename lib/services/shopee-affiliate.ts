@@ -6974,9 +6974,12 @@ function getShopeeProductDedupeKey(product: ShopeeProductRecord) {
   return getShopeeCanonicalProductKey(product) || getShopeeProductIdentity(product) || String(product.productId ?? "").trim();
 }
 
-function getRotatedShopeeCategories(categories: string[], seed = Math.random()) {
+function getRotatedShopeeCategories(categories: string[], rotationIndex = 0) {
   if (!categories.length) return [];
-  const offset = Math.floor(seed * categories.length) % categories.length;
+  const n = categories.length;
+  // Deterministic round-robin: cycle through the selected categories in order,
+  // looping back to the first when the index passes the end.
+  const offset = ((Math.trunc(rotationIndex) % n) + n) % n;
   return [...categories.slice(offset), ...categories.slice(0, offset)];
 }
 
@@ -7517,6 +7520,7 @@ export async function selectShopeeProductsForPages(input: {
   maxPrice?: number;
   minSoldCount?: number;
   excludedProductIds?: string[];
+  categoryRotationIndex?: number;
   jobId?: string;
 }) {
   const sourceTag: ShopeeSourceTag = "all_products";
@@ -7568,7 +7572,10 @@ export async function selectShopeeProductsForPages(input: {
   const selectedProductIds = new Set<string>();
   const selectedProductIdentities = new Set<string>();
 
-  const rotatedCategories = getRotatedShopeeCategories(categories);
+  // Round-robin in the user-selected order (categoryPriority if set, else the selected categories),
+  // advancing by the persisted rotation index so each post moves to the next selected category.
+  const rotationOrder = effectiveCategoryPriority.length ? effectiveCategoryPriority : categories;
+  const rotatedCategories = getRotatedShopeeCategories(rotationOrder, input.categoryRotationIndex ?? 0);
   const productMatchesPreferredCategory = (product: ShopeeProductRecord, category: string) => {
     const hintedCategories = discoveredCategoryHints.get(getShopeeProductDedupeKey(product));
     return Boolean(hintedCategories?.has(category)) || isShopeeCategoryMatch(product.category, category);
