@@ -4149,6 +4149,13 @@ function getShopeeCaptionImageProductMismatch(input: {
   imagePromptSet: ReturnType<typeof buildShopeeImagePromptSet>;
   productIntelligence: ShopeeProductIntelligence;
 }) {
+  // DISABLED: this token-overlap heuristic compared Thai product-intelligence
+  // tokens against an English image prompt and an intentionally entity-light Thai
+  // social caption, producing false "caption_image_product_mismatch" rejections
+  // that blocked posting. The hard product-identity check at the call site
+  // (captionProductId vs imageProductId) still guards genuine mismatches.
+  return null;
+  // eslint-disable-next-line no-unreachable
   const captionText = normalizeShopeeEntityMentionText(input.caption);
   const promptText = normalizeShopeeEntityMentionText([
     input.imagePromptSet.productVisualAnalysis.keyVisualIdentity.join(" "),
