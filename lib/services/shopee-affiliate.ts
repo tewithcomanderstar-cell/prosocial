@@ -5495,7 +5495,7 @@ function buildDeterministicShopeeFallbackCaption(input: {
   ];
   const caption = [
     hookLine,
-    `📍 ${affiliateLink.trim()}`
+    `📍 พิกัด ${affiliateLink.trim()}`
   ].join("\n").replace(/\n{3,}/g, "\n\n").trim();
   return normalizeShopeeCaptionLinkLine(caption, affiliateLink);
 }
@@ -6133,7 +6133,7 @@ function buildThaiSocialCaptionForValidation(input: {
   const body = normalizeShopeeCaptionLinkLine(input.captionText, input.affiliateLink).trim();
   return [
     body,
-    `📍 ${input.affiliateLink.trim()}`
+    `📍 พิกัด ${input.affiliateLink.trim()}`
   ].join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
@@ -6260,7 +6260,7 @@ async function buildShopeeStoryboardCaptionResult(input: {
   const solutionLine = buildShopeeStoryboardSolutionLine(storyboard);
   const caption = [
     buildShopeeStoryboardHook(storyboard),
-    `📍 ${affiliateLink.trim()}`
+    `📍 พิกัด ${affiliateLink.trim()}`
   ].join("\n").replace(/\n{3,}/g, "\n\n").trim();
   console.info("[CAPTION_RAW_OUTPUT]", {
     jobId: input.jobId ?? "",
