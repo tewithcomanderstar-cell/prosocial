@@ -7848,12 +7848,14 @@ export async function selectShopeeProductsForPages(input: {
       const expandedCandidates: ShopeeSelectionCandidate[] = [];
       for (const product of expandedUnique) {
         const scoreResult = buildUnscoredShopeeSelectionCandidate(product);
+        // Last-resort tier intentionally ignores the recently-posted/reserved dedup so the
+        // run never hard-fails ("No eligible products") when the only remaining matches were
+        // posted recently. Strict/fallback/rescue tiers above still enforce dedup.
         const expandedRejection = getShopeeProductFilterRejectionReason({
           product,
           excludedProductIds,
           selectedProductIds,
           selectedProductIdentities,
-          excludedCanonicalKeys,
           minPrice: input.minPrice,
           maxPrice: input.maxPrice,
           minSoldCount: expandedMinSoldCount
@@ -7910,11 +7912,6 @@ export async function selectShopeeProductsForPages(input: {
     );
   }
 
-  await Promise.all(
-    selected.map((item) =>
-      reserveShopeeProductKey({ userId: input.userId, product: item.product, jobId: input.jobId }).catch(() => null)
-    )
-  );
   return selected;
 }
 
