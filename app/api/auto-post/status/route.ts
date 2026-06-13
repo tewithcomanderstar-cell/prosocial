@@ -547,7 +547,7 @@ export async function GET() {
       Job.find(jobQuery)
         .sort({ createdAt: -1 })
         .limit(Math.max(40, targetPageIds.length * 3 || 20))
-        .select("_id postId targetPageId status createdAt updatedAt nextRunAt completedAt processingStartedAt lastError failureReason errorCode result payload")
+        .select("_id postId targetPageId status createdAt updatedAt nextRunAt completedAt processingStartedAt lastError failureReason errorCode result payload facebookCommentId autoCommentStatus autoCommentError autoCommentedAt commentSource")
         .maxTimeMS(STATUS_JOB_TIMEOUT_MS)
         .lean()
         .exec(),
@@ -873,7 +873,12 @@ export async function GET() {
             : "Preparing Shopee post package before page tasks are created",
           startedAt: null,
           scheduledAt: null,
-          finishedAt: null
+          finishedAt: null,
+          facebookCommentId: null,
+          autoCommentStatus: null,
+          autoCommentError: null,
+          autoCommentedAt: null,
+          commentSource: null
         };
       }
       const payload = (job.payload ?? {}) as Record<string, unknown>;
@@ -901,7 +906,12 @@ export async function GET() {
         errorMessage: isFutureQueued ? null : sanitizeLegacyMessage(job.failureReason ?? job.lastError ?? null),
         startedAt: job.processingStartedAt ?? job.createdAt ?? null,
         scheduledAt,
-        finishedAt: job.completedAt ?? null
+        finishedAt: job.completedAt ?? null,
+        facebookCommentId: (job as any).facebookCommentId ?? null,
+        autoCommentStatus: (job as any).autoCommentStatus ?? null,
+        autoCommentError: (job as any).autoCommentError ?? null,
+        autoCommentedAt: (job as any).autoCommentedAt ?? null,
+        commentSource: (job as any).commentSource ?? null
       };
     });
     const selectedPagesCount = pageResults.length;

@@ -35,7 +35,12 @@ const jobSchema = new Schema(
     failureReason: { type: String },
     errorCode: { type: String, index: true },
     errorDetails: { type: Schema.Types.Mixed, default: null },
-    result: { type: Schema.Types.Mixed, default: {} }
+    result: { type: Schema.Types.Mixed, default: {} },
+    facebookCommentId: { type: String, default: null },
+    autoCommentStatus: { type: String, default: null },
+    autoCommentError: { type: String, default: null },
+    autoCommentedAt: { type: Date, default: null },
+    commentSource: { type: String, default: null }
   },
   { timestamps: true }
 );

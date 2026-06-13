@@ -19,7 +19,7 @@ import { finalizeTrackedPostIfComplete, notifyCommentFailure } from "@/lib/servi
 import { logCommentStage } from "@/lib/services/comment-logging";
 import { updateAutoPostRecords } from "@/lib/services/automation-records";
 import { updateAutoPostAiRecords } from "@/lib/services/automation-records-ai";
-import { FacebookPublishError, publishPostToFacebook, replyToFacebookComment } from "@/lib/services/facebook";
+import { commentOnFacebookPost, FacebookPublishError, publishPostToFacebook, replyToFacebookComment } from "@/lib/services/facebook";
 import { composeImageWithLogo } from "@/lib/services/image-composer";
 import { ensureValidFacebookConnection, ensureValidGoogleDriveConnection, getStoredFacebookConnection } from "@/lib/services/integration-auth";
 import { fetchDriveImageBinary } from "@/lib/services/google-drive";
@@ -1989,6 +1989,106 @@ export async function enqueueJobsForDueSchedules() {
   return queued;
 }
 
+async function autoCommentFinalCaptionUnderPost(input: {
+  job: JobExecution;
+  pageId: string;
+  pageAccessToken: string;
+  pageName?: string;
+  postId?: string;
+  facebookPostId?: string;
+  finalCaption: string;
+}) {
+  const enabled = process.env.AUTO_COMMENT_CAPTION_AFTER_PUBLISH !== "false";
+  const delaySeconds = Math.max(0, Number(process.env.AUTO_COMMENT_DELAY_SECONDS ?? "5") || 0);
+  const jobId = input.job._id;
+  const baseMeta = {
+    targetPageId: input.pageId,
+    pageName: input.pageName,
+    facebookPostId: input.facebookPostId,
+    commentSource: "finalCaption"
+  };
+  const log = (level: "info" | "success" | "warn" | "error", message: string, extra?: Record<string, unknown>) =>
+    logAction({
+      userId: input.job.userId,
+      type: "queue",
+      level,
+      message,
+      relatedJobId: jobId,
+      relatedPostId: input.postId,
+      metadata: { ...baseMeta, ...extra }
+    }).catch(() => undefined);
+
+  try {
+    if (!enabled) {
+      await Job.findByIdAndUpdate(jobId, { autoCommentStatus: "skipped" });
+      await log("info", "AUTO_COMMENT_SKIPPED_DISABLED");
+      return;
+    }
+    const existing = (await Job.findById(jobId).select("facebookCommentId").lean()) as { facebookCommentId?: string } | null;
+    if (existing?.facebookCommentId) {
+      await log("info", "AUTO_COMMENT_SKIPPED_ALREADY_EXISTS", { facebookCommentId: existing.facebookCommentId });
+      return;
+    }
+    const finalCaption = (input.finalCaption ?? "").trim();
+    if (!input.facebookPostId || !finalCaption) {
+      await Job.findByIdAndUpdate(jobId, {
+        autoCommentStatus: "skipped",
+        autoCommentError: !input.facebookPostId ? "missing facebookPostId" : "empty final caption"
+      });
+      await log("warn", "AUTO_COMMENT_SKIPPED_DISABLED", { reason: !input.facebookPostId ? "missing_post_id" : "empty_caption" });
+      return;
+    }
+    await Job.findByIdAndUpdate(jobId, { autoCommentStatus: "pending", commentSource: "finalCaption" });
+    await log("info", "AUTO_COMMENT_CAPTION_LOADED", { captionLength: finalCaption.length, captionPreview: finalCaption.slice(0, 200) });
+    await log("info", "AUTO_COMMENT_POST_ID_MATCHED");
+    if (delaySeconds > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delaySeconds * 1000));
+    }
+    await log("info", "AUTO_COMMENT_STARTED");
+
+    let lastError: unknown = null;
+    const maxAttempts = 3; // 1 initial attempt + 2 retries
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        const result = await commentOnFacebookPost({
+          postId: input.facebookPostId,
+          pageAccessToken: input.pageAccessToken,
+          message: finalCaption
+        });
+        await Job.findByIdAndUpdate(jobId, {
+          facebookCommentId: result.id,
+          autoCommentStatus: "success",
+          autoCommentError: null,
+          autoCommentedAt: new Date(),
+          commentSource: "finalCaption"
+        });
+        await log("success", "AUTO_COMMENT_CREATED", { facebookCommentId: result.id, attempt });
+        return;
+      } catch (error) {
+        lastError = error;
+        if (attempt < maxAttempts) {
+          await log("warn", "AUTO_COMMENT_RETRY", { attempt, error: error instanceof Error ? error.message : String(error) });
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+        }
+      }
+    }
+    const errorMessage = lastError instanceof Error ? lastError.message : String(lastError);
+    await Job.findByIdAndUpdate(jobId, { autoCommentStatus: "failed", autoCommentError: errorMessage });
+    await log("error", "AUTO_COMMENT_FAILED", { error: errorMessage });
+  } catch (error) {
+    // Auto comment must never fail the publish workflow.
+    try {
+      await Job.findByIdAndUpdate(jobId, {
+        autoCommentStatus: "failed",
+        autoCommentError: error instanceof Error ? error.message : String(error)
+      });
+    } catch {
+      // ignore secondary failure
+    }
+    await log("error", "AUTO_COMMENT_FAILED", { error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
 async function executePostJob(job: JobExecution) {
   if (!job.postId) {
     throw new Error("Missing post ID for post job");
@@ -2373,6 +2473,16 @@ async function executePostJob(job: JobExecution) {
   });
 
   await updateShopeeQueueStatus(job, "published", { publishResult });
+
+  await autoCommentFinalCaptionUnderPost({
+    job,
+    pageId: page.pageId,
+    pageAccessToken: page.pageAccessToken,
+    pageName: page.name,
+    postId: String(post._id),
+    facebookPostId: typeof publishResult?.id === "string" ? publishResult.id : undefined,
+    finalCaption: message
+  });
 
   await logAction({
     userId: job.userId,

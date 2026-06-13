@@ -526,6 +526,32 @@ export async function replyToFacebookComment(params: {
   return response.json() as Promise<{ id: string }>;
 }
 
+export async function commentOnFacebookPost(params: {
+  postId: string;
+  pageAccessToken: string;
+  message: string;
+}) {
+  const body = new URLSearchParams({
+    message: params.message,
+    access_token: params.pageAccessToken
+  });
+
+  const response = await fetchWithRetry(`https://graph.facebook.com/v21.0/${params.postId}/comments`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body
+  });
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => ({}))) as FacebookGraphErrorPayload;
+    throw classifyFacebookPublishError(payload, "Failed to comment on Facebook post");
+  }
+
+  return response.json() as Promise<{ id: string }>;
+}
+
 export async function fetchCommentsForFacebookPost(params: {
   postId: string;
   pageAccessToken: string;
