@@ -1384,14 +1384,25 @@ export function AutoPostPanel() {
           </div>
         ) : null}
         <div className="grid cols-2 auto-post-metrics auto-post-metrics-minimal">
-          <div className="auto-post-metric-card"><span className="muted">Current job id</span><strong>{controlPanel?.currentJobId ?? "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Current step</span><strong>{controlPanel?.currentStep ?? statusLabel(displayStatus)}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Product attempt</span><strong>{controlPanel?.currentAttempt ? `${controlPanel.currentAttempt} / ${controlPanel.maxProductAttempts ?? 10}` : "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Skipped products</span><strong>{controlPanel?.skippedProductsCount ?? 0}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Current product</span><strong>{controlPanel?.currentProduct ? sanitizeText(controlPanel.currentProduct) : "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Last skipped reason</span><strong>{controlPanel?.lastSkippedReason ? sanitizeText(controlPanel.lastSkippedReason) : "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Selected pages</span><strong>{controlPanel?.selectedPagesCount ?? config.targetPageIds.length}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Created tasks</span><strong>{controlPanel?.createdTasksCount ?? controlPanel?.pageResults?.filter((result) => result.jobId).length ?? 0}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Current page</span><strong>{controlPanel?.currentPublishingPage?.pageName ?? "-"}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Published</span><strong>{controlPanel?.publishedPagesCount ?? 0}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Failed / Pending</span><strong>{controlPanel?.failedPagesCount ?? 0} / {controlPanel?.pendingPagesCount ?? 0}</strong></div>
+          <div className="auto-post-metric-card"><span className="muted">Worker heartbeat</span><strong>{formatDateTime(controlPanel?.lastWorkerHeartbeat ?? undefined)}</strong></div>
+        </div>
+
+        <details style={{ marginTop: 4 }}>
+          <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: 13, color: "#2563eb", padding: "6px 0" }}>🔧 ข้อมูลเชิงเทคนิค / Diagnostics (กดเพื่อดู)</summary>
+          <div className="grid cols-2 auto-post-metrics auto-post-metrics-minimal" style={{ marginTop: 8 }}>
+          <div className="auto-post-metric-card"><span className="muted">Current job id</span><strong>{controlPanel?.currentJobId ?? "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Current product id</span><strong>{controlPanel?.currentProductId ? sanitizeText(controlPanel.currentProductId) : "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Template post id</span><strong>{controlPanel?.templatePostId ? sanitizeText(controlPanel.templatePostId) : "-"}</strong></div>
-          <div className="auto-post-metric-card"><span className="muted">Last skipped reason</span><strong>{controlPanel?.lastSkippedReason ? sanitizeText(controlPanel.lastSkippedReason) : "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Product understanding error</span><strong>{controlPanel?.productUnderstandingError ? sanitizeText(controlPanel.productUnderstandingError) : "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Caption error</span><strong>{controlPanel?.captionGenerationError ? sanitizeText(controlPanel.captionGenerationError) : "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Affiliate link error</span><strong>{controlPanel?.affiliateLinkError ? sanitizeText(controlPanel.affiliateLinkError) : "-"}</strong></div>
@@ -1421,13 +1432,8 @@ export function AutoPostPanel() {
           <div className="auto-post-metric-card"><span className="muted">Image failure step</span><strong>{controlPanel?.imageFailureStep ? sanitizeText(controlPanel.imageFailureStep) : "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Image failure reason</span><strong>{controlPanel?.imageFailureReason ? sanitizeText(controlPanel.imageFailureReason) : "-"}</strong></div>
           <div className="auto-post-metric-card"><span className="muted">Blob status</span><strong>{controlPanel?.blobStatus ?? "-"}</strong></div>
-          <div className="auto-post-metric-card"><span className="muted">Selected pages</span><strong>{controlPanel?.selectedPagesCount ?? config.targetPageIds.length}</strong></div>
-          <div className="auto-post-metric-card"><span className="muted">Created tasks</span><strong>{controlPanel?.createdTasksCount ?? controlPanel?.pageResults?.filter((result) => result.jobId).length ?? 0}</strong></div>
-          <div className="auto-post-metric-card"><span className="muted">Current page</span><strong>{controlPanel?.currentPublishingPage?.pageName ?? "-"}</strong></div>
-          <div className="auto-post-metric-card"><span className="muted">Published</span><strong>{controlPanel?.publishedPagesCount ?? 0}</strong></div>
-          <div className="auto-post-metric-card"><span className="muted">Failed / Pending</span><strong>{controlPanel?.failedPagesCount ?? 0} / {controlPanel?.pendingPagesCount ?? 0}</strong></div>
-          <div className="auto-post-metric-card"><span className="muted">Worker heartbeat</span><strong>{formatDateTime(controlPanel?.lastWorkerHeartbeat ?? undefined)}</strong></div>
-        </div>
+          </div>
+        </details>
         {controlPanel?.queueHealth === "missing_tasks" ? (
           <div className="composer-message composer-message-error">
             {sanitizeText(controlPanel.missingTasksWarning || "Missing Tasks Detected")}
