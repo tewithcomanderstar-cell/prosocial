@@ -7013,12 +7013,14 @@ function getShopeeProductFilterRejectionReason(input: {
   minPrice?: number;
   maxPrice?: number;
   minSoldCount?: number;
+  excludedCanonicalKeys?: Set<string>;
 }) {
   const productId = String(input.product.productId);
   const identity = getShopeeProductIdentity(input.product);
   const effectivePrice = getEffectiveProductPrice(input.product);
   if (input.selectedProductIds.has(productId) || input.selectedProductIdentities.has(identity)) return "already_selected_in_request";
   if (input.excludedProductIds.has(productId)) return "excluded_product_id";
+  if (input.excludedCanonicalKeys && input.excludedCanonicalKeys.has(getShopeeCanonicalProductKey(input.product))) return "recently_posted";
   if (!input.product.productImageUrl && !input.product.productImageUrls?.length) return "missing_image";
   // Only apply price/sold filters when the value is actually known.
   // Shopee's affiliate API often omits sold count (salesCount === undefined) and
@@ -7541,6 +7543,13 @@ export async function selectShopeeProductsForPages(input: {
   const sourceTag: ShopeeSourceTag = "all_products";
   const effectiveMinSoldCount = getEffectiveShopeeMinSoldCount(input.minSoldCount ?? 0);
   const excludedProductIds = new Set((input.excludedProductIds ?? []).map((productId) => String(productId)).filter(Boolean));
+  // Cross-run duplicate guard: exclude products posted within the repost cooldown
+  // (ProductPostHistory) and products currently reserved by an in-flight run.
+  const [recentlyPostedResult, reservedProductKeys] = await Promise.all([
+    getRecentlyPostedProductKeys({ userId: input.userId }),
+    getActiveReservedProductKeys({ userId: input.userId })
+  ]);
+  const excludedCanonicalKeys = new Set<string>([...recentlyPostedResult.keys, ...reservedProductKeys]);
   const rawCategoryInput = input.categories?.length ? input.categories : input.category;
   const categories = normalizeShopeeCategories(rawCategoryInput);
   const discoveryCategories = expandShopeeDiscoveryCategories(rawCategoryInput);
@@ -7612,6 +7621,7 @@ export async function selectShopeeProductsForPages(input: {
         excludedProductIds,
         selectedProductIds,
         selectedProductIdentities,
+        excludedCanonicalKeys,
         minPrice: input.minPrice,
         maxPrice: input.maxPrice,
         minSoldCount: effectiveMinSoldCount
@@ -7675,6 +7685,7 @@ export async function selectShopeeProductsForPages(input: {
           excludedProductIds,
           selectedProductIds,
           selectedProductIdentities,
+          excludedCanonicalKeys,
           minPrice: input.minPrice,
           maxPrice: input.maxPrice,
           minSoldCount: effectiveMinSoldCount
@@ -7744,6 +7755,7 @@ export async function selectShopeeProductsForPages(input: {
           excludedProductIds,
           selectedProductIds,
           selectedProductIdentities,
+          excludedCanonicalKeys,
           minPrice: input.minPrice,
           maxPrice: input.maxPrice,
           minSoldCount: effectiveMinSoldCount
@@ -7820,6 +7832,7 @@ export async function selectShopeeProductsForPages(input: {
           excludedProductIds,
           selectedProductIds,
           selectedProductIdentities,
+          excludedCanonicalKeys,
           minPrice: input.minPrice,
           maxPrice: input.maxPrice,
           minSoldCount: expandedMinSoldCount
@@ -7876,6 +7889,11 @@ export async function selectShopeeProductsForPages(input: {
     );
   }
 
+  await Promise.all(
+    selected.map((item) =>
+      reserveShopeeProductKey({ userId: input.userId, product: item.product, jobId: input.jobId }).catch(() => null)
+    )
+  );
   return selected;
 }
 
