@@ -189,17 +189,27 @@ export function CommentAutomationPanel() {
 
       setComments(commentsPayload.data?.comments ?? []);
       setPages(pagesPayload.data?.pages ?? []);
-      setAutoConfig({
-        autoCommentEnabled: Boolean(autoConfigPayload.data?.autoCommentEnabled),
-        autoCommentAutoSyncEnabled: Boolean(autoConfigPayload.data?.autoCommentAutoSyncEnabled),
-        autoCommentIntervalMinutes:
-          autoConfigPayload.data?.autoCommentIntervalMinutes === 30 || autoConfigPayload.data?.autoCommentIntervalMinutes === 60
-            ? autoConfigPayload.data.autoCommentIntervalMinutes
-            : 15,
-        autoCommentLastSyncedAt: autoConfigPayload.data?.autoCommentLastSyncedAt ?? null,
-        autoCommentPageIds: autoConfigPayload.data?.autoCommentPageIds ?? [],
-        autoCommentReplies: normalizeReplySlots(autoConfigPayload.data?.autoCommentReplies ?? [])
-      });
+      if (isRefresh) {
+        // Background polling must NOT overwrite the settings form while the user is
+        // editing it (toggles, page selection, reply library). Only refresh the
+        // read-only "last synced" timestamp here; the rest of the form is owned by the user.
+        setAutoConfig((current) => ({
+          ...current,
+          autoCommentLastSyncedAt: autoConfigPayload.data?.autoCommentLastSyncedAt ?? current.autoCommentLastSyncedAt
+        }));
+      } else {
+        setAutoConfig({
+          autoCommentEnabled: Boolean(autoConfigPayload.data?.autoCommentEnabled),
+          autoCommentAutoSyncEnabled: Boolean(autoConfigPayload.data?.autoCommentAutoSyncEnabled),
+          autoCommentIntervalMinutes:
+            autoConfigPayload.data?.autoCommentIntervalMinutes === 30 || autoConfigPayload.data?.autoCommentIntervalMinutes === 60
+              ? autoConfigPayload.data.autoCommentIntervalMinutes
+              : 15,
+          autoCommentLastSyncedAt: autoConfigPayload.data?.autoCommentLastSyncedAt ?? null,
+          autoCommentPageIds: autoConfigPayload.data?.autoCommentPageIds ?? [],
+          autoCommentReplies: normalizeReplySlots(autoConfigPayload.data?.autoCommentReplies ?? [])
+        });
+      }
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "โหลด Auto Comment ไม่สำเร็จ");
     } finally {
@@ -215,7 +225,7 @@ export function CommentAutomationPanel() {
   useEffect(() => {
     const timer = window.setInterval(() => {
       void loadData(true);
-    }, 12000);
+    }, 20000);
 
     return () => window.clearInterval(timer);
   }, [loadData]);
