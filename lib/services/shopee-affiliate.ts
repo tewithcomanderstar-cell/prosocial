@@ -6006,14 +6006,35 @@ function validateStoryboardAffiliateCaption(caption: string, storyboard: ShopeeP
     });
   }
 
-  if (failedRules.length > 0) {
+  // Only structural rules block publishing. Content-heuristic rules
+  // (ENTITY_SPECIFIC_LANGUAGE, NO_GENERIC_CATEGORY_TEMPLATE, NO_METADATA_LANGUAGE,
+  // NO_GENERIC_PRODUCT_INTELLIGENCE_PHRASE, NO_FORBIDDEN_SOURCE_LANGUAGE,
+  // WATER_FILTER_NO_GENERIC_USAGE) were rejecting valid AI captions and forcing a
+  // 1-line deterministic fallback. They are now logged but non-blocking so the AI
+  // caption from the prompt is used as-is.
+  const SHOPEE_BLOCKING_CAPTION_RULES = new Set([
+    "NON_EMPTY",
+    "MIN_20_CHARS",
+    "FACEBOOK_LENGTH_LIMIT",
+    "HAS_SHOPEE_SHORT_LINK",
+    "STORYBOARD_REQUIRED"
+  ]);
+  const blockingFailedRules = failedRules.filter((rule) => SHOPEE_BLOCKING_CAPTION_RULES.has(rule.rule));
+  if (failedRules.length > 0 && blockingFailedRules.length === 0) {
+    console.info("[CAPTION_VALIDATION_SOFT_RULES_IGNORED]", {
+      jobId: jobId ?? "",
+      productId: product.productId,
+      ignoredRules: failedRules.map((rule) => rule.rule)
+    });
+  }
+  if (blockingFailedRules.length > 0) {
     throw createStoryboardCaptionValidationError({
       product,
       storyboard,
       affiliateLink,
       caption,
       normalized,
-      failedRules,
+      failedRules: blockingFailedRules,
       jobId
     });
   }
