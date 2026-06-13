@@ -34,7 +34,8 @@ export function Sidebar() {
       title: t("groupAutomation"),
       icon: "planner",
       items: [
-        { href: "/auto-post", label: t("navWorkflows"), icon: "planner" }
+        { href: "/auto-post", label: t("navWorkflows"), icon: "planner" },
+        { href: "/comments", label: "Auto Comment", icon: "compose" }
       ]
     },
     {
