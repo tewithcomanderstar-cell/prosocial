@@ -22,6 +22,7 @@ type AutoPostConfig = {
   shopeeTrackingId: string;
   shopeeBlockedCategories: string[];
   shopeeCategoryPriority: string[];
+  shopeeKeywords: string[];
   shopeeMinPrice: number;
   shopeeMaxPrice: number;
   shopeeMinSoldCount: number;
@@ -229,6 +230,7 @@ const defaults: AutoPostConfig = {
   shopeeTrackingId: "",
   shopeeBlockedCategories: [],
   shopeeCategoryPriority: [],
+  shopeeKeywords: [],
   shopeeMinPrice: 0,
   shopeeMaxPrice: 0,
   shopeeMinSoldCount: 0,
@@ -761,6 +763,17 @@ export function AutoPostPanel() {
     }));
   }
 
+  function updateKeywords(value: string) {
+    updateConfig((current) => ({
+      ...current,
+      shopeeKeywords: value
+        .split("\n")
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .slice(0, 20)
+    }));
+  }
+
   async function saveConfig(enabledOverride?: boolean) {
     const shopeeCategories = getConfigShopeeCategories(config);
     const payload = {
@@ -1148,6 +1161,18 @@ export function AutoPostPanel() {
               onChange={(event) => updateConfig((current) => ({ ...current, shopeeMaxPrice: Number(event.target.value) || 0 }))}
               placeholder="เช่น 1500"
             />
+          </label>
+
+          <label className="label" style={{ gridColumn: "1 / -1" }}>
+            คีย์เวิร์ดค้นหาสินค้า (สูงสุด 20 คำ — บรรทัดละ 1 คำ)
+            <textarea
+              className="input"
+              rows={4}
+              value={(config.shopeeKeywords ?? []).join("\n")}
+              onChange={(event) => updateKeywords(event.target.value)}
+              placeholder={"เช่น\nกระเป๋าเดินทาง\nหูฟังบลูทูธ\nเครื่องฟอกอากาศ"}
+            />
+            <span className="muted">ถ้าใส่คีย์เวิร์ด ระบบจะค้นหาสินค้าตามคีย์เวิร์ด หมุนทีละคำในแต่ละรอบจนครบแล้ววนกลับมาเริ่มใหม่ (เว้นว่าง = ใช้หมวดหมู่ตามปกติ)</span>
           </label>
         </div>
 

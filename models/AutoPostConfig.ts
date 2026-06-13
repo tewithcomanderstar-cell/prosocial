@@ -23,6 +23,8 @@ const autoPostConfigSchema = new Schema(
     shopeeBlockedCategories: { type: [String], default: [] },
     shopeeCategoryPriority: { type: [String], default: [] },
     shopeeCategoryRotationIndex: { type: Number, default: 0 },
+    shopeeKeywords: { type: [String], default: [] },
+    shopeeKeywordRotationIndex: { type: Number, default: 0 },
     shopeeMinPrice: { type: Number, default: 0 },
     shopeeMaxPrice: { type: Number, default: 0 },
     shopeeMinSoldCount: { type: Number, default: 0 },

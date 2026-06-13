@@ -41,6 +41,8 @@ type LeanAutoPostConfig = {
   shopeeBlockedCategories?: string[];
   shopeeCategoryPriority?: string[];
   shopeeCategoryRotationIndex?: number;
+  shopeeKeywords?: string[];
+  shopeeKeywordRotationIndex?: number;
   shopeeMinPrice?: number;
   shopeeMaxPrice?: number;
   shopeeMinSoldCount?: number;
@@ -433,6 +435,7 @@ async function updateAutoPostState(
     dailyUsedImageIds: string[];
     enabled: boolean;
     shopeeCategoryRotationIndex: number;
+    shopeeKeywordRotationIndex: number;
     lastStatus: "pending" | "posted" | "failed" | "paused";
     lastWorkflowId: unknown;
     lastWorkflowRunId: unknown;
@@ -1276,6 +1279,8 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
 }) {
   const skippedProductIds = new Set<string>();
   let shopeeCategoryRotationIndex = input.config.shopeeCategoryRotationIndex ?? 0;
+  const shopeeKeywords = (input.config.shopeeKeywords ?? []).map((keyword) => keyword.trim()).filter(Boolean);
+  let shopeeKeywordRotationIndex = input.config.shopeeKeywordRotationIndex ?? 0;
   const skippedProducts: Array<{
     productId: string;
     shopId?: string;
@@ -1318,10 +1323,15 @@ async function prepareSingleShopeePackageWithProductAttempts(input: {
               minSoldCount: input.config.shopeeMinSoldCount ?? 0,
               excludedProductIds: Array.from(skippedProductIds),
               categoryRotationIndex: shopeeCategoryRotationIndex,
+              keyword: shopeeKeywords.length ? shopeeKeywords[shopeeKeywordRotationIndex % shopeeKeywords.length] : undefined,
               jobId: input.records.workflowRunId
             });
       shopeeCategoryRotationIndex += 1;
       void updateAutoPostState(input.config._id, { shopeeCategoryRotationIndex }).catch(() => undefined);
+      if (shopeeKeywords.length) {
+        shopeeKeywordRotationIndex += 1;
+        void updateAutoPostState(input.config._id, { shopeeKeywordRotationIndex }).catch(() => undefined);
+      }
     } catch (error) {
       const noEligibleDiagnostics = getShopeeNoEligibleDiagnostics(error);
       if (noEligibleDiagnostics) {
@@ -2272,9 +2282,13 @@ async function queueShopeeAutoPostsForConfig(
       maxPrice: config.shopeeMaxPrice ?? 0,
       minSoldCount: config.shopeeMinSoldCount ?? 0,
       categoryRotationIndex: config.shopeeCategoryRotationIndex ?? 0,
+      keyword: (() => { const kws = (config.shopeeKeywords ?? []).map((keyword) => keyword.trim()).filter(Boolean); return kws.length ? kws[(config.shopeeKeywordRotationIndex ?? 0) % kws.length] : undefined; })(),
       jobId: records.workflowRunId
     });
     void updateAutoPostState(config._id, { shopeeCategoryRotationIndex: (config.shopeeCategoryRotationIndex ?? 0) + 1 }).catch(() => undefined);
+    if ((config.shopeeKeywords ?? []).filter(Boolean).length) {
+      void updateAutoPostState(config._id, { shopeeKeywordRotationIndex: (config.shopeeKeywordRotationIndex ?? 0) + 1 }).catch(() => undefined);
+    }
   } catch (error) {
     const noEligibleDiagnostics = getShopeeNoEligibleDiagnostics(error);
     if (noEligibleDiagnostics) {

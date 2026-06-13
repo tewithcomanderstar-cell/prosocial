@@ -7430,6 +7430,7 @@ export async function fetchShopeeAllProductsForSelectedCategories(input: {
   limit: number;
   excludeProductIds?: string[];
   randomSeed?: string;
+  keyword?: string;
 }) {
   const provider = getShopeeProductProvider();
   const selectedCategoryIds = expandShopeeDiscoveryCategories(input.selectedCategoryIds);
@@ -7456,7 +7457,9 @@ export async function fetchShopeeAllProductsForSelectedCategories(input: {
     const sortMode = sortModes[categoriesTried % sortModes.length] ?? "relevance";
     const randomPage = 1 + Math.floor(seededShopeeRandom(`${input.randomSeed ?? ""}:${category}`)() * 5);
     categoriesTried += 1;
-    const thaiKeyword = getShopeeCategoryThaiKeyword(category);
+    // When the user configured search keywords, use the rotated keyword for the search
+    // instead of the category default Thai keyword (keyword-driven discovery).
+    const thaiKeyword = input.keyword?.trim() || getShopeeCategoryThaiKeyword(category);
     const categoryAttempts = [
       {
         mode: "category_keyword_random_page",
@@ -7559,6 +7562,7 @@ export async function selectShopeeProductsForPages(input: {
   minSoldCount?: number;
   excludedProductIds?: string[];
   categoryRotationIndex?: number;
+  keyword?: string;
   jobId?: string;
 }) {
   const sourceTag: ShopeeSourceTag = "all_products";
@@ -7584,6 +7588,7 @@ export async function selectShopeeProductsForPages(input: {
     selectedCategoryIds: discoveryCategories,
     limit: limitPerCategory,
     excludeProductIds: Array.from(excludedProductIds),
+    keyword: input.keyword,
     randomSeed: `${input.userId}:${input.jobId ?? ""}:${Date.now()}`
   });
   discoveredByCategory.push(categoryProducts);
@@ -7756,6 +7761,7 @@ export async function selectShopeeProductsForPages(input: {
       selectedCategoryIds: discoveryCategories,
       limit: limitPerCategory,
       excludeProductIds: Array.from(excludedProductIds),
+      keyword: input.keyword,
       randomSeed: `${input.userId}:${input.jobId ?? ""}:multi-category-rescue:${Date.now()}`
     });
     const existingKeys = new Set(discovered.map((product) => getShopeeProductDedupeKey(product)));
@@ -7833,6 +7839,7 @@ export async function selectShopeeProductsForPages(input: {
       selectedCategoryIds: discoveryCategories,
       limit: limitPerCategory,
       excludeProductIds: Array.from(excludedProductIds),
+      keyword: input.keyword,
       randomSeed: `${input.userId}:${input.jobId ?? ""}:selection-expanded:${Date.now()}`
     });
     const knownKeys = new Set(discovered.map((product) => getShopeeProductDedupeKey(product)));
