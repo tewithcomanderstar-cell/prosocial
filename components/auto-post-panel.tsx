@@ -763,15 +763,13 @@ export function AutoPostPanel() {
     }));
   }
 
-  function updateKeywords(value: string) {
-    updateConfig((current) => ({
-      ...current,
-      shopeeKeywords: value
-        .split("\n")
-        .map((item) => item.trim())
-        .filter(Boolean)
-        .slice(0, 20)
-    }));
+  function updateKeywordSlot(index: number, value: string) {
+    updateConfig((current) => {
+      const next = [...(current.shopeeKeywords ?? [])];
+      while (next.length < 20) next.push("");
+      next[index] = value;
+      return { ...current, shopeeKeywords: next };
+    });
   }
 
   async function saveConfig(enabledOverride?: boolean) {
@@ -1163,17 +1161,22 @@ export function AutoPostPanel() {
             />
           </label>
 
-          <label className="label" style={{ gridColumn: "1 / -1" }}>
-            คีย์เวิร์ดค้นหาสินค้า (สูงสุด 20 คำ — บรรทัดละ 1 คำ)
-            <textarea
-              className="input"
-              rows={4}
-              value={(config.shopeeKeywords ?? []).join("\n")}
-              onChange={(event) => updateKeywords(event.target.value)}
-              placeholder={"เช่น\nกระเป๋าเดินทาง\nหูฟังบลูทูธ\nเครื่องฟอกอากาศ"}
-            />
-            <span className="muted">ถ้าใส่คีย์เวิร์ด ระบบจะค้นหาสินค้าตามคีย์เวิร์ด หมุนทีละคำในแต่ละรอบจนครบแล้ววนกลับมาเริ่มใหม่ (เว้นว่าง = ใช้หมวดหมู่ตามปกติ)</span>
-          </label>
+          <div className="label" style={{ gridColumn: "1 / -1" }}>
+            คีย์เวิร์ดค้นหาสินค้า (20 ช่อง — 1 ช่อง 1 คำ)
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "8px", marginTop: "6px" }}>
+              {Array.from({ length: 20 }).map((_, index) => (
+                <input
+                  key={index}
+                  className="input"
+                  type="text"
+                  value={(config.shopeeKeywords ?? [])[index] ?? ""}
+                  onChange={(event) => updateKeywordSlot(index, event.target.value)}
+                  placeholder={`คีย์เวิร์ดที่ ${index + 1}`}
+                />
+              ))}
+            </div>
+            <span className="muted">ระบบจะค้นหาสินค้าตามคีย์เวิร์ดที่ใส่ หมุนทีละช่องในแต่ละรอบจนครบแล้ววนกลับมาเริ่มใหม่ (เว้นทุกช่อง = ใช้หมวดหมู่ตามปกติ)</span>
+          </div>
         </div>
 
         <div className="grid cols-2 auto-post-grid auto-post-grid-minimal">
