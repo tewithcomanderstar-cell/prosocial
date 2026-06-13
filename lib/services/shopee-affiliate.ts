@@ -7020,9 +7020,20 @@ function getShopeeProductFilterRejectionReason(input: {
   if (input.selectedProductIds.has(productId) || input.selectedProductIdentities.has(identity)) return "already_selected_in_request";
   if (input.excludedProductIds.has(productId)) return "excluded_product_id";
   if (!input.product.productImageUrl && !input.product.productImageUrls?.length) return "missing_image";
-  if ((input.minPrice ?? 0) > 0 && effectivePrice < (input.minPrice ?? 0)) return "below_min_price";
-  if ((input.maxPrice ?? 0) > 0 && effectivePrice > (input.maxPrice ?? 0)) return "above_max_price";
-  if ((input.minSoldCount ?? 0) > 0 && (input.product.salesCount ?? 0) < (input.minSoldCount ?? 0)) return "below_min_sold_count";
+  // Only apply price/sold filters when the value is actually known.
+  // Shopee's affiliate API often omits sold count (salesCount === undefined) and
+  // sometimes price; treating "unknown" as 0 made the SOLD/min-price filters reject
+  // the entire pool -> "No eligible Shopee products found". Unknown values now pass.
+  if ((input.minPrice ?? 0) > 0 && effectivePrice > 0 && effectivePrice < (input.minPrice ?? 0)) return "below_min_price";
+  if ((input.maxPrice ?? 0) > 0 && effectivePrice > 0 && effectivePrice > (input.maxPrice ?? 0)) return "above_max_price";
+  if (
+    (input.minSoldCount ?? 0) > 0 &&
+    typeof input.product.salesCount === "number" &&
+    Number.isFinite(input.product.salesCount) &&
+    input.product.salesCount < (input.minSoldCount ?? 0)
+  ) {
+    return "below_min_sold_count";
+  }
   return null;
 }
 
@@ -10100,7 +10111,7 @@ export async function logShopeeAutomationEvent(input: {
     }
   };
 
-  await withLogTimeout("ActionLog", logAction({
+    await withLogTimeout("ActionLog", logAction({
     userId: input.userId,
     type: "queue",
     level: input.level,
@@ -10120,5 +10131,3 @@ export async function logShopeeAutomationEvent(input: {
     }));
   }
 }
-
-
