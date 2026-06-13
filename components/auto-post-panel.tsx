@@ -27,6 +27,8 @@ type AutoPostConfig = {
   shopeeMaxPrice: number;
   shopeeMinSoldCount: number;
   approvalMode: boolean;
+  autoCommentCaptionAfterPublish: boolean;
+  autoCommentDelaySeconds: number;
   targetPageIds: string[];
   intervalMinutes: number;
   captionStrategy: CaptionStrategy;
@@ -235,6 +237,8 @@ const defaults: AutoPostConfig = {
   shopeeMaxPrice: 0,
   shopeeMinSoldCount: 0,
   approvalMode: false,
+  autoCommentCaptionAfterPublish: true,
+  autoCommentDelaySeconds: 5,
   targetPageIds: [],
   intervalMinutes: 60,
   captionStrategy: "hybrid",
@@ -999,6 +1003,7 @@ export function AutoPostPanel() {
           </label>
         </div>
 
+        <div style={{ marginTop: 18, marginBottom: 2, paddingBottom: 6, borderBottom: "1px solid rgba(37, 99, 235, 0.14)", fontWeight: 700, fontSize: 13, letterSpacing: "0.01em", color: "#2563eb" }}>⚙️ ความถี่ & หมวดหมู่สินค้า</div>
         <div className="grid cols-2 auto-post-grid auto-post-grid-minimal">
           <label className="label">
             Every
@@ -1088,6 +1093,7 @@ export function AutoPostPanel() {
           </div>
         </div>
 
+        <div style={{ marginTop: 18, marginBottom: 2, paddingBottom: 6, borderBottom: "1px solid rgba(37, 99, 235, 0.14)", fontWeight: 700, fontSize: 13, letterSpacing: "0.01em", color: "#2563eb" }}>✍️ สไตล์แคปชั่น & Tracking ID</div>
         <div className="grid cols-2 auto-post-grid auto-post-grid-minimal">
           <label className="label">
             Caption Style
@@ -1118,6 +1124,7 @@ export function AutoPostPanel() {
           </label>
         </div>
 
+        <div style={{ marginTop: 18, marginBottom: 2, paddingBottom: 6, borderBottom: "1px solid rgba(37, 99, 235, 0.14)", fontWeight: 700, fontSize: 13, letterSpacing: "0.01em", color: "#2563eb" }}>🛒 คัดกรองสินค้า & คีย์เวิร์ดค้นหา</div>
         <div className="grid cols-2 auto-post-grid auto-post-grid-minimal">
           <label className="label">
             Sold Count Filter
@@ -1163,7 +1170,7 @@ export function AutoPostPanel() {
 
           <div className="label" style={{ gridColumn: "1 / -1" }}>
             คีย์เวิร์ดค้นหาสินค้า (20 ช่อง — 1 ช่อง 1 คำ)
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "8px", marginTop: "6px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: "8px", marginTop: "6px" }}>
               {Array.from({ length: 20 }).map((_, index) => (
                 <input
                   key={index}
@@ -1179,6 +1186,7 @@ export function AutoPostPanel() {
           </div>
         </div>
 
+        <div style={{ marginTop: 18, marginBottom: 2, paddingBottom: 6, borderBottom: "1px solid rgba(37, 99, 235, 0.14)", fontWeight: 700, fontSize: 13, letterSpacing: "0.01em", color: "#2563eb" }}>✅ การอนุมัติก่อนโพสต์</div>
         <div className="grid cols-2 auto-post-grid auto-post-grid-minimal">
           <label className="auto-post-toggle auto-post-approval-toggle">
           <span>Manual approval before publish</span>
@@ -1190,6 +1198,33 @@ export function AutoPostPanel() {
           </label>
         </div>
 
+        <div style={{ marginTop: 18, marginBottom: 2, paddingBottom: 6, borderBottom: "1px solid rgba(37, 99, 235, 0.14)", fontWeight: 700, fontSize: 13, letterSpacing: "0.01em", color: "#2563eb" }}>💬 คอมเมนต์อัตโนมัติใต้โพสต์</div>
+        <div className="grid cols-2 auto-post-grid auto-post-grid-minimal">
+          <label className="auto-post-toggle auto-post-approval-toggle">
+            <span>คอมเมนต์แคปชั่นใต้โพสต์อัตโนมัติ</span>
+            <input
+              type="checkbox"
+              checked={config.autoCommentCaptionAfterPublish ?? true}
+              onChange={(event) => updateConfig((current) => ({ ...current, autoCommentCaptionAfterPublish: event.target.checked }))}
+            />
+          </label>
+
+          <label className="label">
+            หน่วงเวลาก่อนคอมเมนต์ (วินาที)
+            <input
+              className="input"
+              type="number"
+              min="0"
+              max="60"
+              value={config.autoCommentDelaySeconds ?? 5}
+              onChange={(event) => updateConfig((current) => ({ ...current, autoCommentDelaySeconds: Number(event.target.value) || 0 }))}
+              placeholder="เช่น 5"
+            />
+            <span className="muted">นำแคปชั่นจริงของโพสต์ไปคอมเมนต์ใต้โพสต์เดียวกันหลังโพสต์สำเร็จ</span>
+          </label>
+        </div>
+
+        <div style={{ marginTop: 18, marginBottom: 2, paddingBottom: 6, borderBottom: "1px solid rgba(37, 99, 235, 0.14)", fontWeight: 700, fontSize: 13, letterSpacing: "0.01em", color: "#2563eb" }}>⏰ ช่วงเวลาที่อนุญาตให้โพสต์</div>
         <div className="grid cols-2 auto-post-grid auto-post-grid-minimal">
           <label className="label">
             Post from
@@ -1236,6 +1271,7 @@ export function AutoPostPanel() {
           </div>
         </div>
 
+        <div style={{ marginTop: 18, marginBottom: 2, paddingBottom: 6, borderBottom: "1px solid rgba(37, 99, 235, 0.14)", fontWeight: 700, fontSize: 13, letterSpacing: "0.01em", color: "#2563eb" }}>📝 แคปชั่น & AI</div>
         <label className="label">
           Caption Mode
           <select

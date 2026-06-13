@@ -1998,8 +1998,14 @@ async function autoCommentFinalCaptionUnderPost(input: {
   facebookPostId?: string;
   finalCaption: string;
 }) {
-  const enabled = process.env.AUTO_COMMENT_CAPTION_AFTER_PUBLISH !== "false";
-  const delaySeconds = Math.max(0, Number(process.env.AUTO_COMMENT_DELAY_SECONDS ?? "5") || 0);
+  const autoPostConfigId = (input.job.payload as Record<string, unknown> | undefined)?.autoPostConfigId;
+  const commentConfig = autoPostConfigId
+    ? ((await AutoPostConfig.findById(autoPostConfigId as string)
+        .select("autoCommentCaptionAfterPublish autoCommentDelaySeconds")
+        .lean()) as { autoCommentCaptionAfterPublish?: boolean; autoCommentDelaySeconds?: number } | null)
+    : null;
+  const enabled = commentConfig?.autoCommentCaptionAfterPublish ?? (process.env.AUTO_COMMENT_CAPTION_AFTER_PUBLISH !== "false");
+  const delaySeconds = Math.max(0, (commentConfig?.autoCommentDelaySeconds ?? Number(process.env.AUTO_COMMENT_DELAY_SECONDS ?? "5")) || 0);
   const jobId = input.job._id;
   const baseMeta = {
     targetPageId: input.pageId,

@@ -75,6 +75,8 @@ const schema = z.object({
   shopeeMaxPrice: z.number().min(0).default(0),
   shopeeMinSoldCount: z.number().min(0).default(0),
   approvalMode: z.boolean().default(false),
+  autoCommentCaptionAfterPublish: z.boolean().default(true),
+  autoCommentDelaySeconds: z.number().min(0).max(60).default(5),
   targetPageIds: z.array(z.string()).max(100, "Select up to 100 Facebook pages").default([]),
   intervalMinutes: intervalSchema.default(60),
   captionStrategy: z.enum(["manual", "ai", "hybrid"]),

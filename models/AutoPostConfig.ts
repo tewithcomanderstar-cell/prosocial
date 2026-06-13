@@ -29,6 +29,8 @@ const autoPostConfigSchema = new Schema(
     shopeeMaxPrice: { type: Number, default: 0 },
     shopeeMinSoldCount: { type: Number, default: 0 },
     approvalMode: { type: Boolean, default: false, index: true },
+    autoCommentCaptionAfterPublish: { type: Boolean, default: true },
+    autoCommentDelaySeconds: { type: Number, default: 5 },
     targetPageIds: { type: [String], default: [] },
     intervalMinutes: {
       type: Number,
