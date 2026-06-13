@@ -7441,6 +7441,9 @@ export async function fetchShopeeAllProductsForSelectedCategories(input: {
   let categoriesTried = 0;
   const targetTotalPoolSize = Math.max(input.limit * 4, 80);
   const targetCategoryPoolSize = Math.max(10, Math.min(50, Math.ceil(targetTotalPoolSize / Math.max(1, selectedCategoryIds.length))));
+  // How deep to search per keyword/category. Each run samples random pages within
+  // 1..maxSearchPages so over time the catalog is covered far beyond the first page.
+  const maxSearchPages = Math.max(1, Math.min(100, Number(process.env.SHOPEE_SEARCH_MAX_PAGES ?? "10") || 10));
 
   console.info("SHOPEE_ALL_PRODUCTS_FETCH_STARTED", {
     source: "all_products",
@@ -7455,7 +7458,8 @@ export async function fetchShopeeAllProductsForSelectedCategories(input: {
 
   for (const category of shuffledCategories) {
     const sortMode = sortModes[categoriesTried % sortModes.length] ?? "relevance";
-    const randomPage = 1 + Math.floor(seededShopeeRandom(`${input.randomSeed ?? ""}:${category}`)() * 5);
+    const randomPage = 1 + Math.floor(seededShopeeRandom(`${input.randomSeed ?? ""}:${category}`)() * maxSearchPages);
+    const randomPage2 = 1 + Math.floor(seededShopeeRandom(`${input.randomSeed ?? ""}:${category}:p2`)() * maxSearchPages);
     categoriesTried += 1;
     // When the user configured search keywords, use the rotated keyword for the search
     // instead of the category default Thai keyword (keyword-driven discovery).
@@ -7465,6 +7469,11 @@ export async function fetchShopeeAllProductsForSelectedCategories(input: {
         mode: "category_keyword_random_page",
         keyword: thaiKeyword || (sortMode === "relevance" ? undefined : sortMode),
         page: randomPage
+      },
+      {
+        mode: "category_keyword_random_page_2",
+        keyword: thaiKeyword || (sortMode === "relevance" ? undefined : sortMode),
+        page: randomPage2
       },
       {
         mode: "category_keyword_first_page",
