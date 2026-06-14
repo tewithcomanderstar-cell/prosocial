@@ -112,6 +112,12 @@ export function getAnalyticsModel() {
   return process.env.OPENAI_ANALYTICS_MODEL || "gpt-5.2";
 }
 
+export function getCaptionModel() {
+  // Captions use the smarter model so they read like a real person, not boilerplate.
+  // Override with OPENAI_CAPTION_MODEL; otherwise fall back to the analytics-grade model.
+  return process.env.OPENAI_CAPTION_MODEL || getAnalyticsModel();
+}
+
 export function getLightweightModel() {
   return process.env.OPENAI_LIGHT_MODEL || "gpt-5-nano";
 }
@@ -573,7 +579,7 @@ export async function generateThaiSocialProductCaption(input: {
     throw new Error("Thai social product caption generation is not configured: missing OPENAI_API_KEY");
   }
 
-  const model = getContentModel();
+  const model = getCaptionModel();
   const productIntelligenceJSON = JSON.stringify(input.productIntelligence, null, 2);
   const prompt = `คุณคือนักเขียนแคปชัน Facebook Affiliate ภาษาไทยสไตล์เพจขายของไวรัล
 
