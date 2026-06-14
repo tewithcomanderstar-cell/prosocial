@@ -529,10 +529,15 @@ export async function replyToFacebookComment(params: {
 export async function publishPhotoStoryToFacebook(params: {
   pageId: string;
   pageAccessToken: string;
-  imageUrl: string;
+  imageUrl?: string;
+  imageBytes?: ArrayBuffer;
+  imageFileName?: string;
+  imageMimeType?: string;
 }) {
   // Step 1: upload the image as an unpublished photo to obtain a photo id.
-  const uploaded = await uploadPhotoByUrl(params.pageId, params.pageAccessToken, params.imageUrl);
+  const uploaded = params.imageBytes
+    ? await uploadPhotoByBuffer(params.pageId, params.pageAccessToken, params.imageFileName ?? "story.jpg", params.imageBytes, params.imageMimeType ?? "image/jpeg")
+    : await uploadPhotoByUrl(params.pageId, params.pageAccessToken, params.imageUrl ?? "");
   // Step 2: publish it as a Page photo story.
   const body = new URLSearchParams({
     photo_id: uploaded.id,
