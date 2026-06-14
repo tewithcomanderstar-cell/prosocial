@@ -322,15 +322,17 @@ async function addSequenceBadgeToImage(image: ResolvedImage, sequence: number): 
 
 async function addPageProfileBadgeToImage(
   image: ResolvedImage,
-  profileImage?: { bytes: ArrayBuffer; mimeType: string } | null
+  profileImage?: { bytes: ArrayBuffer; mimeType: string } | null,
+  watermarkOptions?: { position?: "top-left" | "top-right" | "bottom-left" | "bottom-right"; sizePercent?: number }
 ): Promise<ResolvedImage> {
-  return composeImageWithLogo(image, profileImage) as Promise<ResolvedImage>;
+  return composeImageWithLogo(image, profileImage, watermarkOptions) as Promise<ResolvedImage>;
 }
 
 async function decorateAutoPostImages(
   images: ResolvedImage[],
   automationMode?: unknown,
-  profileImage?: { bytes: ArrayBuffer; mimeType: string } | null
+  profileImage?: { bytes: ArrayBuffer; mimeType: string } | null,
+  watermarkOptions?: { position?: "top-left" | "top-right" | "bottom-left" | "bottom-right"; sizePercent?: number }
 ) {
   if (images.length === 0) {
     return images;
@@ -340,7 +342,7 @@ async function decorateAutoPostImages(
   for (const [index, image] of images.entries()) {
     const withSequence =
       automationMode === "multi-image-ai" && images.length > 1 ? await addSequenceBadgeToImage(image, index + 1) : image;
-    decorated.push(await addPageProfileBadgeToImage(withSequence, profileImage));
+    decorated.push(await addPageProfileBadgeToImage(withSequence, profileImage, watermarkOptions));
   }
   return decorated;
 }
@@ -2426,7 +2428,8 @@ async function executePostJob(job: JobExecution) {
   const images = await decorateAutoPostImages(
     await resolveImages(job.userId, imageRefs),
     job.payload?.automationMode,
-    pageProfileImage
+    pageProfileImage,
+    watermarkSettings ? { position: watermarkSettings.position, sizePercent: watermarkSettings.sizePercent } : undefined
   );
 
   if (isShopeeAffiliateJob(job)) {

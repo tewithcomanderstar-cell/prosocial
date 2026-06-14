@@ -29,6 +29,10 @@ type AutoPostConfig = {
   approvalMode: boolean;
   autoCommentCaptionAfterPublish: boolean;
   autoCommentDelaySeconds: number;
+  watermarkEnabled: boolean;
+  watermarkSource: "page_profile" | "custom_logo" | "none";
+  watermarkPosition: "top-left" | "top-right" | "bottom-left" | "bottom-right";
+  watermarkSizePercent: number;
   targetPageIds: string[];
   intervalMinutes: number;
   captionStrategy: CaptionStrategy;
@@ -239,6 +243,10 @@ const defaults: AutoPostConfig = {
   approvalMode: false,
   autoCommentCaptionAfterPublish: true,
   autoCommentDelaySeconds: 5,
+  watermarkEnabled: true,
+  watermarkSource: "page_profile",
+  watermarkPosition: "bottom-right",
+  watermarkSizePercent: 17,
   targetPageIds: [],
   intervalMinutes: 60,
   captionStrategy: "hybrid",
@@ -1221,6 +1229,45 @@ export function AutoPostPanel() {
               placeholder="เช่น 5"
             />
             <span className="muted">นำแคปชั่นจริงของโพสต์ไปคอมเมนต์ใต้โพสต์เดียวกันหลังโพสต์สำเร็จ</span>
+          </label>
+        </div>
+
+        <div style={{ marginTop: 18, marginBottom: 2, paddingBottom: 6, borderBottom: "1px solid rgba(37, 99, 235, 0.14)", fontWeight: 700, fontSize: 13, letterSpacing: "0.01em", color: "#2563eb" }}>🖼️ ลายน้ำโลโก้เพจ</div>
+        <div className="grid cols-2 auto-post-grid auto-post-grid-minimal">
+          <label className="auto-post-toggle auto-post-approval-toggle">
+            <span>ใส่โลโก้เพจเป็นลายน้ำบนรูป</span>
+            <input
+              type="checkbox"
+              checked={config.watermarkEnabled ?? true}
+              onChange={(event) => updateConfig((current) => ({ ...current, watermarkEnabled: event.target.checked }))}
+            />
+          </label>
+
+          <label className="label">
+            ตำแหน่งลายน้ำ
+            <select
+              className="select"
+              value={config.watermarkPosition ?? "bottom-right"}
+              onChange={(event) => updateConfig((current) => ({ ...current, watermarkPosition: event.target.value as AutoPostConfig["watermarkPosition"] }))}
+            >
+              <option value="bottom-right">ล่างขวา</option>
+              <option value="bottom-left">ล่างซ้าย</option>
+              <option value="top-right">บนขวา</option>
+              <option value="top-left">บนซ้าย</option>
+            </select>
+          </label>
+
+          <label className="label">
+            ขนาดลายน้ำ (% ของรูป)
+            <input
+              className="input"
+              type="number"
+              min="8"
+              max="30"
+              value={config.watermarkSizePercent ?? 17}
+              onChange={(event) => updateConfig((current) => ({ ...current, watermarkSizePercent: Math.min(30, Math.max(8, Number(event.target.value) || 17)) }))}
+            />
+            <span className="muted">ดึงรูปโปรไฟล์เพจมาทำลายน้ำอัตโนมัติ • แนะนำ 15–25% (ใหญ่ขึ้น = เห็นชัดขึ้น)</span>
           </label>
         </div>
 

@@ -9,9 +9,12 @@ export type OverlayableImage =
   | { kind: "url"; value: string }
   | { kind: "binary"; fileName: string; bytes: ArrayBuffer; mimeType: string };
 
+export type WatermarkPosition = "top-left" | "top-right" | "bottom-left" | "bottom-right";
+
 export async function composeImageWithLogo(
   image: OverlayableImage,
-  profileImage?: LogoBinary | null
+  profileImage?: LogoBinary | null,
+  options?: { position?: WatermarkPosition; sizePercent?: number }
 ): Promise<OverlayableImage> {
   if (image.kind !== "binary" || !profileImage) {
     return image;
@@ -20,7 +23,8 @@ export async function composeImageWithLogo(
   const inputBuffer = Buffer.from(image.bytes);
   const metadata = await sharp(inputBuffer).metadata();
   const baseSize = Math.min(metadata.width ?? 1200, metadata.height ?? 1200);
-  const avatarSize = Math.max(92, Math.round(baseSize * 0.17));
+  const sizePct = Math.min(30, Math.max(8, options?.sizePercent ?? 17));
+  const avatarSize = Math.max(92, Math.round(baseSize * (sizePct / 100)));
   const containerWidth = Math.round(avatarSize * 1.18);
   const containerHeight = Math.round(avatarSize * 1.18);
   const inset = Math.max(32, Math.round(baseSize * 0.055));
@@ -58,8 +62,11 @@ export async function composeImageWithLogo(
     .png()
     .toBuffer();
 
-  const top = Math.max(24, (metadata.height ?? baseSize) - containerHeight - inset);
-  const left = Math.max(24, (metadata.width ?? baseSize) - containerWidth - inset);
+  const position = options?.position ?? "bottom-right";
+  const maxTop = (metadata.height ?? baseSize) - containerHeight - inset;
+  const maxLeft = (metadata.width ?? baseSize) - containerWidth - inset;
+  const top = position.startsWith("top") ? inset : Math.max(24, maxTop);
+  const left = position.endsWith("left") ? inset : Math.max(24, maxLeft);
 
   const output = await sharp(inputBuffer)
     .composite([
