@@ -2095,37 +2095,6 @@ async function autoCommentFinalCaptionUnderPost(input: {
   }
 }
 
-async function renderStoryImageWithLink(imageUrl: string, link: string): Promise<{ bytes: ArrayBuffer; fileName: string; mimeType: string }> {
-  const W = 1080;
-  const H = 1920;
-  const productBuffer = await fetchRemoteImageBuffer(imageUrl);
-  const background = await sharp(productBuffer)
-    .resize(W, H, { fit: "cover", position: "attention" })
-    .blur(28)
-    .modulate({ brightness: 0.6 })
-    .toBuffer();
-  const product = await sharp(productBuffer)
-    .resize(960, 960, { fit: "contain", background: { r: 255, g: 255, b: 255, alpha: 0 } })
-    .png()
-    .toBuffer();
-  const safeLink = escapeXml(link);
-  const overlay = Buffer.from(
-    `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">` +
-      `<rect x="60" y="1470" width="960" height="320" rx="44" fill="rgba(15,23,42,0.78)"/>` +
-      `<text x="540" y="1580" text-anchor="middle" font-family="sans-serif" font-size="44" font-weight="bold" fill="#ffffff">สั่งซื้อ / ดูเพิ่มเติมได้ที่</text>` +
-      `<text x="540" y="1684" text-anchor="middle" font-family="monospace" font-size="50" font-weight="bold" fill="#ffe14d">${safeLink}</text>` +
-      `</svg>`
-  );
-  const output = await sharp(background)
-    .composite([
-      { input: product, top: 300, left: 60 },
-      { input: overlay, top: 0, left: 0 }
-    ])
-    .jpeg({ quality: 92 })
-    .toBuffer();
-  return { bytes: Uint8Array.from(output).buffer, fileName: `shopee-story-${Date.now()}.jpg`, mimeType: "image/jpeg" };
-}
-
 async function autoPostStoryAfterPublish(input: {
   job: JobExecution;
   pageId: string;
@@ -2133,7 +2102,6 @@ async function autoPostStoryAfterPublish(input: {
   pageName?: string;
   postId?: string;
   storyImageUrl?: string;
-  storyLink?: string;
 }) {
   const enabled = process.env.AUTO_STORY_AFTER_PUBLISH !== "false";
   const jobId = input.job._id;
@@ -2166,38 +2134,17 @@ async function autoPostStoryAfterPublish(input: {
       return;
     }
     await Job.findByIdAndUpdate(jobId, { autoStoryStatus: "pending" });
-    await log("info", "AUTO_STORY_STARTED", { storyImageUrl: input.storyImageUrl, storyLink: input.storyLink });
-
-    // Burn the post's link onto a 9:16 story canvas so it stays visible after Facebook's story crop.
-    let storyImage: { bytes: ArrayBuffer; fileName: string; mimeType: string } | null = null;
-    if (input.storyLink && input.storyImageUrl) {
-      try {
-        storyImage = await renderStoryImageWithLink(input.storyImageUrl, input.storyLink);
-      } catch (renderError) {
-        await log("warn", "AUTO_STORY_RETRY", { stage: "render", error: renderError instanceof Error ? renderError.message : String(renderError) });
-        storyImage = null;
-      }
-    }
+    await log("info", "AUTO_STORY_STARTED", { storyImageUrl: input.storyImageUrl });
 
     let lastError: unknown = null;
     const maxAttempts = 3; // 1 initial + 2 retries
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       try {
-        const result = await publishPhotoStoryToFacebook(
-          storyImage
-            ? {
-                pageId: input.pageId,
-                pageAccessToken: input.pageAccessToken,
-                imageBytes: storyImage.bytes,
-                imageFileName: storyImage.fileName,
-                imageMimeType: storyImage.mimeType
-              }
-            : {
-                pageId: input.pageId,
-                pageAccessToken: input.pageAccessToken,
-                imageUrl: input.storyImageUrl
-              }
-        );
+        const result = await publishPhotoStoryToFacebook({
+          pageId: input.pageId,
+          pageAccessToken: input.pageAccessToken,
+          imageUrl: input.storyImageUrl
+        });
         const storyId = result.post_id || result.id || "published";
         await Job.findByIdAndUpdate(jobId, {
           fbStoryId: storyId,
@@ -2648,8 +2595,7 @@ async function executePostJob(job: JobExecution) {
     pageAccessToken: page.pageAccessToken,
     pageName: page.name,
     postId: String(post._id),
-    storyImageUrl: autoStoryImageUrl,
-    storyLink: typeof job.payload?.affiliateLink === "string" ? job.payload.affiliateLink : undefined
+    storyImageUrl: autoStoryImageUrl
   });
 
   await logAction({
