@@ -19,7 +19,7 @@ import { finalizeTrackedPostIfComplete, notifyCommentFailure } from "@/lib/servi
 import { logCommentStage } from "@/lib/services/comment-logging";
 import { updateAutoPostRecords } from "@/lib/services/automation-records";
 import { updateAutoPostAiRecords } from "@/lib/services/automation-records-ai";
-import { commentOnFacebookPost, FacebookPublishError, publishPostToFacebook, replyToFacebookComment } from "@/lib/services/facebook";
+import { commentOnFacebookPost, FacebookPublishError, publishPhotoStoryToFacebook, publishPostToFacebook, replyToFacebookComment } from "@/lib/services/facebook";
 import { composeImageWithLogo } from "@/lib/services/image-composer";
 import { ensureValidFacebookConnection, ensureValidGoogleDriveConnection, getStoredFacebookConnection } from "@/lib/services/integration-auth";
 import { fetchDriveImageBinary } from "@/lib/services/google-drive";
@@ -2095,6 +2095,90 @@ async function autoCommentFinalCaptionUnderPost(input: {
   }
 }
 
+async function autoPostStoryAfterPublish(input: {
+  job: JobExecution;
+  pageId: string;
+  pageAccessToken: string;
+  pageName?: string;
+  postId?: string;
+  storyImageUrl?: string;
+}) {
+  const enabled = process.env.AUTO_STORY_AFTER_PUBLISH !== "false";
+  const jobId = input.job._id;
+  const baseMeta = { targetPageId: input.pageId, pageName: input.pageName };
+  const log = (level: "info" | "success" | "warn" | "error", message: string, extra?: Record<string, unknown>) =>
+    logAction({
+      userId: input.job.userId,
+      type: "queue",
+      level,
+      message,
+      relatedJobId: jobId,
+      relatedPostId: input.postId,
+      metadata: { ...baseMeta, ...extra }
+    }).catch(() => undefined);
+
+  try {
+    if (!enabled) {
+      await Job.findByIdAndUpdate(jobId, { autoStoryStatus: "skipped" });
+      await log("info", "AUTO_STORY_SKIPPED_DISABLED");
+      return;
+    }
+    const existing = (await Job.findById(jobId).select("fbStoryId").lean()) as { fbStoryId?: string } | null;
+    if (existing?.fbStoryId) {
+      await log("info", "AUTO_STORY_SKIPPED_ALREADY_EXISTS", { fbStoryId: existing.fbStoryId });
+      return;
+    }
+    if (!input.storyImageUrl) {
+      await Job.findByIdAndUpdate(jobId, { autoStoryStatus: "skipped", autoStoryError: "no story image available" });
+      await log("warn", "AUTO_STORY_SKIPPED_DISABLED", { reason: "no_image" });
+      return;
+    }
+    await Job.findByIdAndUpdate(jobId, { autoStoryStatus: "pending" });
+    await log("info", "AUTO_STORY_STARTED", { storyImageUrl: input.storyImageUrl });
+
+    let lastError: unknown = null;
+    const maxAttempts = 3; // 1 initial + 2 retries
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        const result = await publishPhotoStoryToFacebook({
+          pageId: input.pageId,
+          pageAccessToken: input.pageAccessToken,
+          imageUrl: input.storyImageUrl
+        });
+        const storyId = result.post_id || result.id || "published";
+        await Job.findByIdAndUpdate(jobId, {
+          fbStoryId: storyId,
+          autoStoryStatus: "success",
+          autoStoryError: null,
+          autoStoryAt: new Date()
+        });
+        await log("success", "AUTO_STORY_CREATED", { fbStoryId: storyId, attempt });
+        return;
+      } catch (error) {
+        lastError = error;
+        if (attempt < maxAttempts) {
+          await log("warn", "AUTO_STORY_RETRY", { attempt, error: error instanceof Error ? error.message : String(error) });
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+        }
+      }
+    }
+    const errorMessage = lastError instanceof Error ? lastError.message : String(lastError);
+    await Job.findByIdAndUpdate(jobId, { autoStoryStatus: "failed", autoStoryError: errorMessage });
+    await log("error", "AUTO_STORY_FAILED", { error: errorMessage });
+  } catch (error) {
+    // Auto story must never fail the publish workflow.
+    try {
+      await Job.findByIdAndUpdate(jobId, {
+        autoStoryStatus: "failed",
+        autoStoryError: error instanceof Error ? error.message : String(error)
+      });
+    } catch {
+      // ignore secondary failure
+    }
+    await log("error", "AUTO_STORY_FAILED", { error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
 async function executePostJob(job: JobExecution) {
   if (!job.postId) {
     throw new Error("Missing post ID for post job");
@@ -2488,6 +2572,30 @@ async function executePostJob(job: JobExecution) {
     postId: String(post._id),
     facebookPostId: typeof publishResult?.id === "string" ? publishResult.id : undefined,
     finalCaption: message
+  });
+
+  let autoStoryImageUrl: string | undefined;
+  try {
+    const firstAiImageRef = (post.imageUrls ?? []).find((ref: string) => typeof ref === "string" && ref.startsWith("ai-image:"));
+    if (firstAiImageRef) {
+      const storyImageDoc = (await AiGeneratedImage.findById(firstAiImageRef.replace("ai-image:", ""))
+        .select("generatedImageUrl fallbackImageUrl")
+        .lean()) as { generatedImageUrl?: string; fallbackImageUrl?: string } | null;
+      // Use the raw generated image (not the decorated card used in the feed post) so it
+      // does not violate Facebook's "photo already used in a published post" rule.
+      autoStoryImageUrl = storyImageDoc?.generatedImageUrl || storyImageDoc?.fallbackImageUrl || undefined;
+    }
+  } catch {
+    autoStoryImageUrl = undefined;
+  }
+
+  await autoPostStoryAfterPublish({
+    job,
+    pageId: page.pageId,
+    pageAccessToken: page.pageAccessToken,
+    pageName: page.name,
+    postId: String(post._id),
+    storyImageUrl: autoStoryImageUrl
   });
 
   await logAction({

@@ -526,6 +526,32 @@ export async function replyToFacebookComment(params: {
   return response.json() as Promise<{ id: string }>;
 }
 
+export async function publishPhotoStoryToFacebook(params: {
+  pageId: string;
+  pageAccessToken: string;
+  imageUrl: string;
+}) {
+  // Step 1: upload the image as an unpublished photo to obtain a photo id.
+  const uploaded = await uploadPhotoByUrl(params.pageId, params.pageAccessToken, params.imageUrl);
+  // Step 2: publish it as a Page photo story.
+  const body = new URLSearchParams({
+    photo_id: uploaded.id,
+    access_token: params.pageAccessToken
+  });
+  const response = await fetchWithRetry(`https://graph.facebook.com/v21.0/${params.pageId}/photo_stories`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body
+  });
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => ({}))) as FacebookGraphErrorPayload;
+    throw classifyFacebookPublishError(payload, "Failed to publish Facebook photo story");
+  }
+  return response.json() as Promise<{ success?: boolean; post_id?: string; id?: string }>;
+}
+
 export async function commentOnFacebookPost(params: {
   postId: string;
   pageAccessToken: string;

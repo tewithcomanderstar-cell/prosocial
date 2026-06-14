@@ -40,7 +40,11 @@ const jobSchema = new Schema(
     autoCommentStatus: { type: String, default: null },
     autoCommentError: { type: String, default: null },
     autoCommentedAt: { type: Date, default: null },
-    commentSource: { type: String, default: null }
+    commentSource: { type: String, default: null },
+    fbStoryId: { type: String, default: null },
+    autoStoryStatus: { type: String, default: null },
+    autoStoryError: { type: String, default: null },
+    autoStoryAt: { type: Date, default: null }
   },
   { timestamps: true }
 );
