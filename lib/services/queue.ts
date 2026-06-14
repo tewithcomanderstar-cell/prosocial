@@ -2352,6 +2352,24 @@ async function executePostJob(job: JobExecution) {
         connection
       });
       pageProfileImage = pageLogo.image;
+      if (pageLogo.image) {
+        await logAction({
+          userId: job.userId,
+          type: "queue",
+          level: "info",
+          message: "PAGE_LOGO_WATERMARK_READY: page logo fetched, applying watermark",
+          relatedJobId: job._id,
+          relatedPostId: job.postId,
+          relatedScheduleId: job.scheduleId,
+          metadata: {
+            ...getAutoPostLogFlags(job),
+            targetPageId: page.pageId,
+            pageLogoSource: pageLogo.source,
+            watermarkPosition: watermarkSettings?.position,
+            watermarkSizePercent: watermarkSettings?.sizePercent
+          }
+        });
+      }
       if (!pageLogo.image) {
         await logAction({
           userId: job.userId,
