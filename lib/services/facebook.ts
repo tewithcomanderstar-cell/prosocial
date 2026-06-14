@@ -342,12 +342,15 @@ export async function fetchFacebookPageProfileImage(params: {
   }
 }
 
-async function uploadPhotoByUrl(pageId: string, pageAccessToken: string, url: string) {
+async function uploadPhotoByUrl(pageId: string, pageAccessToken: string, url: string, caption?: string) {
   const body = new URLSearchParams({
     url,
     published: "false",
     access_token: pageAccessToken
   });
+  if (caption && caption.trim()) {
+    body.set("message", caption.trim());
+  }
 
   const response = await fetchWithRetry(`https://graph.facebook.com/v21.0/${pageId}/photos`, {
     method: "POST",
@@ -370,12 +373,16 @@ async function uploadPhotoByBuffer(
   pageAccessToken: string,
   fileName: string,
   bytes: ArrayBuffer,
-  mimeType: string
+  mimeType: string,
+  caption?: string
 ) {
   const formData = new FormData();
   formData.set("published", "false");
   formData.set("access_token", pageAccessToken);
   formData.set("source", new Blob([bytes], { type: mimeType }), fileName);
+  if (caption && caption.trim()) {
+    formData.set("message", caption.trim());
+  }
 
   const response = await fetchWithRetry(`https://graph.facebook.com/v21.0/${pageId}/photos`, {
     method: "POST",
@@ -395,6 +402,7 @@ export async function publishPostToFacebook(params: {
   pageAccessToken: string;
   message: string;
   link?: string;
+  photoCaption?: string;
   images: Array<
     | { kind: "url"; value: string }
     | { kind: "binary"; fileName: string; bytes: ArrayBuffer; mimeType: string }
@@ -423,13 +431,14 @@ export async function publishPostToFacebook(params: {
     });
     const uploaded =
       image.kind === "url"
-        ? await uploadPhotoByUrl(params.pageId, params.pageAccessToken, image.value)
+        ? await uploadPhotoByUrl(params.pageId, params.pageAccessToken, image.value, params.photoCaption)
         : await uploadPhotoByBuffer(
             params.pageId,
             params.pageAccessToken,
             image.fileName,
             image.bytes,
-            image.mimeType
+            image.mimeType,
+            params.photoCaption
           );
     attachedMedia.push({ media_fbid: uploaded.id });
     console.info("[FB_PHOTO_UPLOAD_SUCCESS]", {

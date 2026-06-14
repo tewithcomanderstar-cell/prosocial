@@ -2533,6 +2533,10 @@ async function executePostJob(job: JobExecution) {
     pageAccessToken: page.pageAccessToken,
     message,
     link: facebookAttachmentLink,
+    photoCaption:
+      typeof job.payload?.affiliateLink === "string" && job.payload.affiliateLink.trim()
+        ? `📍 พิกัด ${job.payload.affiliateLink.trim()}`
+        : undefined,
     images
   });
 
